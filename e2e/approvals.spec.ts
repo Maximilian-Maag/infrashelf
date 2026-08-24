@@ -94,13 +94,30 @@ test.describe('Approvals', () => {
     await tryDelete(root, `/api/projects/${projectId}`)
   })
 
-  /** The card for the order this test placed, and nothing else on the page. */
-  const ownCard = (page: import('@playwright/test').Page) =>
+  type Page = import('@playwright/test').Page
+
+  /**
+   * The decision row of the order this test placed — the block holding its id and
+   * its Approve/Reject buttons, and nothing else on the page.
+   *
+   * Note what this does NOT match: once Reject is clicked the row swaps its
+   * buttons for the note form (ApprovalRow's `{!rejecting && …}`), so there is no
+   * Reject button left to filter on and this resolves to nothing. That is used
+   * below as the assertion that the swap happened, rather than worked around.
+   */
+  const decisionRow = (page: Page) =>
     page
       .locator('div')
       .filter({ has: page.getByText(`#${orderId}`, { exact: true }) })
       .filter({ has: page.getByRole('button', { name: /^reject$/i }) })
       .last()
+
+  /** This order's rejection form. Its textarea id is per-order, so it is unique. */
+  const rejectionForm = (page: Page) =>
+    page.locator('form').filter({ has: page.locator(`#rejection-note-${orderId}`) })
+
+  /** Whether this order is in the queue at all. */
+  const queueEntry = (page: Page) => page.getByText(`#${orderId}`, { exact: true })
 
   test('approvals page loads without error', async ({ page }) => {
     await expect(page).not.toHaveURL(/\/login/)
@@ -121,53 +138,58 @@ test.describe('Approvals', () => {
     expect(pending).toBeGreaterThanOrEqual(1)
   })
 
-  test('a pending order appears in the queue with its product and environment', async ({ page }) => {
-    const card = ownCard(page)
-    await expect(card).toBeVisible({ timeout: 10000 })
-    await expect(card).toContainText(offering.productName)
+  test('a pending order appears in the queue with its product and who asked for it', async ({
+    page,
+  }) => {
+    const row = decisionRow(page)
+    await expect(row).toBeVisible({ timeout: 10000 })
+    await expect(row).toContainText(offering.productName)
     // Who asked for it, which is the whole basis on which an approver decides.
-    await expect(card).toContainText(pm.name)
+    await expect(row).toContainText(pm.name)
   })
 
   test('an order placed by someone else offers both Approve and Reject', async ({ page }) => {
-    const card = ownCard(page)
-    await expect(card).toBeVisible({ timeout: 10000 })
-    await expect(card.getByRole('button', { name: /^approve$/i })).toBeVisible()
-    await expect(card.getByRole('button', { name: /^reject$/i })).toBeVisible()
+    const row = decisionRow(page)
+    await expect(row).toBeVisible({ timeout: 10000 })
+    await expect(row.getByRole('button', { name: /^approve$/i })).toBeVisible()
+    await expect(row.getByRole('button', { name: /^reject$/i })).toBeVisible()
   })
 
   test('clicking Reject shows the rejection note form', async ({ page }) => {
-    const card = ownCard(page)
-    await card.getByRole('button', { name: /^reject$/i }).click()
+    await expect(decisionRow(page)).toBeVisible({ timeout: 10000 })
+    await decisionRow(page).getByRole('button', { name: /^reject$/i }).click()
 
     // Per-order ids: the list renders one of these per row, so the note field is
     // addressed by the order it belongs to.
-    await expect(page.locator(`#rejection-note-${orderId}`)).toBeVisible()
-    await expect(card.getByPlaceholder(/explain why/i)).toBeVisible()
-    await expect(card.getByRole('button', { name: /confirm rejection/i })).toBeVisible()
-    await expect(card.getByRole('button', { name: /cancel/i })).toBeVisible()
-    // The decision buttons give way to the form, so there is one action in flight.
-    await expect(card.getByRole('button', { name: /^approve$/i })).toHaveCount(0)
+    const form = rejectionForm(page)
+    await expect(form).toBeVisible()
+    await expect(form.getByPlaceholder(/explain why/i)).toBeVisible()
+    await expect(form.getByRole('button', { name: /confirm rejection/i })).toBeVisible()
+    await expect(form.getByRole('button', { name: /cancel/i })).toBeVisible()
+    // The decision buttons gave way to the form, so there is one action in flight
+    // — see the comment on `decisionRow` for why this expresses exactly that.
+    await expect(decisionRow(page)).toHaveCount(0)
   })
 
   test('cancel on the rejection form puts the decision buttons back', async ({ page }) => {
-    const card = ownCard(page)
-    await card.getByRole('button', { name: /^reject$/i }).click()
-    await expect(page.locator(`#rejection-note-${orderId}`)).toBeVisible()
+    await expect(decisionRow(page)).toBeVisible({ timeout: 10000 })
+    await decisionRow(page).getByRole('button', { name: /^reject$/i }).click()
+    await expect(rejectionForm(page)).toBeVisible()
 
-    await card.getByRole('button', { name: /cancel/i }).click()
+    await rejectionForm(page).getByRole('button', { name: /cancel/i }).click()
 
-    // The form is gone — the old test asserted an Approve button was visible
-    // somewhere on the page, which is true of any other row in the queue.
-    await expect(page.locator(`#rejection-note-${orderId}`)).toHaveCount(0)
-    await expect(card.getByRole('button', { name: /^approve$/i })).toBeVisible()
+    // THIS order's form is gone and THIS order's buttons are back. The old test
+    // asserted that an Approve button was visible somewhere on the page, which is
+    // true of any other row in the queue.
+    await expect(rejectionForm(page)).toHaveCount(0)
+    await expect(decisionRow(page).getByRole('button', { name: /^approve$/i })).toBeVisible()
   })
 
   test('approving an order provisions it and takes it out of the queue', async ({ page }) => {
-    const card = ownCard(page)
-    await card.getByRole('button', { name: /^approve$/i }).click()
+    await expect(decisionRow(page)).toBeVisible({ timeout: 10000 })
+    await decisionRow(page).getByRole('button', { name: /^approve$/i }).click()
 
-    await expect(card).toHaveCount(0, { timeout: 15000 })
+    await expect(queueEntry(page)).toHaveCount(0, { timeout: 15000 })
 
     // The state change, not the button count. Counting Approve buttons before and
     // after says nothing about what the click did to the order — and approval is
@@ -193,12 +215,12 @@ test.describe('Approvals', () => {
 
   test('rejecting an order records the note and takes it out of the queue', async ({ page }) => {
     const note = 'Rejected by the e2e approvals spec'
-    const card = ownCard(page)
-    await card.getByRole('button', { name: /^reject$/i }).click()
+    await expect(decisionRow(page)).toBeVisible({ timeout: 10000 })
+    await decisionRow(page).getByRole('button', { name: /^reject$/i }).click()
     await page.locator(`#rejection-note-${orderId}`).fill(note)
-    await card.getByRole('button', { name: /confirm rejection/i }).click()
+    await rejectionForm(page).getByRole('button', { name: /confirm rejection/i }).click()
 
-    await expect(card).toHaveCount(0, { timeout: 15000 })
+    await expect(queueEntry(page)).toHaveCount(0, { timeout: 15000 })
 
     await expect
       .poll(
