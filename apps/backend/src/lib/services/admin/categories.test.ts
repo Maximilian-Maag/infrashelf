@@ -32,6 +32,9 @@ import {
   createOrder as seedOrder,
   createInfraElement,
   linkProductEnvironment,
+  waitUntilBlocked,
+  warmPool,
+  latch,
 } from '@/test/helpers'
 
 const mockedWebhooks = vi.mocked(triggerProductWebhooks)
@@ -198,6 +201,47 @@ describe('deleteCategory preserves order history (issue #142)', () => {
     const productRows = await db.select().from(products).where(eq(products.id, product.id))
     expect(productRows.length).toBe(1)
     expect(productRows[0].retiredAt).toBeInstanceOf(Date)
+  })
+
+  it('counts an order that commits while the delete is running, and keeps it', async () => {
+    // Issue #195. The count used to be taken before the destroy-trigger loop — one
+    // HTTP call per active element, seconds and for a large category minutes —
+    // while the category stayed fully orderable. An order placed in that window was
+    // not counted, so the bare DELETE that ended the function cascaded it and its
+    // `product_snapshot` away. The holder stands in for that order: it takes the
+    // FOR KEY SHARE lock on the product that an order insert takes, and does not
+    // commit until the delete is genuinely waiting behind it.
+    const pm = await createUser({ role: 'project_manager' })
+    const cat = await seedCategory('Racing')
+    const product = await seedProduct(cat.id, 'P')
+    const ci = await createCiSource()
+    const env = await createEnvironment(ci.id)
+    await linkProductEnvironment(product.id, env.id)
+    const project = await createProject(pm.id)
+    await warmPool()
+
+    const held = latch()
+    const holder = db.transaction(async (tx) => {
+      await tx.insert(orders).values({
+        projectId: project.id,
+        productId: product.id,
+        environmentId: env.id,
+        userId: pm.id,
+        status: 'completed',
+      })
+      held.open()
+      await waitUntilBlocked('the delete never claimed the products in the category')
+    })
+    await held.opened
+
+    const [result] = await Promise.all([deleteCategory(cat.id), holder])
+    expect(result.ok).toBe(true)
+
+    // Counted, so the category was retired — and the order it was counted for
+    // survives. The stale count hard-deleted the category and cascaded it away.
+    expect(await db.select().from(orders)).toHaveLength(1)
+    const [row] = await db.select().from(categories).where(eq(categories.id, cat.id))
+    expect(row.retiredAt).toBeInstanceOf(Date)
   })
 
   it('withdraws the offerings and drops out of the category list', async () => {
