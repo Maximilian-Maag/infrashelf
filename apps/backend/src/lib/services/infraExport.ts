@@ -39,9 +39,10 @@ export { REDACTED } from '@/lib/services/parameterRedaction'
 export const buildInfraExportRows = async (
   session: SessionUser,
   filters: InfraFilters,
+  lang: string,
   options: { includeParameters?: boolean } = {},
 ): Promise<Result<InfraExportRow[]>> => {
-  const listed = await listInfrastructure(session, filters)
+  const listed = await listInfrastructure(session, filters, lang)
   if (!listed.ok) return listed
 
   const elements = listed.data

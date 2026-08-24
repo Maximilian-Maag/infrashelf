@@ -8,6 +8,20 @@ import {
 } from '@/lib/db/schema'
 import { and, eq } from 'drizzle-orm'
 import { loadApplicableParameters, resolveParameterDefs } from '@/lib/services/catalog'
+import { RECORD_LANGUAGE } from '@/lib/services/productName'
+
+/**
+ * The single name/description a snapshot records alongside the full set.
+ *
+ * The same order as the SQL fallback chain — RECORD_LANGUAGE, then German, then
+ * whatever exists — spelled out in TypeScript because the rows are already loaded
+ * and a second round trip to have Postgres apply the identical COALESCE would buy
+ * nothing.
+ */
+const resolveRecorded = <T extends { languageCode: string }>(rows: T[]): T | undefined =>
+  rows.find((r) => r.languageCode === RECORD_LANGUAGE) ??
+  rows.find((r) => r.languageCode === 'de') ??
+  rows[0]
 
 /**
  * Point-in-time capture of what a customer was actually offered (issue #38).
@@ -38,6 +52,23 @@ export interface ProductSnapshot {
   capturedAt: string
   productName: string
   productDescription: string
+  /**
+   * Every name the product had, keyed by language code, as they read at capture
+   * time (issue #162).
+   *
+   * The snapshot is what makes an order's own record of itself durable, and a
+   * single string made that record English-only: a German customer's own order
+   * history could never be German, whatever was fixed upstream. Recording the
+   * whole set keeps both properties at once — the reader picks their language and
+   * still sees the name as it stood, not as the catalogue reads today.
+   *
+   * ABSENT on snapshots taken before this field existed, exactly as `sizeCode` is:
+   * a reader must fall back to `productName`, not conclude the product had no
+   * translations. Names only, deliberately — the order detail renders the name and
+   * nothing renders the description, so carrying 25 paragraphs per order would be
+   * paid on every order forever for a string nobody reads.
+   */
+  productNames?: Record<string, string>
   environmentName: string
   /**
    * The UNIT price that applied — the chosen size's, or the offering's when the
@@ -154,16 +185,23 @@ export const captureProductSnapshot = async (
       )[0]
     : undefined
 
-  const [translation] = await db
-    .select({ name: productTranslations.name, description: productTranslations.description })
+  // Every translation, not the English one: see `productNames`. `productName` and
+  // `productDescription` stay the single strings they have always been so that
+  // existing snapshots, existing readers and the version diff all keep working;
+  // they are resolved at RECORD_LANGUAGE through the shared fallback, which is what
+  // stops a German-only product being frozen into the order as `Product #7`.
+  const translationRows = await db
+    .select({
+      languageCode: productTranslations.languageCode,
+      name: productTranslations.name,
+      description: productTranslations.description,
+    })
     .from(productTranslations)
-    .where(
-      and(
-        eq(productTranslations.productId, productId),
-        eq(productTranslations.languageCode, 'en'),
-      ),
-    )
-    .limit(1)
+    .where(eq(productTranslations.productId, productId))
+    .orderBy(productTranslations.languageCode)
+
+  const productNames = Object.fromEntries(translationRows.map((r) => [r.languageCode, r.name]))
+  const translation = resolveRecorded(translationRows)
 
   // The same resolution the order form rendered and the order service validated
   // against, so the snapshot records the definitions that actually applied rather
@@ -177,6 +215,7 @@ export const captureProductSnapshot = async (
     capturedAt: new Date().toISOString(),
     productName: translation?.name ?? `Product #${productId}`,
     productDescription: translation?.description ?? '',
+    productNames,
     environmentName: offering.environmentName ?? `Environment #${environmentId}`,
     price: size?.price ?? offering.price,
     currency: size?.currency ?? offering.currency,

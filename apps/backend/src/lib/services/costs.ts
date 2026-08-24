@@ -4,7 +4,6 @@ import {
   orders,
   projects,
   productEnvironments,
-  productTranslations,
   costCenters,
   deploymentEnvironments,
   infrastructureElements,
@@ -14,6 +13,7 @@ import { and, eq, gte, lte, inArray, sql } from 'drizzle-orm'
 import { alias } from 'drizzle-orm/pg-core'
 import { ok, err, type Result } from '@/lib/services/result'
 import { linePriceSql, lineCurrencySql } from '@/lib/services/sizes'
+import { productNameSql } from '@/lib/services/productName'
 
 /**
  * Spending overview (issue #32).
@@ -170,6 +170,7 @@ interface CostRow {
 export const getCostReport = async (
   session: SessionUser,
   filters: CostFilters = {},
+  lang: string,
   /** Injected so a test can pin which month counts as unfinished. */
   now: Date = new Date(),
 ): Promise<Result<CostReport>> => {
@@ -197,7 +198,7 @@ export const getCostReport = async (
       projectCostCenterId: projects.costCenterId,
       projectCostCenterLabel: sql<string>`${projectCostCenters.code} || ' — ' || ${projectCostCenters.name}`,
       productId: orders.productId,
-      productName: productTranslations.name,
+      productName: productNameSql(orders.productId, lang),
       environmentId: orders.environmentId,
       environmentName: deploymentEnvironments.name,
       // The snapshot is the authoritative price: what the customer was charged.
@@ -219,13 +220,6 @@ export const getCostReport = async (
     // Second join on the same table for the project's cost centre: a 'project'-mode
     // order has no cost centre of its own to join to.
     .leftJoin(projectCostCenters, eq(projects.costCenterId, projectCostCenters.id))
-    .leftJoin(
-      productTranslations,
-      and(
-        eq(orders.productId, productTranslations.productId),
-        eq(productTranslations.languageCode, 'en'),
-      ),
-    )
     .leftJoin(deploymentEnvironments, eq(orders.environmentId, deploymentEnvironments.id))
     // Left: an offering withdrawn since the order was placed must not drop the
     // order out of the report, which would make past spend disappear.
@@ -517,6 +511,7 @@ export interface CostRowExport {
 export const getCostRows = async (
   session: SessionUser,
   filters: CostFilters = {},
+  lang: string,
 ): Promise<Result<CostRowExport[]>> => {
   const isAdmin = session.role === 'admin' || session.role === 'root'
 
@@ -534,7 +529,7 @@ export const getCostRows = async (
       projectName: projects.name,
       costCenterLabel: sql<string>`${costCenters.code} || ' — ' || ${costCenters.name}`,
       projectCostCenterLabel: sql<string>`${projectCostCenters.code} || ' — ' || ${projectCostCenters.name}`,
-      productName: productTranslations.name,
+      productName: productNameSql(orders.productId, lang),
       environmentName: deploymentEnvironments.name,
       snapshotPrice: sql<string | null>`${orders.productSnapshot} ->> 'price'`,
       snapshotCurrency: sql<string | null>`${orders.productSnapshot} ->> 'currency'`,
@@ -551,13 +546,6 @@ export const getCostRows = async (
     .leftJoin(projects, eq(orders.projectId, projects.id))
     .leftJoin(costCenters, eq(orders.costCenterId, costCenters.id))
     .leftJoin(projectCostCenters, eq(projects.costCenterId, projectCostCenters.id))
-    .leftJoin(
-      productTranslations,
-      and(
-        eq(orders.productId, productTranslations.productId),
-        eq(productTranslations.languageCode, 'en'),
-      ),
-    )
     .leftJoin(deploymentEnvironments, eq(orders.environmentId, deploymentEnvironments.id))
     .leftJoin(
       productEnvironments,

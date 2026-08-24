@@ -4,7 +4,6 @@ import {
   cartItems,
   products,
   productEnvironments,
-  productTranslations,
   deploymentEnvironments,
 } from '@/lib/db/schema'
 import { and, eq, sql, inArray } from 'drizzle-orm'
@@ -19,6 +18,7 @@ import {
   lineSizeLabelSql,
   lineSizeStillOfferedSql,
 } from '@/lib/services/sizes'
+import { productNameSql } from '@/lib/services/productName'
 
 export interface CartRow {
   id: number
@@ -74,7 +74,7 @@ export const MAX_CHECKOUT_ELEMENTS = 100
  * request per item, and the offering is checked so an item whose product was
  * withdrawn can be shown as unavailable instead of silently failing at checkout.
  */
-export const listCart = async (session: SessionUser): Promise<Result<CartRow[]>> => {
+export const listCart = async (session: SessionUser, lang: string): Promise<Result<CartRow[]>> => {
   const rows = await db
     .select({
       id: cartItems.id,
@@ -82,7 +82,10 @@ export const listCart = async (session: SessionUser): Promise<Result<CartRow[]>>
       environmentId: cartItems.environmentId,
       parameters: cartItems.parameters,
       createdAt: cartItems.createdAt,
-      productName: productTranslations.name,
+      // A scalar subquery rather than the join this used to carry: the join
+      // pinned the row to one language_code, which is what made the cart
+      // contradict the catalogue the item was added from (issue #162).
+      productName: productNameSql(cartItems.productId, lang),
       imageAlt: products.imageAlt,
       environmentName: deploymentEnvironments.name,
       sizeCode: cartItems.sizeCode,
@@ -104,13 +107,6 @@ export const listCart = async (session: SessionUser): Promise<Result<CartRow[]>>
     // the join chain — selecting a column from it without joining produces a
     // cross join, which is how adding imageAlt broke every cart test at once.
     .leftJoin(products, eq(cartItems.productId, products.id))
-    .leftJoin(
-      productTranslations,
-      and(
-        eq(cartItems.productId, productTranslations.productId),
-        eq(productTranslations.languageCode, 'en'),
-      ),
-    )
     .leftJoin(deploymentEnvironments, eq(cartItems.environmentId, deploymentEnvironments.id))
     // Left, not inner: an item whose offering was withdrawn must still be listed,
     // so the user can see why checkout will refuse it.
@@ -152,6 +148,8 @@ export const addToCart = async (
     sizeCode?: string | null
     quantity?: number
   },
+  /** Only for the row echoed back, which is a `listCart` row and has to read like one. */
+  lang: string,
 ): Promise<Result<CartRow>> => {
   const [offering] = await db
     .select({ productId: productEnvironments.productId })
@@ -198,7 +196,7 @@ export const addToCart = async (
     })
     .returning()
 
-  const listed = await listCart(session)
+  const listed = await listCart(session, lang)
   const enriched = listed.ok ? listed.data.find((r) => r.id === item.id) : undefined
   return ok(
     enriched ?? {

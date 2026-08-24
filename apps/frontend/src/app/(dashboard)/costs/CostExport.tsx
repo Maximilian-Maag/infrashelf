@@ -34,6 +34,9 @@ export function CostExport({ token, lang }: Props) {
       if (value) params.set(key, value)
     }
     params.set('format', format)
+    // The file has to name products the way the report on screen does; see the
+    // route's own note on why an export that differs from its list is worse than none.
+    params.set('lang', lang)
 
     setBusy(format)
     setError(null)

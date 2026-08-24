@@ -1,7 +1,7 @@
 import { type NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { requireAuth, isAuth } from '@/lib/auth/middleware'
-import { toResponse } from '@/lib/http'
+import { toResponse, requestLang } from '@/lib/http'
 import { listCart, addToCart, clearCart, pruneOrphanedCartItems } from '@/lib/services/cart'
 import { SIZE_CODE_MAX_LENGTH } from '@/lib/services/sizes'
 
@@ -24,7 +24,7 @@ export async function GET(req: NextRequest) {
   // Drop items whose product has been deleted before listing, so the overview
   // never shows a row that checkout could not possibly accept.
   await pruneOrphanedCartItems(session)
-  return toResponse(await listCart(session))
+  return toResponse(await listCart(session, requestLang(req)))
 }
 
 export async function POST(req: NextRequest) {
@@ -36,7 +36,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid request', details: parsed.error.flatten() }, { status: 400 })
   }
 
-  return toResponse(await addToCart(session, parsed.data), 201)
+  return toResponse(await addToCart(session, parsed.data, requestLang(req)), 201)
 }
 
 export async function DELETE(req: NextRequest) {

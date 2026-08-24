@@ -3,6 +3,7 @@ import { products, productEnvironments, deploymentEnvironments, costCenters, par
 import { eq, or, and, isNull, sql } from 'drizzle-orm'
 import { ok, err, type Result } from '@/lib/services/result'
 import { withoutSensitiveDefaults } from '@/lib/services/parameterRedaction'
+import { productNameSql, productDescriptionSql } from '@/lib/services/productName'
 import { safeImageContentType } from '@/lib/services/imageUpload'
 import { listActiveSizesForProduct } from '@/lib/services/sizes'
 
@@ -159,18 +160,8 @@ export const listCatalog = async (
   // Built once and used in both the SELECT and the WHERE: searching against a
   // different expression than the one displayed is how a search result becomes
   // inexplicable.
-  const nameSql = sql<string>`COALESCE(
-    (SELECT name FROM product_translations WHERE product_id = ${products.id} AND language_code = ${lang}),
-    (SELECT name FROM product_translations WHERE product_id = ${products.id} AND language_code = 'en'),
-    (SELECT name FROM product_translations WHERE product_id = ${products.id} AND language_code = 'de'),
-    (SELECT name FROM product_translations WHERE product_id = ${products.id} LIMIT 1)
-  )`
-  const descriptionSql = sql<string>`COALESCE(
-    (SELECT description FROM product_translations WHERE product_id = ${products.id} AND language_code = ${lang}),
-    (SELECT description FROM product_translations WHERE product_id = ${products.id} AND language_code = 'en'),
-    (SELECT description FROM product_translations WHERE product_id = ${products.id} AND language_code = 'de'),
-    ''
-  )`
+  const nameSql = productNameSql(products.id, lang)
+  const descriptionSql = productDescriptionSql(products.id, lang)
 
   // Retired products stay in the table as the referent their orders need
   // (products.retiredAt, issue #142) and must never appear in the catalogue.
@@ -234,18 +225,8 @@ export const getProduct = async (
       // Carried with the product so every component that renders the picture uses
       // the description its uploader wrote, instead of inventing one.
       imageAlt: products.imageAlt,
-      name: sql<string>`COALESCE(
-        (SELECT name FROM product_translations WHERE product_id = ${products.id} AND language_code = ${lang}),
-        (SELECT name FROM product_translations WHERE product_id = ${products.id} AND language_code = 'en'),
-        (SELECT name FROM product_translations WHERE product_id = ${products.id} AND language_code = 'de'),
-        (SELECT name FROM product_translations WHERE product_id = ${products.id} LIMIT 1)
-      )`,
-      description: sql<string>`COALESCE(
-        (SELECT description FROM product_translations WHERE product_id = ${products.id} AND language_code = ${lang}),
-        (SELECT description FROM product_translations WHERE product_id = ${products.id} AND language_code = 'en'),
-        (SELECT description FROM product_translations WHERE product_id = ${products.id} AND language_code = 'de'),
-        ''
-      )`,
+      name: productNameSql(products.id, lang),
+      description: productDescriptionSql(products.id, lang),
     })
     .from(products)
     // A retired product is gone as far as the shop is concerned, even though the

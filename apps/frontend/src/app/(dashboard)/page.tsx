@@ -33,12 +33,12 @@ export default async function DashboardHome() {
   const lang = await getLang()
 
   const [orders, infra, projects, products] = await Promise.allSettled([
-    get<Order[]>('/api/orders', token),
-    get<InfrastructureElement[]>('/api/infrastructure', token),
+    get<Order[]>(`/api/orders?lang=${lang}`, token),
+    get<InfrastructureElement[]>(`/api/infrastructure?lang=${lang}`, token),
     get<Project[]>('/api/projects', token),
     // Eight cards, so ask for eight rows: this used to fetch the whole catalogue
     // and slice it in the browser (#91).
-    get<CatalogPage>('/api/catalog?lang=en&limit=8', token),
+    get<CatalogPage>(`/api/catalog?lang=${lang}&limit=8`, token),
   ])
 
   const orderList = orders.status === 'fulfilled' ? (orders.value ?? []) : []

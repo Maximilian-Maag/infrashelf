@@ -11,6 +11,7 @@ import { eq, and, sql } from 'drizzle-orm'
 import { logAudit } from '@/lib/audit'
 import { sendOrderApproved, sendOrderRejected } from '@/lib/notification'
 import { findProductName, findUserEmail } from '@/lib/db/queries'
+import { productNameSql } from '@/lib/services/productName'
 import { ok, err, type Result } from '@/lib/services/result'
 import { redactParametersForOrders } from '@/lib/services/parameterRedaction'
 import { activeDelegationsHeldBy, type DelegationRow } from '@/lib/services/delegations'
@@ -48,7 +49,7 @@ export interface ApprovalRow {
   projectName: string | null
 }
 
-export const listApprovals = async (): Promise<Result<ApprovalRow[]>> => {
+export const listApprovals = async (lang: string): Promise<Result<ApprovalRow[]>> => {
   const rows = await db
     .select({
       id: orders.id,
@@ -66,12 +67,7 @@ export const listApprovals = async (): Promise<Result<ApprovalRow[]>> => {
       isTrial: orders.isTrial,
       sizeCode: orders.sizeCode,
       quantity: orders.quantity,
-      productName: sql<string>`(
-        SELECT name FROM product_translations
-        WHERE product_id = ${orders.productId}
-          AND language_code = 'en'
-        LIMIT 1
-      )`,
+      productName: productNameSql(orders.productId, lang),
       environmentName: deploymentEnvironments.name,
       userName: users.name,
       projectName: projects.name,

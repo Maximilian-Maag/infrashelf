@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from 'next/server'
 import { requireRole, isAuth } from '@/lib/auth/middleware'
 import { toCsv } from '@/lib/csv'
+import { requestLang } from '@/lib/http'
 import { parseInfraFilters } from '@/lib/services/infraFilters'
 import { buildInfraExportRows, type InfraExportRow } from '@/lib/services/infraExport'
 import { getBranding } from '@/lib/services/admin/branding'
@@ -124,7 +125,7 @@ export async function GET(req: NextRequest) {
   }
   const includeParameters = searchParams.get('includeParameters') === 'true'
 
-  const result = await buildInfraExportRows(session, filters.data, { includeParameters })
+  const result = await buildInfraExportRows(session, filters.data, requestLang(req), { includeParameters })
   if (!result.ok) return NextResponse.json({ error: result.message }, { status: result.status })
 
   if (format === 'pdf') {

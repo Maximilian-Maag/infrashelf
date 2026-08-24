@@ -32,14 +32,7 @@ import { Select } from '@/components/ui/Select'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
 import { ProductVersionHistory } from './ProductVersionHistory'
-import { t } from '@/lib/i18n'
-
-const LANGUAGES = [
-  { value: 'en', label: 'English' },
-  { value: 'de', label: 'German' },
-  { value: 'fr', label: 'French' },
-  { value: 'es', label: 'Spanish' },
-]
+import { t, LANGUAGE_OPTIONS } from '@/lib/i18n'
 
 const COST_CENTER_MODES: { value: CostCenterMode; label: string }[] = [
   { value: 'project', label: 'From Project' },
@@ -485,7 +478,7 @@ export function ProductEditForm({ product, categories, environments, translation
             <Select label="Category" value={categoryId} onChange={(e) => setCategoryId(e.target.value)} required
               options={categories.map((c) => ({ value: c.id, label: c.name }))} />
             <Select label="Base Language" value={baseLanguage} onChange={(e) => setBaseLanguage(e.target.value)}
-              options={LANGUAGES} />
+              options={LANGUAGE_OPTIONS} />
           </div>
           <Input label="Name" value={name} onChange={(e) => setName(e.target.value)} required />
           <div className="flex flex-col gap-1">
@@ -676,7 +669,7 @@ export function ProductEditForm({ product, categories, environments, translation
       <Modal open={transModal} onClose={() => setTransModal(false)} title="Add Translation" size="md">
         <form onSubmit={handleAddTranslation} className="space-y-4">
           {transError && <Alert>{transError}</Alert>}
-          <Select label="Language" value={translationLang} onChange={(e) => setTranslationLang(e.target.value)} options={LANGUAGES} />
+          <Select label="Language" value={translationLang} onChange={(e) => setTranslationLang(e.target.value)} options={LANGUAGE_OPTIONS} />
           <Input label="Name" value={translationName} onChange={(e) => setTranslationName(e.target.value)} required />
           <div className="flex flex-col gap-1">
             <label htmlFor="translation-description" className="text-sm font-medium text-slate-700">Description</label>

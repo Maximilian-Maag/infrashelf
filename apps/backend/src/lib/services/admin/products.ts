@@ -26,6 +26,7 @@ import { fireDestroyTriggers, destroyVariables } from '@/lib/services/teardown'
 import { recordProductVersion } from '@/lib/services/versions'
 import { logAudit, logAuditWith, changedFields } from '@/lib/audit'
 import { isEmptyUpdate, EMPTY_UPDATE_MESSAGE } from '@/lib/services/updates'
+import { productNameSql, productDescriptionSql } from '@/lib/services/productName'
 import {
   ALLOWED_IMAGE_MIMES,
   MAX_IMAGE_BYTES,
@@ -112,27 +113,24 @@ export interface UpsertTranslationInput {
   description?: string
 }
 
-const adminProductSelect = {
+// The admin list and detail read the same expression as the catalogue, so a
+// product a root user just created in German reads back in German instead of
+// showing whatever happened to be in the `en` row. Before, those two screens were
+// the only place the `en` mirror this service used to write (issue #161) was
+// visible, which is what made the mirror look necessary.
+const adminProductSelect = (lang: string) => ({
   id: products.id,
   categoryId: products.categoryId,
   baseLanguage: products.baseLanguage,
   createdAt: products.createdAt,
   categoryName: categories.name,
-  name: sql<string>`(
-    SELECT name FROM product_translations
-    WHERE product_id = ${products.id} AND language_code = 'en'
-    LIMIT 1
-  )`,
-  description: sql<string>`(
-    SELECT description FROM product_translations
-    WHERE product_id = ${products.id} AND language_code = 'en'
-    LIMIT 1
-  )`,
-}
+  name: productNameSql(products.id, lang),
+  description: productDescriptionSql(products.id, lang),
+})
 
-export const listProducts = async (): Promise<Result<ProductAdminRow[]>> => {
+export const listProducts = async (lang: string): Promise<Result<ProductAdminRow[]>> => {
   const rows = await db
-    .select(adminProductSelect)
+    .select(adminProductSelect(lang))
     .from(products)
     .leftJoin(categories, eq(products.categoryId, categories.id))
     // Retired products are gone as far as every catalogue and admin screen is
@@ -154,16 +152,18 @@ export const createProduct = async (
     .values({ categoryId, baseLanguage })
     .returning()
 
+  // Exactly one row, in the language the text was actually written in.
+  //
+  // This used to seed a second, identical `en` row for a non-English product, to
+  // keep the "there is always an `en` row" invariant that ten read paths depended
+  // on (issue #162). Those paths resolve through the shared fallback chain now, so
+  // the invariant is gone — and with it a row that claimed to be an English
+  // translation while holding German text, indistinguishable from a real one both
+  // to the admin translations tab and to `updateProduct`, which is what let a
+  // German typo fix overwrite the English name for every user (issue #161).
   await db
     .insert(productTranslations)
     .values({ productId: product.id, languageCode: baseLanguage, name, description })
-
-  if (baseLanguage !== 'en') {
-    await db
-      .insert(productTranslations)
-      .values({ productId: product.id, languageCode: 'en', name, description })
-      .onConflictDoNothing()
-  }
 
   await logAudit(
     actorId ?? null,
@@ -175,9 +175,9 @@ export const createProduct = async (
   return ok({ ...product, name, description, categoryName: null } as ProductAdminRow)
 }
 
-export const getProductAdmin = async (id: number): Promise<Result<ProductAdminRow & { environments: ProductEnvironment[]; parameters: Parameter[] }>> => {
+export const getProductAdmin = async (id: number, lang: string): Promise<Result<ProductAdminRow & { environments: ProductEnvironment[]; parameters: Parameter[] }>> => {
   const rows = await db
-    .select(adminProductSelect)
+    .select(adminProductSelect(lang))
     .from(products)
     .leftJoin(categories, eq(products.categoryId, categories.id))
     .where(and(eq(products.id, id), isNull(products.retiredAt)))
@@ -239,6 +239,8 @@ export const updateProduct = async (
   }
 
   if (name !== undefined || description !== undefined) {
+    // Re-read rather than reuse `existing`: the update above may have just changed
+    // the base language, and the text in this request is written in the new one.
     const productRows = await db
       .select({ baseLanguage: products.baseLanguage })
       .from(products)
@@ -250,6 +252,23 @@ export const updateProduct = async (
     if (name !== undefined) updateData.name = name
     if (description !== undefined) updateData.description = description
 
+    // ONE row, and it is the base language's — never a second language's as well.
+    //
+    // This used to mirror the same text into the `en` row with onConflictDoUpdate
+    // whenever the base language was not English, so fixing a typo in a German name
+    // silently replaced the English TRANSLATION with German text — for every user,
+    // in the cart, the order list, the approvals queue, the cost report and the
+    // subject line of every notification mail, with nothing in the version history
+    // saying so (issue #161). The base language and English are the same row only
+    // when the base language IS English; the primary key is (product_id,
+    // language_code), so they are otherwise two rows and always were.
+    //
+    // Not merely softened to onConflictDoNothing, which would still write German
+    // into `en` for a product that had no English translation yet: with the mirror
+    // deleted there is no statement here that can name a language other than the
+    // one the admin declared they are typing in. `upsertTranslation` and
+    // `translateProductById` are the only ways to write any other row, and both are
+    // told which language they are writing.
     await db
       .insert(productTranslations)
       .values({ productId: id, languageCode: lang, name: name ?? '', description: description ?? '' })
@@ -257,16 +276,6 @@ export const updateProduct = async (
         target: [productTranslations.productId, productTranslations.languageCode],
         set: updateData,
       })
-
-    if (lang !== 'en') {
-      await db
-        .insert(productTranslations)
-        .values({ productId: id, languageCode: 'en', name: name ?? '', description: description ?? '' })
-        .onConflictDoUpdate({
-          target: [productTranslations.productId, productTranslations.languageCode],
-          set: updateData,
-        })
-    }
   }
 
   const updated = await db

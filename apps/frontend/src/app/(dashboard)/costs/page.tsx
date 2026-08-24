@@ -42,10 +42,11 @@ export default async function CostsPage({ searchParams }: Props) {
     const value = Array.isArray(raw) ? raw[0] : raw
     if (value) query.set(key, value)
   }
-  const qs = query.toString()
+  const reportQuery = new URLSearchParams(query)
+  reportQuery.set('lang', lang)
 
   const [reportRes, projectsRes, ratesRes] = await Promise.allSettled([
-    get<CostReport>(`/api/costs${qs ? `?${qs}` : ''}`, token),
+    get<CostReport>(`/api/costs?${reportQuery.toString()}`, token),
     get<Project[]>('/api/projects', token),
     get<ExchangeRate[]>('/api/public/exchange-rates', token),
   ])

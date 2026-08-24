@@ -66,7 +66,7 @@ describe('listApprovals', () => {
     await seedOrder(project.id, product.id, env.id, pm.id, { status: 'completed' })
     await seedOrder(project.id, product.id, env.id, pm.id, { status: 'rejected' })
 
-    const result = await listApprovals()
+    const result = await listApprovals('en')
     expect(result.ok).toBe(true)
     if (!result.ok) return
 
@@ -82,7 +82,7 @@ describe('listApprovals', () => {
     const { pm, product, env, project } = await setup()
     await seedOrder(project.id, product.id, env.id, pm.id, { status: 'completed' })
 
-    const result = await listApprovals()
+    const result = await listApprovals('en')
     expect(result.ok).toBe(true)
     if (result.ok) expect(result.data).toEqual([])
   })
@@ -284,7 +284,7 @@ describe('approveOrder — time-boxed trials', () => {
     const ctx = await buildTrial()
     await seedOrder(ctx.project.id, ctx.product.id, ctx.env.id, ctx.pm.id, { status: 'pending', isTrial: true })
 
-    const result = await listApprovals()
+    const result = await listApprovals('en')
     expect(result.ok).toBe(true)
     if (result.ok) expect(result.data[0].isTrial).toBe(true)
   })

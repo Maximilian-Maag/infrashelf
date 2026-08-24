@@ -10,7 +10,7 @@ import { Input } from '@/components/ui/Input'
 import { Select } from '@/components/ui/Select'
 import { Button } from '@/components/ui/Button'
 import { useLang } from '@/lib/useLang'
-import { t } from '@/lib/i18n'
+import { t, LANGUAGE_OPTIONS } from '@/lib/i18n'
 
 interface Props {
   categories: Category[]
@@ -23,12 +23,6 @@ const MAX_IMAGE_BYTES = 10 * 1024 * 1024
 
 export function NewProductForm({ categories, token }: Props) {
   const lang = useLang()
-  const LANGUAGES = [
-    { value: 'en', label: t('languageEnglish', lang) },
-    { value: 'de', label: t('languageGerman', lang) },
-    { value: 'fr', label: t('languageFrench', lang) },
-    { value: 'es', label: t('languageSpanish', lang) },
-  ]
   const router = useRouter()
   const [image, setImage] = useState<File | null>(null)
   const [imageAlt, setImageAlt] = useState('')
@@ -108,7 +102,7 @@ export function NewProductForm({ categories, token }: Props) {
           label={t('baseLanguage', lang)}
           value={baseLanguage}
           onChange={(e) => setBaseLanguage(e.target.value)}
-          options={LANGUAGES}
+          options={LANGUAGE_OPTIONS}
         />
         <Input label={t('name', lang)} value={name} onChange={(e) => setName(e.target.value)} required />
         <div className="flex flex-col gap-1">

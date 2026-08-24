@@ -64,13 +64,13 @@ export function AddToCart({ product, token, lang }: Props) {
         ...(needsSize ? { sizeCode } : {}),
         ...(parsedQuantity > 1 ? { quantity: parsedQuantity } : {}),
       }
-      await post('/api/cart', body, token)
+      await post(`/api/cart?lang=${lang}`, body, token)
       setAdded(true)
       // Tell the header badge straight away — a shopper's confirmation that the
       // click landed is the count going up, and waiting for the server round trip
       // of router.refresh() to repaint the shell reads as a dead button.
       try {
-        const items = await get<CartItem[]>('/api/cart', token)
+        const items = await get<CartItem[]>(`/api/cart?lang=${lang}`, token)
         publishCartCount((items ?? []).length)
       } catch { /* the refresh below still corrects the badge */ }
       router.refresh()

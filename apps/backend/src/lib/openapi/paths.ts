@@ -7,6 +7,21 @@ extendZodWithOpenApi(z)
 
 const bearerAuth = [{ BearerAuth: [] }]
 
+/**
+ * The language product names and descriptions come back in (issue #162).
+ *
+ * Documented on every endpoint that names a product, not only the catalogue's:
+ * nine of them used to answer in English whatever was asked, which is precisely
+ * the sort of thing a spec has to stop being able to say quietly.
+ */
+const langQuery = {
+  lang: z.string().optional().openapi({
+    description:
+      'Language for product name/description. Falls back to English, then German, then any ' +
+      'translation the product has. Defaults to en.',
+  }),
+}
+
 // ─── Shared schemas ───────────────────────────────────────────────────────────
 
 const userSchema = z.object({
@@ -471,7 +486,7 @@ registry.registerPath({
     'as "spend doubled".',
   tags: ['Costs'],
   security: bearerAuth,
-  request: { query: costFilterQuery },
+  request: { query: costFilterQuery.extend(langQuery) },
   responses: {
     200: {
       description: 'Cost report',
@@ -517,7 +532,7 @@ registry.registerPath({
     'currency has no stored rate — 0 would read as "free".',
   tags: ['Costs'],
   security: bearerAuth,
-  request: { query: costFilterQuery.extend({ format: z.enum(['csv', 'pdf']).optional() }) },
+  request: { query: costFilterQuery.extend({ format: z.enum(['csv', 'pdf']).optional(), ...langQuery }) },
   responses: {
     200: { description: 'CSV or PDF attachment' },
     400: { description: 'Invalid filter or format' },
@@ -560,6 +575,7 @@ registry.registerPath({
   description: 'Oldest first. Items whose product has been deleted are pruned before listing.',
   tags: ['Cart'],
   security: bearerAuth,
+  request: { query: z.object(langQuery) },
   responses: {
     200: { description: 'Cart items', content: { 'application/json': { schema: z.array(cartItemSchema) } } },
     401: { description: 'Unauthorized' },
@@ -577,6 +593,7 @@ registry.registerPath({
   tags: ['Cart'],
   security: bearerAuth,
   request: {
+    query: z.object(langQuery),
     body: {
       content: {
         'application/json': {
@@ -1134,6 +1151,7 @@ registry.registerPath({
   summary: 'List orders (admins see all, project managers see own)',
   tags: ['Orders'],
   security: bearerAuth,
+  request: { query: z.object(langQuery) },
   responses: {
     200: {
       description: 'List of orders',
@@ -1201,6 +1219,7 @@ registry.registerPath({
   security: bearerAuth,
   request: {
     params: z.object({ id: z.string() }),
+    query: z.object(langQuery),
   },
   responses: {
     200: {
@@ -1221,6 +1240,7 @@ registry.registerPath({
   summary: '[admin] List pending orders awaiting approval',
   tags: ['Approvals'],
   security: bearerAuth,
+  request: { query: z.object(langQuery) },
   responses: {
     200: {
       description: 'List of pending orders',
@@ -1557,6 +1577,7 @@ registry.registerPath({
       }),
       sort: z.enum(['date', 'name', 'status']).optional(),
       direction: z.enum(['asc', 'desc']).optional(),
+      ...langQuery,
     }),
   },
   responses: {
@@ -1578,6 +1599,7 @@ registry.registerPath({
     'so a project manager only sees facets drawn from their own projects.',
   tags: ['Infrastructure'],
   security: bearerAuth,
+  request: { query: z.object(langQuery) },
   responses: {
     200: {
       description: 'Facet values',
@@ -1618,6 +1640,7 @@ registry.registerPath({
       deployedTo: z.string().optional(),
       sort: z.enum(['date', 'name', 'status']).optional(),
       direction: z.enum(['asc', 'desc']).optional(),
+      ...langQuery,
     }),
   },
   responses: {
@@ -2234,6 +2257,7 @@ registry.registerPath({
   summary: '[root] List all products',
   tags: ['Admin'],
   security: bearerAuth,
+  request: { query: z.object(langQuery) },
   responses: {
     200: {
       description: 'List of products',
@@ -2283,6 +2307,7 @@ registry.registerPath({
   security: bearerAuth,
   request: {
     params: z.object({ id: z.string() }),
+    query: z.object(langQuery),
   },
   responses: {
     200: {

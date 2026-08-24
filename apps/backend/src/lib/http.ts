@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import type { Result } from '@/lib/services/result'
+import { RECORD_LANGUAGE } from '@/lib/services/productName'
 
 export const toResponse = <T>(result: Result<T>, successStatus = 200): NextResponse =>
   result.ok
@@ -30,3 +31,20 @@ export const parseRouteId = (raw: string): number | null => {
  */
 export const invalidId = (what = 'id'): NextResponse =>
   NextResponse.json({ error: `Invalid ${what}` }, { status: 400 })
+
+/**
+ * The language this request wants its product content in (issue #162).
+ *
+ * One reader rather than `searchParams.get('lang') ?? 'en'` copied into a dozen
+ * routes: the catalogue and the favourites endpoint each grew their own, and the
+ * other nine surfaces that name a product simply never grew one — which is the
+ * whole of issue #162. A route that forgets to call this no longer compiles,
+ * because the services take `lang` as a required argument.
+ *
+ * Not validated against SUPPORTED_LANGUAGES: an unknown code matches no
+ * `language_code` row and falls through the same chain as a missing translation,
+ * so rejecting it would only turn a harmless typo into a 400. The value is bound
+ * as a query parameter, never interpolated.
+ */
+export const requestLang = (req: { url: string }): string =>
+  new URL(req.url).searchParams.get('lang') ?? RECORD_LANGUAGE

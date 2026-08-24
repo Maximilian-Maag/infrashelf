@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { SUPPORTED_LANGUAGES, t, isValidLang, type Translations } from './i18n'
+import { SUPPORTED_LANGUAGES, LANGUAGE_OPTIONS, t, isValidLang, type Translations } from './i18n'
 
 // The English table is the reference: t() falls back to it per key, so it is the
 // only one the type system requires to be complete. That fallback is a safety
@@ -11,6 +11,17 @@ describe('i18n', () => {
     expect(SUPPORTED_LANGUAGES.length).toBe(25)
     expect(SUPPORTED_LANGUAGES.map((l) => l.code)).toContain('de')
     expect(SUPPORTED_LANGUAGES.map((l) => l.code)).toContain('en')
+  })
+
+  it('offers every supported language when a product is written or translated', () => {
+    // The two admin product forms each hardcoded four (en/de/fr/es), so a product
+    // could be machine-translated into Polish and then not editable in Polish by
+    // hand — and de-only or fr-only products were the normal case (issue #162).
+    expect(LANGUAGE_OPTIONS.map((o) => o.value)).toEqual(SUPPORTED_LANGUAGES.map((l) => l.code))
+    expect(LANGUAGE_OPTIONS).toHaveLength(25)
+    // Labelled in the language itself: a language picker names languages the way
+    // their own speakers do.
+    expect(LANGUAGE_OPTIONS.find((o) => o.value === 'pl')?.label).toBe('Polski')
   })
 
   it('resolves a key for every supported language', () => {

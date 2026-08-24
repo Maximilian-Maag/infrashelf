@@ -9,6 +9,7 @@ import { Alert } from '@/components/ui/Alert'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { ButtonLink } from '@/components/ui/Button'
 import { getLang } from '@/lib/getLang'
+import { snapshotProductName } from '@/lib/snapshotName'
 import { t } from '@/lib/i18n'
 import { OrderComments } from './OrderComments'
 
@@ -26,7 +27,7 @@ export default async function OrderDetailPage({ params }: Props) {
 
   let order: Order
   try {
-    order = await get<Order>(`/api/orders/${id}`, token)
+    order = await get<Order>(`/api/orders/${id}?lang=${lang}`, token)
   } catch {
     notFound()
   }
@@ -84,7 +85,9 @@ export default async function OrderDetailPage({ params }: Props) {
         <dl className="grid grid-cols-2 gap-x-6 gap-y-4 text-sm">
           <div>
             <dt className="font-medium text-slate-500">{t('product', lang)}</dt>
-            <dd className="text-slate-900">{snapshot?.productName ?? order.productName ?? `#${order.productId}`}</dd>
+            <dd className="text-slate-900">
+              {snapshotProductName(snapshot, lang) ?? order.productName ?? `#${order.productId}`}
+            </dd>
           </div>
           {snapshot && (
             <div>

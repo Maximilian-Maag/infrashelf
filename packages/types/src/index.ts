@@ -769,6 +769,16 @@ export interface ProductSnapshot {
   capturedAt: string
   productName: string
   productDescription: string
+  /**
+   * Every name the product had when the order was placed, keyed by language code
+   * (issue #162).
+   *
+   * ABSENT on snapshots taken before it existed — a reader falls back to
+   * `productName`, it does not conclude the product had no translations. History is
+   * never retranslated: this is what the names read as at capture time, so a
+   * reader picks their language and still sees what was ordered.
+   */
+  productNames?: Record<string, string>
   environmentName: string
   /**
    * The UNIT price that applied — the chosen size's, or the offering's when the

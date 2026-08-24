@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from 'next/server'
 import { requireAuth, isAuth } from '@/lib/auth/middleware'
-import { toResponse } from '@/lib/http'
+import { toResponse, requestLang } from '@/lib/http'
 import { getCostReport, assertMaySeeProject } from '@/lib/services/costs'
 import { parseCostFilters } from '@/lib/services/costFilters'
 
@@ -24,5 +24,5 @@ export async function GET(req: NextRequest) {
     if (!allowed.ok) return NextResponse.json({ error: allowed.message }, { status: allowed.status })
   }
 
-  return toResponse(await getCostReport(session, filters.data))
+  return toResponse(await getCostReport(session, filters.data, requestLang(req)))
 }

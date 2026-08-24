@@ -33,7 +33,7 @@ export default async function ProjectDetailPage({ params }: Props) {
   }
 
   const [ordersRes, costCentersRes] = await Promise.allSettled([
-    get<Order[]>(`/api/orders?projectId=${id}`, token),
+    get<Order[]>(`/api/orders?projectId=${id}&lang=${lang}`, token),
     get<CostCenter[]>('/api/admin/cost-centers', token),
   ])
 

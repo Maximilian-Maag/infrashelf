@@ -19,7 +19,7 @@ export default async function AdminProductsPage() {
   const lang = await getLang()
 
   const [productsRes, categoriesRes] = await Promise.allSettled([
-    get<Product[]>('/api/admin/products', token),
+    get<Product[]>(`/api/admin/products?lang=${lang}`, token),
     get<Category[]>('/api/admin/categories', token),
   ])
 

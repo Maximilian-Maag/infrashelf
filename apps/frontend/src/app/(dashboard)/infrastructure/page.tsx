@@ -61,10 +61,14 @@ export default async function InfrastructurePage({ searchParams }: Props) {
   }
   const qs = query.toString()
   const isFiltered = qs !== ''
+  // `lang` is appended AFTER `isFiltered` is decided: it is not a filter, and
+  // counting it as one would make every visit look like a narrowed list.
+  const listQuery = new URLSearchParams(query)
+  listQuery.set('lang', lang)
 
   const [listRes, facetsRes] = await Promise.allSettled([
-    get<InfrastructureElement[]>(`/api/infrastructure${qs ? `?${qs}` : ''}`, token),
-    get<InfraFacets>('/api/infrastructure/facets', token),
+    get<InfrastructureElement[]>(`/api/infrastructure?${listQuery.toString()}`, token),
+    get<InfraFacets>(`/api/infrastructure/facets?lang=${lang}`, token),
   ])
 
   // A rejected list is NOT an empty inventory. An invalid bookmarked filter comes

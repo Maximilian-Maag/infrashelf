@@ -1,7 +1,8 @@
 import { db } from '@/lib/db/client'
-import { users, productTranslations, ciSources, deploymentEnvironments } from '@/lib/db/schema'
+import { users, products, ciSources, deploymentEnvironments } from '@/lib/db/schema'
 import { eq, sql } from 'drizzle-orm'
 import { gitlabProjectRefFromTriggerUrl } from '@/lib/ci/gitlab'
+import { productNameSql, RECORD_LANGUAGE } from '@/lib/services/productName'
 
 export interface CiSource {
   url: string
@@ -24,11 +25,21 @@ export interface CiSource {
 export const countWhere = async (query: PromiseLike<{ n: number }[]>): Promise<number> =>
   (await query)[0].n
 
+/**
+ * The product's name for a NOTIFICATION, not for a screen (issue #162).
+ *
+ * Every caller feeds this into a mail subject and body that are English sentences
+ * end to end, and none of them has a reader to ask: two of them run from a CI
+ * webhook, where there is no request and no session. So it resolves at
+ * RECORD_LANGUAGE and takes the shared fallback from there — which is the part
+ * that matters, because a product translated only into German used to arrive as
+ * `Product #7` in the subject line.
+ */
 export const findProductName = async (productId: number): Promise<string> => {
   const rows = await db
-    .select({ name: productTranslations.name })
-    .from(productTranslations)
-    .where(sql`${productTranslations.productId} = ${productId} AND ${productTranslations.languageCode} = 'en'`)
+    .select({ name: productNameSql(products.id, RECORD_LANGUAGE) })
+    .from(products)
+    .where(eq(products.id, productId))
     .limit(1)
   return rows[0]?.name ?? `Product #${productId}`
 }

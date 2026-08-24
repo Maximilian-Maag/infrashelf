@@ -36,7 +36,7 @@ export default async function InfrastructureDetailPage({ params }: Props) {
 
   let element: InfrastructureDetail
   try {
-    element = await get<InfrastructureDetail>(`/api/infrastructure/${id}`, token)
+    element = await get<InfrastructureDetail>(`/api/infrastructure/${id}?lang=${lang}`, token)
   } catch {
     // The API answers 404 for an element outside the caller's scope as well, so
     // this covers "gone" and "not yours" without distinguishing them here either.

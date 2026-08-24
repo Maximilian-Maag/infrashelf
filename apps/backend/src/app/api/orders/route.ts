@@ -1,7 +1,7 @@
 import { type NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { requireAuth, isAuth } from '@/lib/auth/middleware'
-import { toResponse } from '@/lib/http'
+import { toResponse, requestLang } from '@/lib/http'
 import { listOrders, createOrder } from '@/lib/services/orders'
 import { SIZE_CODE_MAX_LENGTH } from '@/lib/services/sizes'
 
@@ -27,7 +27,7 @@ export async function GET(req: NextRequest) {
   const session = await requireAuth(req)
   if (!isAuth(session)) return session
 
-  return toResponse(await listOrders(session))
+  return toResponse(await listOrders(session, requestLang(req)))
 }
 
 export async function POST(req: NextRequest) {

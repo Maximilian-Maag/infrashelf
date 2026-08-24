@@ -75,7 +75,7 @@ describe('listProducts', () => {
     await seedProduct(cat.id, 'Alpha')
     await seedProduct(cat.id, 'Beta')
 
-    const result = await listProducts()
+    const result = await listProducts('en')
     expect(result.ok).toBe(true)
     if (result.ok) {
       expect(result.data.length).toBe(2)
@@ -85,7 +85,11 @@ describe('listProducts', () => {
 })
 
 describe('createProduct', () => {
-  it('inserts a product with translation for baseLanguage', async () => {
+  it('inserts exactly one translation, in the base language', async () => {
+    // It used to seed a second `en` row holding the same German text, so that the
+    // read paths that hardcoded English had something to find (issue #162). That
+    // row was indistinguishable from a real English translation, which is what
+    // made `updateProduct` willing to overwrite one (issue #161).
     const cat = await createCategory()
     const result = await createProduct({
       categoryId: cat.id,
@@ -101,15 +105,89 @@ describe('createProduct', () => {
       .select()
       .from(productTranslations)
       .where(eq(productTranslations.productId, result.data.id))
-    const codes = tRows.map((r) => r.languageCode).sort()
-    expect(codes).toContain('de')
-    expect(codes).toContain('en')
+    expect(tRows.map((r) => r.languageCode)).toEqual(['de'])
+  })
+
+  it('is still named on every screen without an English row to fall back on', async () => {
+    const cat = await createCategory()
+    const created = await createProduct({
+      categoryId: cat.id,
+      baseLanguage: 'de',
+      name: 'Deutsch Name',
+      description: 'beschr',
+    })
+    expect(created.ok).toBe(true)
+    if (!created.ok) return
+
+    const listed = await listProducts('de')
+    expect(listed.ok && listed.data.find((p) => p.id === created.data.id)?.name).toBe('Deutsch Name')
+    const detail = await getProductAdmin(created.data.id, 'en')
+    // English asked for, German delivered — the fallback, not a hardcoded row.
+    expect(detail.ok && detail.data.name).toBe('Deutsch Name')
+  })
+})
+
+describe('updateProduct and the English translation (issue #161)', () => {
+  /*
+   * The failure this pins, in the steps an admin actually takes:
+   *
+   *   1. create the product with base language German
+   *   2. translate it — by hand or by machine — so `en` says "Virtual Machine"
+   *   3. fix a typo in the German name
+   *
+   * Step 3 used to mirror the German text into the `en` row with
+   * onConflictDoUpdate, destroying the translation from step 2 for every user of
+   * every language, with nothing in the version history saying it had happened.
+   */
+  it('leaves the English translation alone when the German name is edited', async () => {
+    const cat = await createCategory()
+    const created = await createProduct({
+      categoryId: cat.id,
+      baseLanguage: 'de',
+      name: 'Virtuelle Maschine',
+      description: 'Eine VM',
+    })
+    expect(created.ok).toBe(true)
+    if (!created.ok) return
+    await upsertTranslation(created.data.id, 'en', { name: 'Virtual Machine', description: 'A VM' })
+
+    const updated = await updateProduct(created.data.id, { name: 'Virtuelle Maschine (Linux)' })
+    expect(updated.ok).toBe(true)
+
+    const rows = await db
+      .select()
+      .from(productTranslations)
+      .where(eq(productTranslations.productId, created.data.id))
+    const byLang = Object.fromEntries(rows.map((r) => [r.languageCode, r.name]))
+    expect(byLang.de).toBe('Virtuelle Maschine (Linux)')
+    expect(byLang.en).toBe('Virtual Machine')
+  })
+
+  it('does not invent an English row for a product that has none', async () => {
+    // onConflictDoNothing — the smallest fix — would still have written German
+    // text into `en` here, where there is no conflict to do nothing about.
+    const cat = await createCategory()
+    const created = await createProduct({
+      categoryId: cat.id,
+      baseLanguage: 'de',
+      name: 'Virtuelle Maschine',
+    })
+    expect(created.ok).toBe(true)
+    if (!created.ok) return
+
+    await updateProduct(created.data.id, { name: 'Virtuelle Maschine (Linux)' })
+
+    const rows = await db
+      .select()
+      .from(productTranslations)
+      .where(eq(productTranslations.productId, created.data.id))
+    expect(rows.map((r) => r.languageCode)).toEqual(['de'])
   })
 })
 
 describe('getProductAdmin', () => {
   it('returns 404 for unknown id', async () => {
-    const result = await getProductAdmin(999_999)
+    const result = await getProductAdmin(999_999, 'en')
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.status).toBe(404)
   })
@@ -117,7 +195,7 @@ describe('getProductAdmin', () => {
   it('returns the product when found', async () => {
     const cat = await createCategory()
     const p = await seedProduct(cat.id, 'Find')
-    const result = await getProductAdmin(p.id)
+    const result = await getProductAdmin(p.id, 'en')
     expect(result.ok).toBe(true)
     if (result.ok) expect(result.data.name).toBe('Find')
   })
@@ -340,7 +418,7 @@ describe('deleteProduct preserves order history (issue #142)', () => {
     const { product } = await seedOrderedProduct()
     await deleteProduct(product.id)
 
-    const admin = await listProducts()
+    const admin = await listProducts('en')
     expect(admin.ok).toBe(true)
     if (admin.ok) expect(admin.data.map((p) => p.id)).not.toContain(product.id)
 
@@ -356,7 +434,7 @@ describe('deleteProduct preserves order history (issue #142)', () => {
     expect(detail.ok).toBe(false)
     if (!detail.ok) expect(detail.status).toBe(404)
 
-    expect((await getProductAdmin(product.id)).ok).toBe(false)
+    expect((await getProductAdmin(product.id, 'en')).ok).toBe(false)
   })
 
   it('returns 404 when the same product is deleted twice', async () => {
@@ -722,7 +800,7 @@ describe('product environments', () => {
     const listRes = await listProductEnvironments(p.id)
     expect(listRes.ok && listRes.data[0].overheadCostCenterId).toBe(cc.id)
 
-    const detailRes = await getProductAdmin(p.id)
+    const detailRes = await getProductAdmin(p.id, 'en')
     expect(detailRes.ok && detailRes.data.environments[0].overheadCostCenterId).toBe(cc.id)
   })
 

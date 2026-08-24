@@ -319,7 +319,7 @@ describe('sizing through the order flow (issue #98)', () => {
       (await import('drizzle-orm')).sql`UPDATE product_environment_sizes SET price = '800.00'`,
     )
 
-    const report = await getCostReport(makeSession(admin))
+    const report = await getCostReport(makeSession(admin), {}, 'en')
     expect(report.ok).toBe(true)
     if (!report.ok) return
     // 2 × 400, the price that applied — not 2 × 800, which would restate history.
@@ -341,11 +341,11 @@ describe('sizing through the order flow (issue #98)', () => {
     })
     if (!result.ok) throw new Error('order failed')
 
-    const report = await getCostReport(makeSession(admin))
+    const report = await getCostReport(makeSession(admin), {}, 'en')
     if (!report.ok) throw new Error('report failed')
     expect(report.data.totalEur).toBe(100)
 
-    const rows = await getCostRows(makeSession(admin))
+    const rows = await getCostRows(makeSession(admin), {}, 'en')
     if (!rows.ok) throw new Error('rows failed')
     expect(rows.data).toHaveLength(1)
     // The unit price stays the unit price; the line total is what reconciles.
@@ -375,7 +375,7 @@ describe('sizing through the order flow (issue #98)', () => {
     await db.execute(sql`UPDATE orders SET product_snapshot = NULL`)
     await db.execute(sql`UPDATE product_environment_sizes SET active = FALSE`)
 
-    const report = await getCostReport(makeSession(admin))
+    const report = await getCostReport(makeSession(admin), {}, 'en')
     if (!report.ok) throw new Error('report failed')
     expect(report.data.totalEur).toBe(400)
     expect(report.data.estimatedOrders).toBe(1)
@@ -398,7 +398,7 @@ describe('sizing through the order flow (issue #98)', () => {
     await db.execute(sql`UPDATE orders SET product_snapshot = NULL`)
     await db.execute(sql`DELETE FROM product_environment_sizes`)
 
-    const report = await getCostReport(makeSession(admin))
+    const report = await getCostReport(makeSession(admin), {}, 'en')
     if (!report.ok) throw new Error('report failed')
     // Not the offering's 99: that is the price of an unsized line, and this order
     // named a size. Nothing is a truer answer here than the wrong thing.
@@ -406,7 +406,7 @@ describe('sizing through the order flow (issue #98)', () => {
 
     // The export reports an unpriceable line as zero and flags it estimated — the
     // same `?? '0'` an order whose offering was withdrawn entirely has always hit.
-    const rows = await getCostRows(makeSession(admin))
+    const rows = await getCostRows(makeSession(admin), {}, 'en')
     if (!rows.ok) throw new Error('rows failed')
     expect(rows.data[0].price).toBe('0')
     expect(rows.data[0].lineTotalEur).toBe(0)
@@ -424,7 +424,7 @@ describe('sizing through the order flow (issue #98)', () => {
     })
     if (!result.ok) throw new Error('order failed')
 
-    const report = await getCostReport(makeSession(admin))
+    const report = await getCostReport(makeSession(admin), {}, 'en')
     if (!report.ok) throw new Error('report failed')
     expect(report.data.totalEur).toBe(99)
   })
@@ -440,10 +440,10 @@ describe('the cart line: product × environment × size × quantity', () => {
       environmentId: env.id,
       sizeCode: 'L',
       quantity: 3,
-    })
+    }, 'en')
     expect(added.ok).toBe(true)
 
-    const listed = await listCart(makeSession(pm))
+    const listed = await listCart(makeSession(pm), 'en')
     if (!listed.ok) throw new Error('list failed')
     expect(listed.data[0].sizeCode).toBe('L')
     expect(listed.data[0].sizeLabel).toBe('Large')
@@ -457,7 +457,7 @@ describe('the cart line: product × environment × size × quantity', () => {
     const { pm, product, env } = await setup()
     await createSize(product.id, env.id, { code: 'L', price: '50.00' })
 
-    const added = await addToCart(makeSession(pm), { productId: product.id, environmentId: env.id })
+    const added = await addToCart(makeSession(pm), { productId: product.id, environmentId: env.id }, 'en')
 
     // Unlike the parameters, the size is not something filled in later: a line
     // that could never be ordered has no business in the cart.
@@ -470,13 +470,13 @@ describe('the cart line: product × environment × size × quantity', () => {
       productId: product.id,
       environmentId: env.id,
       parameters: { HOST: 'web-01' },
-    })
+    }, 'en')
     if (!added.ok) throw new Error('add failed')
 
     const updated = await updateCartItem(makeSession(pm), added.data.id, { quantity: 7 })
 
     expect(updated.ok).toBe(true)
-    const listed = await listCart(makeSession(pm))
+    const listed = await listCart(makeSession(pm), 'en')
     if (!listed.ok) throw new Error('list failed')
     expect(listed.data[0].quantity).toBe(7)
     expect(listed.data[0].parameters).toEqual({ HOST: 'web-01' })
@@ -489,14 +489,14 @@ describe('the cart line: product × environment × size × quantity', () => {
       productId: product.id,
       environmentId: env.id,
       sizeCode: 'L',
-    })
+    }, 'en')
     if (!added.ok) throw new Error('add failed')
 
     await db.execute(
       (await import('drizzle-orm')).sql`UPDATE product_environment_sizes SET active = FALSE`,
     )
 
-    const listed = await listCart(makeSession(pm))
+    const listed = await listCart(makeSession(pm), 'en')
     if (!listed.ok) throw new Error('list failed')
     // Said on the line, so the shopper can act on it — not as a checkout error.
     expect(listed.data[0].stillOffered).toBe(false)
@@ -510,12 +510,12 @@ describe('the cart line: product × environment × size × quantity', () => {
       environmentId: env.id,
       sizeCode: 'L',
       quantity: 3,
-    })
+    }, 'en')
     if (!added.ok) throw new Error('add failed')
 
     await db.execute((await import('drizzle-orm')).sql`DELETE FROM product_environment_sizes`)
 
-    const listed = await listCart(makeSession(pm))
+    const listed = await listCart(makeSession(pm), 'en')
     if (!listed.ok) throw new Error('list failed')
     // The offering's own 99.00 is the price of a line with NO size; this line has
     // one. Returning it here put an unorderable line into the cart's subtotal.
@@ -531,14 +531,14 @@ describe('the cart line: product × environment × size × quantity', () => {
       productId: product.id,
       environmentId: env.id,
       sizeCode: 'L',
-    })
+    }, 'en')
     if (!added.ok) throw new Error('add failed')
 
     await db.execute(
       (await import('drizzle-orm')).sql`UPDATE product_environment_sizes SET active = FALSE`,
     )
 
-    const listed = await listCart(makeSession(pm))
+    const listed = await listCart(makeSession(pm), 'en')
     if (!listed.ok) throw new Error('list failed')
     // The row is still there, so what the line was struck at is still knowable and
     // worth showing beside the flag that stops it being checked out.
@@ -556,7 +556,7 @@ describe('the cart line: product × environment × size × quantity', () => {
       environmentId: env.id,
       sizeCode: 'M',
       quantity: 5,
-    })
+    }, 'en')
     if (!added.ok) throw new Error('add failed')
 
     const result = await checkoutCart(makeSession(admin), {
@@ -589,7 +589,7 @@ describe('the cart line: product × environment × size × quantity', () => {
         productId: product.id,
         environmentId: env.id,
         quantity: 20,
-      })
+      }, 'en')
       if (!added.ok) throw new Error('add failed')
       items.push(added.data.id)
     }

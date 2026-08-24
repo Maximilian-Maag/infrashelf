@@ -38,6 +38,9 @@ export function InfraExport({ token, lang }: Props) {
       if (value) params.set(key, value)
     }
     params.set('format', format)
+    // Same as the cost export: the inventory has to name products the way the list
+    // the user exported it from does.
+    params.set('lang', lang)
     if (includeParameters) params.set('includeParameters', 'true')
 
     setBusy(format)

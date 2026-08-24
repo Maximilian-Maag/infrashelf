@@ -23,7 +23,7 @@ export default async function ApprovalsPage() {
 
   let orders: Order[] = []
   try {
-    const all = (await get<Order[]>('/api/orders', token)) ?? []
+    const all = (await get<Order[]>(`/api/orders?lang=${lang}`, token)) ?? []
     orders = all.filter((o) => o.status === 'pending')
   } catch {
     /* empty */

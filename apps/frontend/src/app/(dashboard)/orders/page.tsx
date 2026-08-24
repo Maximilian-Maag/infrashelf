@@ -20,7 +20,7 @@ export default async function OrdersPage() {
   // Let a genuine fetch failure throw to the (dashboard) error boundary so an
   // outage is not mistaken for an empty list. A successful empty response
   // still renders the empty state below.
-  const orders = (await get<Order[]>('/api/orders', token)) ?? []
+  const orders = (await get<Order[]>(`/api/orders?lang=${lang}`, token)) ?? []
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">

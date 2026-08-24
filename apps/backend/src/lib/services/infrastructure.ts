@@ -16,6 +16,7 @@ import { recordOrderPipelineId, finishOrderTriggerRun } from '@/lib/services/pip
 import { triggerProductWebhooksTracked, triggerPipelineStacksTracked } from '@/lib/ci/webhooks'
 import { ELEMENT_SEQUENCE_VAR } from '@/lib/ci/stateKey'
 import { ok, err, type Result } from '@/lib/services/result'
+import { productNameSql } from '@/lib/services/productName'
 import { trialVariables, trialExpiry } from '@/lib/services/trial'
 import {
   loadSensitiveParameterNames,
@@ -99,18 +100,21 @@ export interface InfraFilters {
 // always visibly explicable. Deliberately excludes `parameters`: the values
 // there include ones flagged sensitive, and a substring match would turn the
 // filter into an oracle for confirming a secret's value.
-const productNameSql = sql<string>`(
-  SELECT name FROM product_translations
-  WHERE product_id = ${infrastructureElements.productId}
-    AND language_code = 'en'
-  LIMIT 1
-)`
+//
+// Per request rather than a module constant, because "the expression the row
+// displays" now depends on the caller's language: hardcoding 'en' here meant a
+// German user searching for the name the catalogue had shown them got no results
+// at all (issue #162). The sort key is the same expression for the same reason —
+// a list sorted by a name it is not showing looks unsorted.
+const elementNameSql = (lang: string) => productNameSql(infrastructureElements.productId, lang)
 
 export const listInfrastructure = async (
   session: SessionUser,
   filters: InfraFilters,
+  lang: string,
 ): Promise<Result<InfraRow[]>> => {
   const isAdmin = session.role === 'admin' || session.role === 'root'
+  const nameSql = elementNameSql(lang)
 
   const conditions: ReturnType<typeof sql>[] = []
   if (!isAdmin) conditions.push(sql`${projects.ownerId} = ${session.id}`)
@@ -134,7 +138,7 @@ export const listInfrastructure = async (
     // the result set instead of widening it to everything.
     const pattern = `%${filters.search.replace(/[\\%_]/g, (c) => `\\${c}`)}%`
     conditions.push(sql`(
-      ${productNameSql} ILIKE ${pattern} ESCAPE '\\'
+      ${nameSql} ILIKE ${pattern} ESCAPE '\\'
       OR ${deploymentEnvironments.name} ILIKE ${pattern} ESCAPE '\\'
       OR ${projects.name} ILIKE ${pattern} ESCAPE '\\'
     )`)
@@ -156,7 +160,7 @@ export const listInfrastructure = async (
   const direction = filters.direction === 'asc' ? sql`ASC` : sql`DESC`
   const orderBy = {
     date: sql`${infrastructureElements.deployedAt} ${direction}`,
-    name: sql`${productNameSql} ${direction}`,
+    name: sql`${nameSql} ${direction}`,
     status: sql`${infrastructureElements.status} ${direction}`,
   }[filters.sort ?? 'date']
 
@@ -176,7 +180,7 @@ export const listInfrastructure = async (
       sizeCode: infrastructureElements.sizeCode,
       sequence: infrastructureElements.sequence,
       orderQuantity: orders.quantity,
-      productName: productNameSql,
+      productName: nameSql,
       environmentName: deploymentEnvironments.name,
       projectName: projects.name,
       orderStatus: orders.status,
@@ -223,6 +227,7 @@ export interface InfraFacets {
  */
 export const listInfrastructureFacets = async (
   session: SessionUser,
+  lang: string,
 ): Promise<Result<InfraFacets>> => {
   const isAdmin = session.role === 'admin' || session.role === 'root'
   const scope = isAdmin ? undefined : sql`${projects.ownerId} = ${session.id}`
@@ -234,7 +239,7 @@ export const listInfrastructureFacets = async (
       projectId: infrastructureElements.projectId,
       projectName: projects.name,
       productId: infrastructureElements.productId,
-      productName: productNameSql,
+      productName: elementNameSql(lang),
     })
     .from(infrastructureElements)
     .leftJoin(
@@ -824,6 +829,7 @@ export interface InfraDetail extends InfraRow {
 export const getInfrastructureElement = async (
   session: SessionUser,
   id: number,
+  lang: string,
 ): Promise<Result<InfraDetail>> => {
   const isAdmin = session.role === 'admin' || session.role === 'root'
 
@@ -842,7 +848,7 @@ export const getInfrastructureElement = async (
       outputs: infrastructureElements.outputs,
       deployedAt: infrastructureElements.deployedAt,
       scheduledDecommissionAt: infrastructureElements.scheduledDecommissionAt,
-      productName: productNameSql,
+      productName: elementNameSql(lang),
       environmentName: deploymentEnvironments.name,
       projectName: projects.name,
       orderStatus: orders.status,

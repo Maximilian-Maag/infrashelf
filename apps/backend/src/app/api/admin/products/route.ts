@@ -1,7 +1,7 @@
 import { type NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { requireRole, isAuth } from '@/lib/auth/middleware'
-import { toResponse } from '@/lib/http'
+import { toResponse, requestLang } from '@/lib/http'
 import { listProducts, createProduct } from '@/lib/services/admin/products'
 
 const CreateProductSchema = z.object({
@@ -15,7 +15,7 @@ export async function GET(req: NextRequest) {
   const session = await requireRole('root')(req)
   if (!isAuth(session)) return session
 
-  return toResponse(await listProducts())
+  return toResponse(await listProducts(requestLang(req)))
 }
 
 export async function POST(req: NextRequest) {

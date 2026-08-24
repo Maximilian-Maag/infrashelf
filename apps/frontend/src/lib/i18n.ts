@@ -28,6 +28,24 @@ export const SUPPORTED_LANGUAGES = [
 
 export type LangCode = (typeof SUPPORTED_LANGUAGES)[number]['code']
 
+/**
+ * The languages a product can be written or translated in, as `<Select>` options.
+ *
+ * All 25, not the four (`en`/`de`/`fr`/`es`) the two admin product forms each used
+ * to list. Those four were a hardcoded subset of the set the AI translator already
+ * produces and the catalogue already reads, so a product could be translated into
+ * Polish by the machine and then not be editable in Polish by hand — and a
+ * `de`-only or `fr`-only product, which the subset made normal rather than
+ * exceptional, showed as `Product #7` on every screen that hardcoded English
+ * (issue #162).
+ *
+ * Labelled in the language itself, the way a language picker is: a root user
+ * choosing "Polski" does not need the Polish word for Polish translated.
+ */
+export const LANGUAGE_OPTIONS: { value: string; label: string }[] = SUPPORTED_LANGUAGES.map(
+  ({ code, name }) => ({ value: code, label: name }),
+)
+
 export type Translations = {
   signOut: string
   activeSessions: string

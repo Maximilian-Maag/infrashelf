@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from 'next/server'
 import { requireAuth, isAuth } from '@/lib/auth/middleware'
 import { toCsv } from '@/lib/csv'
+import { requestLang } from '@/lib/http'
 import { getCostRows, getCostReport, assertMaySeeProject, type CostRowExport } from '@/lib/services/costs'
 import { parseCostFilters } from '@/lib/services/costFilters'
 import { getBranding } from '@/lib/services/admin/branding'
@@ -145,11 +146,12 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid format — expected csv or pdf' }, { status: 400 })
   }
 
-  const result = await getCostRows(session, filters.data)
+  const lang = requestLang(req)
+  const result = await getCostRows(session, filters.data, lang)
   if (!result.ok) return NextResponse.json({ error: result.message }, { status: result.status })
 
   if (format === 'pdf') {
-    const report = await getCostReport(session, filters.data)
+    const report = await getCostReport(session, filters.data, lang)
     const branding = await getBranding()
     const pdf = await buildPdf(
       result.data,

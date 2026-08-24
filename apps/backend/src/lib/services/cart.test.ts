@@ -66,7 +66,7 @@ const setup = async () => {
 describe('addToCart', () => {
   it('adds an item and resolves its display fields', async () => {
     const { pm, nginx, env } = await setup()
-    const result = await addToCart(makeSession(pm), { productId: nginx.id, environmentId: env.id })
+    const result = await addToCart(makeSession(pm), { productId: nginx.id, environmentId: env.id }, 'en')
     expect(result.ok).toBe(true)
     if (!result.ok) return
     expect(result.data).toMatchObject({
@@ -90,7 +90,7 @@ describe('addToCart', () => {
       productId: nginx.id,
       environmentId: env.id,
       parameters: { SIZE: 'not-a-number' },
-    })
+    }, 'en')
     expect(result.ok).toBe(true)
     const [row] = await db.select().from(cartItems)
     expect(row.parameters).toEqual({ SIZE: 'not-a-number' })
@@ -98,7 +98,7 @@ describe('addToCart', () => {
 
   it('refuses an item that is not offered — it could never be ordered', async () => {
     const { pm, nginx, unofferedEnv } = await setup()
-    const result = await addToCart(makeSession(pm), { productId: nginx.id, environmentId: unofferedEnv.id })
+    const result = await addToCart(makeSession(pm), { productId: nginx.id, environmentId: unofferedEnv.id }, 'en')
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.status).toBe(400)
     expect(await db.select().from(cartItems)).toHaveLength(0)
@@ -106,8 +106,8 @@ describe('addToCart', () => {
 
   it('allows the same product twice — they differ by parameters', async () => {
     const { pm, nginx, env } = await setup()
-    await addToCart(makeSession(pm), { productId: nginx.id, environmentId: env.id, parameters: { H: 'a' } })
-    await addToCart(makeSession(pm), { productId: nginx.id, environmentId: env.id, parameters: { H: 'b' } })
+    await addToCart(makeSession(pm), { productId: nginx.id, environmentId: env.id, parameters: { H: 'a' } }, 'en')
+    await addToCart(makeSession(pm), { productId: nginx.id, environmentId: env.id, parameters: { H: 'b' } }, 'en')
     expect(await db.select().from(cartItems)).toHaveLength(2)
   })
 
@@ -115,9 +115,9 @@ describe('addToCart', () => {
     // An unbounded cart is a way to fire unbounded pipelines in one request.
     const { pm, nginx, env } = await setup()
     for (let i = 0; i < MAX_CART_ITEMS; i++) {
-      await addToCart(makeSession(pm), { productId: nginx.id, environmentId: env.id })
+      await addToCart(makeSession(pm), { productId: nginx.id, environmentId: env.id }, 'en')
     }
-    const result = await addToCart(makeSession(pm), { productId: nginx.id, environmentId: env.id })
+    const result = await addToCart(makeSession(pm), { productId: nginx.id, environmentId: env.id }, 'en')
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.message).toMatch(/at most/i)
   })
@@ -126,23 +126,23 @@ describe('addToCart', () => {
 describe('listCart', () => {
   it('returns only the caller\'s items, oldest first', async () => {
     const { pm, other, nginx, postgres, env } = await setup()
-    await addToCart(makeSession(pm), { productId: nginx.id, environmentId: env.id })
-    await addToCart(makeSession(pm), { productId: postgres.id, environmentId: env.id })
-    await addToCart(makeSession(other), { productId: nginx.id, environmentId: env.id })
+    await addToCart(makeSession(pm), { productId: nginx.id, environmentId: env.id }, 'en')
+    await addToCart(makeSession(pm), { productId: postgres.id, environmentId: env.id }, 'en')
+    await addToCart(makeSession(other), { productId: nginx.id, environmentId: env.id }, 'en')
 
-    const result = await listCart(makeSession(pm))
+    const result = await listCart(makeSession(pm), 'en')
     expect(result.ok && result.data.map((r) => r.productName)).toEqual(['Nginx Gateway', 'Managed Postgres'])
   })
 
   it('keeps an item whose offering was withdrawn, marked unavailable', async () => {
     // Vanishing without explanation is worse than showing why checkout will refuse.
     const { pm, nginx, env } = await setup()
-    await addToCart(makeSession(pm), { productId: nginx.id, environmentId: env.id })
+    await addToCart(makeSession(pm), { productId: nginx.id, environmentId: env.id }, 'en')
     await db
       .delete(productEnvironments)
       .where(and(eq(productEnvironments.productId, nginx.id), eq(productEnvironments.environmentId, env.id)))
 
-    const result = await listCart(makeSession(pm))
+    const result = await listCart(makeSession(pm), 'en')
     expect(result.ok).toBe(true)
     if (!result.ok) return
     expect(result.data).toHaveLength(1)
@@ -151,14 +151,14 @@ describe('listCart', () => {
 
   it('returns an empty cart rather than an error', async () => {
     const { pm } = await setup()
-    expect((await listCart(makeSession(pm))).ok).toBe(true)
+    expect((await listCart(makeSession(pm), 'en')).ok).toBe(true)
   })
 })
 
 describe('updateCartItem / removeFromCart / clearCart', () => {
   it('saves a parameter prefill', async () => {
     const { pm, nginx, env } = await setup()
-    const added = await addToCart(makeSession(pm), { productId: nginx.id, environmentId: env.id })
+    const added = await addToCart(makeSession(pm), { productId: nginx.id, environmentId: env.id }, 'en')
     if (!added.ok) throw new Error('setup failed')
 
     const result = await updateCartItem(makeSession(pm), added.data.id, { parameters: { HOST: 'web-01' } })
@@ -169,7 +169,7 @@ describe('updateCartItem / removeFromCart / clearCart', () => {
 
   it('will not touch another user\'s item', async () => {
     const { pm, other, nginx, env } = await setup()
-    const added = await addToCart(makeSession(pm), { productId: nginx.id, environmentId: env.id })
+    const added = await addToCart(makeSession(pm), { productId: nginx.id, environmentId: env.id }, 'en')
     if (!added.ok) throw new Error('setup failed')
 
     const updated = await updateCartItem(makeSession(other), added.data.id, { parameters: { HOST: 'stolen' } })
@@ -182,7 +182,7 @@ describe('updateCartItem / removeFromCart / clearCart', () => {
 
   it('removes one item idempotently', async () => {
     const { pm, nginx, env } = await setup()
-    const added = await addToCart(makeSession(pm), { productId: nginx.id, environmentId: env.id })
+    const added = await addToCart(makeSession(pm), { productId: nginx.id, environmentId: env.id }, 'en')
     if (!added.ok) throw new Error('setup failed')
 
     expect((await removeFromCart(makeSession(pm), added.data.id)).ok).toBe(true)
@@ -192,8 +192,8 @@ describe('updateCartItem / removeFromCart / clearCart', () => {
 
   it('clears only the caller\'s cart', async () => {
     const { pm, other, nginx, env } = await setup()
-    await addToCart(makeSession(pm), { productId: nginx.id, environmentId: env.id })
-    await addToCart(makeSession(other), { productId: nginx.id, environmentId: env.id })
+    await addToCart(makeSession(pm), { productId: nginx.id, environmentId: env.id }, 'en')
+    await addToCart(makeSession(other), { productId: nginx.id, environmentId: env.id }, 'en')
 
     await clearCart(makeSession(pm))
     expect(await db.select().from(cartItems)).toHaveLength(1)
@@ -202,13 +202,13 @@ describe('updateCartItem / removeFromCart / clearCart', () => {
   it('counts the caller\'s items', async () => {
     const { pm, nginx, env } = await setup()
     expect(await countCart(makeSession(pm))).toBe(0)
-    await addToCart(makeSession(pm), { productId: nginx.id, environmentId: env.id })
+    await addToCart(makeSession(pm), { productId: nginx.id, environmentId: env.id }, 'en')
     expect(await countCart(makeSession(pm))).toBe(1)
   })
 
   it('prunes items whose product was deleted', async () => {
     const { pm, nginx, env } = await setup()
-    await addToCart(makeSession(pm), { productId: nginx.id, environmentId: env.id })
+    await addToCart(makeSession(pm), { productId: nginx.id, environmentId: env.id }, 'en')
     // The FK cascades on product delete, so this asserts the guard is harmless
     // rather than load-bearing — it exists for a product removed by other means.
     await db.delete(products).where(eq(products.id, nginx.id))
@@ -220,8 +220,8 @@ describe('updateCartItem / removeFromCart / clearCart', () => {
 describe('checkoutCart', () => {
   const stocked = async () => {
     const ctx = await setup()
-    const a = await addToCart(makeSession(ctx.pm), { productId: ctx.nginx.id, environmentId: ctx.env.id })
-    const b = await addToCart(makeSession(ctx.pm), { productId: ctx.postgres.id, environmentId: ctx.env.id })
+    const a = await addToCart(makeSession(ctx.pm), { productId: ctx.nginx.id, environmentId: ctx.env.id }, 'en')
+    const b = await addToCart(makeSession(ctx.pm), { productId: ctx.postgres.id, environmentId: ctx.env.id }, 'en')
     if (!a.ok || !b.ok) throw new Error('setup failed')
     return { ...ctx, first: a.data, second: b.data }
   }
@@ -305,7 +305,7 @@ describe('checkoutCart', () => {
       productId: ctx.nginx.id,
       environmentId: ctx.env.id,
       parameters: { HOST: 'stale-prefill' },
-    })
+    }, 'en')
     if (!added.ok) throw new Error('setup failed')
 
     const result = await checkoutCart(makeSession(ctx.pm), {
@@ -335,7 +335,7 @@ describe('checkoutCart', () => {
 
   it('provisions an admin\'s orders immediately', async () => {
     const ctx = await setup()
-    const a = await addToCart(makeSession(ctx.admin), { productId: ctx.nginx.id, environmentId: ctx.env.id })
+    const a = await addToCart(makeSession(ctx.admin), { productId: ctx.nginx.id, environmentId: ctx.env.id }, 'en')
     if (!a.ok) throw new Error('setup failed')
 
     const result = await checkoutCart(makeSession(ctx.admin), {
@@ -362,7 +362,7 @@ describe('checkoutCart', () => {
 
   it('refuses an item from another user\'s cart', async () => {
     const ctx = await stocked()
-    const theirs = await addToCart(makeSession(ctx.other), { productId: ctx.nginx.id, environmentId: ctx.env.id })
+    const theirs = await addToCart(makeSession(ctx.other), { productId: ctx.nginx.id, environmentId: ctx.env.id }, 'en')
     if (!theirs.ok) throw new Error('setup failed')
 
     const result = await checkoutCart(makeSession(ctx.pm), {
@@ -406,8 +406,8 @@ describe('checkoutCart', () => {
     // Past the validation gate a failure cannot be undone, so the honest answer is
     // to say which items landed and keep the rest for a retry.
     const ctx = await setup()
-    const a = await addToCart(makeSession(ctx.admin), { productId: ctx.nginx.id, environmentId: ctx.env.id })
-    const b = await addToCart(makeSession(ctx.admin), { productId: ctx.postgres.id, environmentId: ctx.env.id })
+    const a = await addToCart(makeSession(ctx.admin), { productId: ctx.nginx.id, environmentId: ctx.env.id }, 'en')
+    const b = await addToCart(makeSession(ctx.admin), { productId: ctx.postgres.id, environmentId: ctx.env.id }, 'en')
     if (!a.ok || !b.ok) throw new Error('setup failed')
 
     mockedWebhooks
@@ -431,7 +431,7 @@ describe('checkoutCart', () => {
 
   it('returns 502 when no order at all could be created', async () => {
     const ctx = await setup()
-    const a = await addToCart(makeSession(ctx.admin), { productId: ctx.nginx.id, environmentId: ctx.env.id })
+    const a = await addToCart(makeSession(ctx.admin), { productId: ctx.nginx.id, environmentId: ctx.env.id }, 'en')
     if (!a.ok) throw new Error('setup failed')
     mockedWebhooks.mockRejectedValue(new Error('CI unreachable'))
 

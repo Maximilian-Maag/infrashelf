@@ -1,7 +1,7 @@
 import { type NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { requireRole, isAuth } from '@/lib/auth/middleware'
-import { toResponse, parseRouteId, invalidId } from '@/lib/http'
+import { toResponse, parseRouteId, invalidId, requestLang } from '@/lib/http'
 import { getProductAdmin, updateProduct, deleteProduct } from '@/lib/services/admin/products'
 
 const UpdateProductSchema = z.object({
@@ -23,7 +23,7 @@ export async function GET(
   const { id } = await params
   const productId = parseRouteId(id)
   if (productId === null) return invalidId('product id')
-  return toResponse(await getProductAdmin(productId))
+  return toResponse(await getProductAdmin(productId, requestLang(req)))
 }
 
 export async function PUT(

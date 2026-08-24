@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from 'next/server'
 import { requireAuth, isAuth } from '@/lib/auth/middleware'
-import { toResponse } from '@/lib/http'
+import { toResponse, requestLang } from '@/lib/http'
 import { listInfrastructure } from '@/lib/services/infrastructure'
 import { parseInfraFilters } from '@/lib/services/infraFilters'
 
@@ -14,5 +14,5 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: filters.message }, { status: filters.status })
   }
 
-  return toResponse(await listInfrastructure(session, filters.data))
+  return toResponse(await listInfrastructure(session, filters.data, requestLang(req)))
 }

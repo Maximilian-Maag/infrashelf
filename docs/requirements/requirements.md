@@ -22,7 +22,7 @@
 | FA-02.1 | Products are organized into categories. Categories are manageable by the Root. | Shipped — `apps/backend/src/lib/db/schema.ts` `categories`; `docs/guides/root.md` §3 |
 | FA-02.2 | Each product has: name, description, image, category, parameter sets, and prices per deployment environment. | Shipped — `schema.ts` `products`/`productEnvironments` |
 | FA-02.3 | Product images are stored in the database (PostgreSQL `bytea`). | Shipped — `schema.ts` products `imageData`/`imageMime`/`imageAlt` |
-| FA-02.4 | Product content (name, description) is multilingual (all 24 EU official languages + Russian). | Shipped — `productTranslations` table; `apps/frontend/src/lib/i18n.ts` |
+| FA-02.4 | Product content (name, description) is multilingual (all 24 EU official languages + Russian). | Shipped — `productTranslations` table; all 25 offered when a product is written or translated (`LANGUAGE_OPTIONS`), where the admin forms used to list four |
 | FA-02.5 | Each product can be available in one or more deployment environments. | Shipped — `productEnvironments` join table |
 | FA-02.6 | Price and cost center configuration can be defined separately per product and environment. | Shipped — same table, per-row `price`/`costCenterMode` |
 
@@ -146,7 +146,7 @@
 |----|-------------|--------------|
 | FA-12.1 | The UI is available in all 24 EU official languages and Russian. | Shipped — `apps/frontend/src/lib/i18n.ts` `SUPPORTED_LANGUAGES` (25 entries) |
 | FA-12.2 | Language selection is based on the user's session preference, with fallback to the Accept-Language header. | Shipped |
-| FA-12.3 | Product content (name, description) is loaded language-specifically from a translation table. | Shipped — `productTranslations` |
+| FA-12.3 | Product content (name, description) is loaded language-specifically from a translation table. | Shipped — one shared lookup, `apps/backend/src/lib/services/productName.ts`, used by every read path that names a product. Until issue #162 only the catalogue honoured the requested language and nine other surfaces hardcoded English |
 
 ---
 

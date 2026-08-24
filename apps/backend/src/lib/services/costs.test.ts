@@ -88,7 +88,7 @@ describe('getCostReport — what counts as spend', () => {
     await spend(ctx, { projectId: ctx.mine.id, productId: ctx.nginx.id, price: '10.00', status: 'completed' })
     await spend(ctx, { projectId: ctx.mine.id, productId: ctx.nginx.id, price: '5.00', status: 'provisioning' })
 
-    const result = await getCostReport(makeSession(ctx.admin))
+    const result = await getCostReport(makeSession(ctx.admin), {}, 'en')
     expect(result.ok && result.data.totalEur).toBe(15)
     expect(result.ok && result.data.orderCount).toBe(2)
   })
@@ -99,7 +99,7 @@ describe('getCostReport — what counts as spend', () => {
     const ctx = await setup()
     await spend(ctx, { projectId: ctx.mine.id, productId: ctx.nginx.id, price: '99.00', status })
 
-    const result = await getCostReport(makeSession(ctx.admin))
+    const result = await getCostReport(makeSession(ctx.admin), {}, 'en')
     expect(result.ok && result.data.totalEur).toBe(0)
     expect(result.ok && result.data.orderCount).toBe(0)
   })
@@ -110,7 +110,7 @@ describe('getCostReport — what counts as spend', () => {
     await createInfraElement(order.id, ctx.mine.id, ctx.env.id, ctx.nginx.id)
     await createInfraElement(order.id, ctx.mine.id, ctx.env.id, ctx.nginx.id)
 
-    const result = await getCostReport(makeSession(ctx.admin))
+    const result = await getCostReport(makeSession(ctx.admin), {}, 'en')
     expect(result.ok && result.data.totalEur).toBe(10)
     expect(result.ok && result.data.orderCount).toBe(1)
   })
@@ -127,7 +127,7 @@ describe('getCostReport — which price', () => {
       .set({ price: '999.00' })
       .where(eq(productEnvironments.productId, ctx.nginx.id))
 
-    const result = await getCostReport(makeSession(ctx.admin))
+    const result = await getCostReport(makeSession(ctx.admin), {}, 'en')
     expect(result.ok && result.data.totalEur).toBe(10)
     expect(result.ok && result.data.estimatedOrders).toBe(0)
   })
@@ -136,7 +136,7 @@ describe('getCostReport — which price', () => {
     const ctx = await setup()
     await spend(ctx, { projectId: ctx.mine.id, productId: ctx.nginx.id, price: 'ignored', noSnapshot: true })
 
-    const result = await getCostReport(makeSession(ctx.admin))
+    const result = await getCostReport(makeSession(ctx.admin), {}, 'en')
     expect(result.ok).toBe(true)
     if (!result.ok) return
     expect(result.data.totalEur).toBe(10)
@@ -150,7 +150,7 @@ describe('getCostReport — which price', () => {
     await spend(ctx, { projectId: ctx.mine.id, productId: ctx.nginx.id, price: '10.00' })
     await db.delete(productEnvironments).where(eq(productEnvironments.productId, ctx.nginx.id))
 
-    const result = await getCostReport(makeSession(ctx.admin))
+    const result = await getCostReport(makeSession(ctx.admin), {}, 'en')
     expect(result.ok && result.data.totalEur).toBe(10)
     expect(result.ok && result.data.orderCount).toBe(1)
   })
@@ -159,7 +159,7 @@ describe('getCostReport — which price', () => {
     const ctx = await setup()
     await spend(ctx, { projectId: ctx.mine.id, productId: ctx.nginx.id, price: 'twelve' })
 
-    const result = await getCostReport(makeSession(ctx.admin))
+    const result = await getCostReport(makeSession(ctx.admin), {}, 'en')
     // NaN would poison every total it touched.
     expect(result.ok && result.data.totalEur).toBe(0)
     expect(result.ok && result.data.orderCount).toBe(1)
@@ -172,7 +172,7 @@ describe('getCostReport — currency conversion', () => {
     await db.insert(exchangeRates).values({ currencyCode: 'CHF', rate: '2.0' })
     await spend(ctx, { projectId: ctx.mine.id, productId: ctx.nginx.id, price: '20.00', currency: 'CHF' })
 
-    const result = await getCostReport(makeSession(ctx.admin))
+    const result = await getCostReport(makeSession(ctx.admin), {}, 'en')
     // Rates are relative to EUR, so 20 CHF at 2.0 is 10 EUR.
     expect(result.ok && result.data.totalEur).toBe(10)
   })
@@ -182,7 +182,7 @@ describe('getCostReport — currency conversion', () => {
     const ctx = await setup()
     await spend(ctx, { projectId: ctx.mine.id, productId: ctx.nginx.id, price: '100.00', currency: 'JPY' })
 
-    const result = await getCostReport(makeSession(ctx.admin))
+    const result = await getCostReport(makeSession(ctx.admin), {}, 'en')
     expect(result.ok).toBe(true)
     if (!result.ok) return
     expect(result.data.totalEur).toBe(0)
@@ -194,7 +194,7 @@ describe('getCostReport — currency conversion', () => {
     await spend(ctx, { projectId: ctx.mine.id, productId: ctx.nginx.id, price: '100.00', currency: 'JPY' })
     await spend(ctx, { projectId: ctx.mine.id, productId: ctx.postgres.id, price: '50.00', currency: 'JPY' })
 
-    const result = await getCostReport(makeSession(ctx.admin))
+    const result = await getCostReport(makeSession(ctx.admin), {}, 'en')
     expect(result.ok && result.data.unconverted).toEqual([{ currency: 'JPY', amount: 150 }])
   })
 
@@ -203,7 +203,7 @@ describe('getCostReport — currency conversion', () => {
     await db.insert(exchangeRates).values({ currencyCode: 'CHF', rate: '3.0' })
     await spend(ctx, { projectId: ctx.mine.id, productId: ctx.nginx.id, price: '10.00', currency: 'CHF' })
 
-    const result = await getCostReport(makeSession(ctx.admin))
+    const result = await getCostReport(makeSession(ctx.admin), {}, 'en')
     expect(result.ok && result.data.totalEur).toBe(3.33)
   })
 })
@@ -215,7 +215,7 @@ describe('getCostReport — breakdowns', () => {
     await spend(ctx, { projectId: ctx.mine.id, productId: ctx.nginx.id, price: '10.00', costCenterId: cc.id })
     await spend(ctx, { projectId: ctx.theirs.id, productId: ctx.postgres.id, price: '30.00' })
 
-    const result = await getCostReport(makeSession(ctx.admin))
+    const result = await getCostReport(makeSession(ctx.admin), {}, 'en')
     expect(result.ok).toBe(true)
     if (!result.ok) return
 
@@ -244,7 +244,7 @@ describe('getCostReport — breakdowns', () => {
     await db.update(projects).set({ costCenterId: cc.id }).where(eq(projects.id, ctx.mine.id))
     await spend(ctx, { projectId: ctx.mine.id, productId: ctx.nginx.id, price: '40.00' })
 
-    const result = await getCostReport(makeSession(ctx.admin))
+    const result = await getCostReport(makeSession(ctx.admin), {}, 'en')
     expect(result.ok && result.data.byCostCenter).toEqual([
       { id: cc.id, label: 'CC-9 — Owning Team', totalEur: 40, orderCount: 1 },
     ])
@@ -259,7 +259,7 @@ describe('getCostReport — breakdowns', () => {
     await db.update(projects).set({ costCenterId: projectCc.id }).where(eq(projects.id, ctx.mine.id))
     await spend(ctx, { projectId: ctx.mine.id, productId: ctx.nginx.id, price: '15.00', costCenterId: orderCc.id })
 
-    const result = await getCostReport(makeSession(ctx.admin))
+    const result = await getCostReport(makeSession(ctx.admin), {}, 'en')
     expect(result.ok && result.data.byCostCenter.map((b) => b.label)).toEqual(['CC-O — Chosen'])
   })
 
@@ -267,7 +267,7 @@ describe('getCostReport — breakdowns', () => {
     const ctx = await setup()
     await spend(ctx, { projectId: ctx.mine.id, productId: ctx.nginx.id, price: '5.00' })
 
-    const result = await getCostReport(makeSession(ctx.admin))
+    const result = await getCostReport(makeSession(ctx.admin), {}, 'en')
     expect(result.ok && result.data.byCostCenter).toEqual([
       { id: null, label: 'No cost centre', totalEur: 5, orderCount: 1 },
     ])
@@ -278,7 +278,7 @@ describe('getCostReport — breakdowns', () => {
     await spend(ctx, { projectId: ctx.mine.id, productId: ctx.nginx.id, price: '10.00' })
     await spend(ctx, { projectId: ctx.mine.id, productId: ctx.nginx.id, price: '10.00' })
 
-    const result = await getCostReport(makeSession(ctx.admin))
+    const result = await getCostReport(makeSession(ctx.admin), {}, 'en')
     expect(result.ok && result.data.byProject[0]).toMatchObject({ orderCount: 2, totalEur: 20 })
   })
 })
@@ -289,7 +289,7 @@ describe('getCostReport — scoping', () => {
     await spend(ctx, { projectId: ctx.mine.id, productId: ctx.nginx.id, price: '10.00' })
     await spend(ctx, { projectId: ctx.theirs.id, productId: ctx.nginx.id, price: '20.00' })
 
-    const result = await getCostReport(makeSession(ctx.admin))
+    const result = await getCostReport(makeSession(ctx.admin), {}, 'en')
     expect(result.ok && result.data.totalEur).toBe(30)
     expect(result.ok && result.data.global).toBe(true)
   })
@@ -301,7 +301,7 @@ describe('getCostReport — scoping', () => {
     await spend(ctx, { projectId: ctx.mine.id, productId: ctx.nginx.id, price: '10.00' })
     await spend(ctx, { projectId: ctx.theirs.id, productId: ctx.nginx.id, price: '20.00' })
 
-    const result = await getCostReport(makeSession(ctx.pm))
+    const result = await getCostReport(makeSession(ctx.pm), {}, 'en')
     expect(result.ok).toBe(true)
     if (!result.ok) return
     expect(result.data.totalEur).toBe(10)
@@ -314,7 +314,7 @@ describe('getCostReport — scoping', () => {
     await spend(ctx, { projectId: ctx.mine.id, productId: ctx.nginx.id, price: '10.00' })
     await spend(ctx, { projectId: ctx.theirs.id, productId: ctx.nginx.id, price: '20.00' })
 
-    const result = await getCostReport(makeSession(ctx.admin), { projectId: ctx.theirs.id })
+    const result = await getCostReport(makeSession(ctx.admin), { projectId: ctx.theirs.id }, 'en')
     expect(result.ok && result.data.totalEur).toBe(20)
   })
 })
@@ -328,19 +328,19 @@ describe('getCostReport — time range', () => {
     const result = await getCostReport(makeSession(ctx.admin), {
       from: new Date('2026-06-01T00:00:00.000Z'),
       to: new Date('2026-06-30T23:59:59.999Z'),
-    })
+    }, 'en')
     expect(result.ok && result.data.totalEur).toBe(20)
 
     const onBoundary = await getCostReport(makeSession(ctx.admin), {
       from: new Date('2026-01-15T00:00:00.000Z'),
       to: new Date('2026-01-15T00:00:00.000Z'),
-    })
+    }, 'en')
     expect(onBoundary.ok && onBoundary.data.totalEur).toBe(10)
   })
 
   it('returns a zero report rather than an error when nothing matches', async () => {
     const ctx = await setup()
-    const result = await getCostReport(makeSession(ctx.admin), { from: new Date('2099-01-01T00:00:00.000Z') })
+    const result = await getCostReport(makeSession(ctx.admin), { from: new Date('2099-01-01T00:00:00.000Z') }, 'en')
     expect(result.ok).toBe(true)
     if (result.ok) {
       expect(result.data).toMatchObject({ totalEur: 0, orderCount: 0, byProject: [], unconverted: [] })
@@ -359,7 +359,7 @@ describe('getCostReport — monthly series (issue #106)', () => {
     await spend(ctx, { projectId: ctx.mine.id, productId: ctx.nginx.id, price: '5.00', createdAt: new Date('2026-06-28T23:00:00.000Z') })
     await spend(ctx, { projectId: ctx.mine.id, productId: ctx.postgres.id, price: '20.00', createdAt: new Date('2026-08-01T00:00:00.000Z') })
 
-    const result = await getCostReport(makeSession(ctx.admin), {}, NOW)
+    const result = await getCostReport(makeSession(ctx.admin), {}, 'en', NOW)
     expect(result.ok).toBe(true)
     if (!result.ok) return
     expect(result.data.series.map((p) => [p.period, p.totalEur])).toEqual([
@@ -377,7 +377,7 @@ describe('getCostReport — monthly series (issue #106)', () => {
     await spend(ctx, { projectId: ctx.mine.id, productId: ctx.nginx.id, price: '10.00', createdAt: new Date('2025-11-10T00:00:00.000Z') })
     await spend(ctx, { projectId: ctx.mine.id, productId: ctx.nginx.id, price: '10.00', createdAt: new Date('2026-02-10T00:00:00.000Z') })
 
-    const result = await getCostReport(makeSession(ctx.admin), {}, NOW)
+    const result = await getCostReport(makeSession(ctx.admin), {}, 'en', NOW)
     // Crosses the year boundary without inventing a month 13.
     expect(result.ok && result.data.series.map((p) => p.period)).toEqual([
       '2025-11', '2025-12', '2026-01', '2026-02',
@@ -391,7 +391,7 @@ describe('getCostReport — monthly series (issue #106)', () => {
     const ctx = await setup()
     await spend(ctx, { projectId: ctx.mine.id, productId: ctx.nginx.id, price: '10.00', createdAt: new Date('2026-08-05T00:00:00.000Z') })
 
-    const result = await getCostReport(makeSession(ctx.admin), {}, NOW)
+    const result = await getCostReport(makeSession(ctx.admin), {}, 'en', NOW)
     expect(result.ok && result.data.series).toHaveLength(1)
     expect(result.ok && result.data.series[0].period).toBe('2026-08')
   })
@@ -402,7 +402,7 @@ describe('getCostReport — monthly series (issue #106)', () => {
     await spend(ctx, { projectId: ctx.mine.id, productId: ctx.postgres.id, price: '3.33', createdAt: new Date('2026-07-02T00:00:00.000Z') })
     await spend(ctx, { projectId: ctx.theirs.id, productId: ctx.nginx.id, price: '7.10', createdAt: new Date('2026-08-02T00:00:00.000Z') })
 
-    const result = await getCostReport(makeSession(ctx.admin), {}, NOW)
+    const result = await getCostReport(makeSession(ctx.admin), {}, 'en', NOW)
     if (!result.ok) throw new Error('expected a report')
     const summed = result.data.series.reduce((sum, p) => sum + p.totalEur, 0)
     expect(Math.round(summed * 100) / 100).toBe(result.data.totalEur)
@@ -413,7 +413,7 @@ describe('getCostReport — monthly series (issue #106)', () => {
     await spend(ctx, { projectId: ctx.mine.id, productId: ctx.nginx.id, price: '10.00', createdAt: new Date('2026-07-02T00:00:00.000Z') })
     await spend(ctx, { projectId: ctx.mine.id, productId: ctx.nginx.id, price: '4.00', createdAt: new Date('2026-08-02T00:00:00.000Z') })
 
-    const result = await getCostReport(makeSession(ctx.admin), {}, NOW)
+    const result = await getCostReport(makeSession(ctx.admin), {}, 'en', NOW)
     expect(result.ok && result.data.series.map((p) => p.partial)).toEqual([false, true])
   })
 
@@ -424,7 +424,7 @@ describe('getCostReport — monthly series (issue #106)', () => {
     await spend(ctx, { projectId: ctx.mine.id, productId: ctx.nginx.id, price: '10.00', createdAt: new Date('2026-06-02T00:00:00.000Z') })
     await spend(ctx, { projectId: ctx.mine.id, productId: ctx.nginx.id, price: '1.00', createdAt: new Date('2026-08-02T00:00:00.000Z') })
 
-    const result = await getCostReport(makeSession(ctx.admin), {}, NOW)
+    const result = await getCostReport(makeSession(ctx.admin), {}, 'en', NOW)
     expect(result.ok && result.data.series.find((p) => p.period === '2026-07')?.partial).toBe(false)
     expect(result.ok && result.data.series.find((p) => p.period === '2026-08')?.partial).toBe(true)
   })
@@ -434,7 +434,7 @@ describe('getCostReport — monthly series (issue #106)', () => {
     await spend(ctx, { projectId: ctx.mine.id, productId: ctx.nginx.id, price: 'ignored', noSnapshot: true, createdAt: new Date('2026-07-02T00:00:00.000Z') })
     await spend(ctx, { projectId: ctx.mine.id, productId: ctx.nginx.id, price: '4.00', createdAt: new Date('2026-08-02T00:00:00.000Z') })
 
-    const result = await getCostReport(makeSession(ctx.admin), {}, NOW)
+    const result = await getCostReport(makeSession(ctx.admin), {}, 'en', NOW)
     if (!result.ok) throw new Error('expected a report')
     expect(result.data.series.map((p) => [p.period, p.estimatedOrders])).toEqual([
       ['2026-07', 1],
@@ -450,7 +450,7 @@ describe('getCostReport — monthly series (issue #106)', () => {
     const ctx = await setup()
     await spend(ctx, { projectId: ctx.mine.id, productId: ctx.nginx.id, price: '100.00', currency: 'JPY', createdAt: new Date('2026-08-02T00:00:00.000Z') })
 
-    const result = await getCostReport(makeSession(ctx.admin), {}, NOW)
+    const result = await getCostReport(makeSession(ctx.admin), {}, 'en', NOW)
     if (!result.ok) throw new Error('expected a report')
     expect(result.data.series).toEqual([
       { period: '2026-08', totalEur: 0, orderCount: 1, estimatedOrders: 0, partial: true },
@@ -464,7 +464,7 @@ describe('getCostReport — monthly series (issue #106)', () => {
     await createInfraElement(order.id, ctx.mine.id, ctx.env.id, ctx.nginx.id)
     await createInfraElement(order.id, ctx.mine.id, ctx.env.id, ctx.nginx.id)
 
-    const result = await getCostReport(makeSession(ctx.admin), {}, NOW)
+    const result = await getCostReport(makeSession(ctx.admin), {}, 'en', NOW)
     expect(result.ok && result.data.series).toEqual([
       { period: '2026-08', totalEur: 10, orderCount: 1, estimatedOrders: 0, partial: true },
     ])
@@ -475,11 +475,7 @@ describe('getCostReport — monthly series (issue #106)', () => {
     await spend(ctx, { projectId: ctx.mine.id, productId: ctx.nginx.id, price: '10.00', createdAt: new Date('2026-01-15T00:00:00.000Z') })
     await spend(ctx, { projectId: ctx.mine.id, productId: ctx.nginx.id, price: '20.00', createdAt: new Date('2026-08-15T00:00:00.000Z') })
 
-    const result = await getCostReport(
-      makeSession(ctx.admin),
-      { from: new Date('2026-08-01T00:00:00.000Z') },
-      NOW,
-    )
+    const result = await getCostReport(makeSession(ctx.admin), { from: new Date('2026-08-01T00:00:00.000Z') }, 'en', NOW)
     expect(result.ok && result.data.series.map((p) => p.period)).toEqual(['2026-08'])
   })
 
@@ -488,13 +484,13 @@ describe('getCostReport — monthly series (issue #106)', () => {
     await spend(ctx, { projectId: ctx.mine.id, productId: ctx.nginx.id, price: '10.00', createdAt: new Date('2026-08-02T00:00:00.000Z') })
     await spend(ctx, { projectId: ctx.theirs.id, productId: ctx.nginx.id, price: '99.00', createdAt: new Date('2026-08-02T00:00:00.000Z') })
 
-    const result = await getCostReport(makeSession(ctx.pm), {}, NOW)
+    const result = await getCostReport(makeSession(ctx.pm), {}, 'en', NOW)
     expect(result.ok && result.data.series[0].totalEur).toBe(10)
   })
 
   it('returns an empty series rather than a fabricated month when nothing matches', async () => {
     const ctx = await setup()
-    const result = await getCostReport(makeSession(ctx.admin), {}, NOW)
+    const result = await getCostReport(makeSession(ctx.admin), {}, 'en', NOW)
     expect(result.ok && result.data.series).toEqual([])
     expect(result.ok && result.data.comparison).toBeNull()
   })
@@ -508,7 +504,7 @@ describe('getCostReport — period comparison (issue #106)', () => {
     await spend(ctx, { projectId: ctx.mine.id, productId: ctx.nginx.id, price: '40.00', createdAt: new Date('2026-07-02T00:00:00.000Z') })
     await spend(ctx, { projectId: ctx.mine.id, productId: ctx.nginx.id, price: '50.00', createdAt: new Date('2026-08-02T00:00:00.000Z') })
 
-    const result = await getCostReport(makeSession(ctx.admin), {}, NOW)
+    const result = await getCostReport(makeSession(ctx.admin), {}, 'en', NOW)
     if (!result.ok) throw new Error('expected a report')
     expect(result.data.comparison).toMatchObject({
       previous: { period: '2026-07', totalEur: 40 },
@@ -523,7 +519,7 @@ describe('getCostReport — period comparison (issue #106)', () => {
     await spend(ctx, { projectId: ctx.mine.id, productId: ctx.nginx.id, price: '40.00', createdAt: new Date('2026-07-02T00:00:00.000Z') })
     await spend(ctx, { projectId: ctx.mine.id, productId: ctx.nginx.id, price: '10.00', createdAt: new Date('2026-08-02T00:00:00.000Z') })
 
-    const result = await getCostReport(makeSession(ctx.admin), {}, NOW)
+    const result = await getCostReport(makeSession(ctx.admin), {}, 'en', NOW)
     expect(result.ok && result.data.comparison?.changeEur).toBe(-30)
     expect(result.ok && result.data.comparison?.changePct).toBe(-75)
   })
@@ -535,7 +531,7 @@ describe('getCostReport — period comparison (issue #106)', () => {
     await spend(ctx, { projectId: ctx.mine.id, productId: ctx.nginx.id, price: '10.00', createdAt: new Date('2026-06-02T00:00:00.000Z') })
     await spend(ctx, { projectId: ctx.mine.id, productId: ctx.nginx.id, price: '30.00', createdAt: new Date('2026-08-02T00:00:00.000Z') })
 
-    const result = await getCostReport(makeSession(ctx.admin), {}, NOW)
+    const result = await getCostReport(makeSession(ctx.admin), {}, 'en', NOW)
     expect(result.ok && result.data.comparison?.previous.period).toBe('2026-07')
     expect(result.ok && result.data.comparison?.changePct).toBeNull()
     expect(result.ok && result.data.comparison?.changeEur).toBe(30)
@@ -548,11 +544,7 @@ describe('getCostReport — period comparison (issue #106)', () => {
     await spend(ctx, { projectId: ctx.mine.id, productId: ctx.nginx.id, price: '40.00', createdAt: new Date('2026-07-02T00:00:00.000Z') })
     await spend(ctx, { projectId: ctx.mine.id, productId: ctx.nginx.id, price: '50.00', createdAt: new Date('2026-08-02T00:00:00.000Z') })
 
-    const result = await getCostReport(
-      makeSession(ctx.admin),
-      { from: new Date('2026-08-01T00:00:00.000Z') },
-      NOW,
-    )
+    const result = await getCostReport(makeSession(ctx.admin), { from: new Date('2026-08-01T00:00:00.000Z') }, 'en', NOW)
     expect(result.ok && result.data.series).toHaveLength(1)
     expect(result.ok && result.data.comparison).toBeNull()
   })
@@ -562,7 +554,7 @@ describe('getCostReport — period comparison (issue #106)', () => {
     await spend(ctx, { projectId: ctx.mine.id, productId: ctx.nginx.id, price: '40.00', createdAt: new Date('2026-07-02T00:00:00.000Z') })
     await spend(ctx, { projectId: ctx.mine.id, productId: ctx.nginx.id, price: '5.00', createdAt: new Date('2026-08-02T00:00:00.000Z') })
 
-    const result = await getCostReport(makeSession(ctx.admin), {}, NOW)
+    const result = await getCostReport(makeSession(ctx.admin), {}, 'en', NOW)
     expect(result.ok && result.data.comparison?.current.partial).toBe(true)
     expect(result.ok && result.data.comparison?.previous.partial).toBe(false)
   })
@@ -574,7 +566,7 @@ describe('getCostRows', () => {
     await spend(ctx, { projectId: ctx.mine.id, productId: ctx.nginx.id, price: '10.00', createdAt: new Date('2026-01-01T00:00:00.000Z') })
     await spend(ctx, { projectId: ctx.mine.id, productId: ctx.postgres.id, price: '20.00', createdAt: new Date('2026-06-01T00:00:00.000Z') })
 
-    const result = await getCostRows(makeSession(ctx.admin))
+    const result = await getCostRows(makeSession(ctx.admin), {}, 'en')
     expect(result.ok).toBe(true)
     if (!result.ok) return
     expect(result.data.map((r) => r.price)).toEqual(['20.00', '10.00'])
@@ -592,7 +584,7 @@ describe('getCostRows', () => {
     const ctx = await setup()
     await spend(ctx, { projectId: ctx.mine.id, productId: ctx.nginx.id, price: 'x', noSnapshot: true })
 
-    const result = await getCostRows(makeSession(ctx.admin))
+    const result = await getCostRows(makeSession(ctx.admin), {}, 'en')
     expect(result.ok && result.data[0].estimated).toBe(true)
   })
 
@@ -601,7 +593,7 @@ describe('getCostRows', () => {
     const ctx = await setup()
     await spend(ctx, { projectId: ctx.mine.id, productId: ctx.nginx.id, price: '100.00', currency: 'JPY' })
 
-    const result = await getCostRows(makeSession(ctx.admin))
+    const result = await getCostRows(makeSession(ctx.admin), {}, 'en')
     expect(result.ok && result.data[0].priceEur).toBeNull()
   })
 
@@ -610,7 +602,7 @@ describe('getCostRows', () => {
     await spend(ctx, { projectId: ctx.mine.id, productId: ctx.nginx.id, price: '10.00' })
     await spend(ctx, { projectId: ctx.theirs.id, productId: ctx.nginx.id, price: '20.00' })
 
-    const result = await getCostRows(makeSession(ctx.pm))
+    const result = await getCostRows(makeSession(ctx.pm), {}, 'en')
     expect(result.ok && result.data).toHaveLength(1)
     expect(result.ok && result.data[0].projectName).toBe('Webshop')
   })

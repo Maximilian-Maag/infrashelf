@@ -66,7 +66,7 @@ describe('listOrders', () => {
     await seedOrder(project.id, product.id, env.id, pm.id)
     await seedOrder(otherProject.id, product.id, env.id, otherPm.id)
 
-    const result = await listOrders(makeSession(admin))
+    const result = await listOrders(makeSession(admin), 'en')
     expect(result.ok).toBe(true)
     if (result.ok) {
       expect(result.data.length).toBe(2)
@@ -81,7 +81,7 @@ describe('listOrders', () => {
     await seedOrder(project.id, product.id, env.id, pm.id)
     await seedOrder(otherProject.id, product.id, env.id, otherPm.id)
 
-    const result = await listOrders(makeSession(pm))
+    const result = await listOrders(makeSession(pm), 'en')
     expect(result.ok).toBe(true)
     if (result.ok) {
       expect(result.data.length).toBe(1)
@@ -93,7 +93,7 @@ describe('listOrders', () => {
     const { pm, product, env, project } = await buildBase()
     await seedOrder(project.id, product.id, env.id, pm.id)
 
-    const result = await listOrders(makeSession(pm))
+    const result = await listOrders(makeSession(pm), 'en')
     expect(result.ok).toBe(true)
     if (result.ok) {
       const row = result.data[0]
@@ -109,7 +109,7 @@ describe('getOrderById', () => {
     const { admin, pm, product, env, project } = await buildBase()
     const order = await seedOrder(project.id, product.id, env.id, pm.id)
 
-    const result = await getOrderById(makeSession(admin), order.id)
+    const result = await getOrderById(makeSession(admin), order.id, 'en')
     expect(result.ok).toBe(true)
     if (result.ok) expect(result.data.id).toBe(order.id)
   })
@@ -118,7 +118,7 @@ describe('getOrderById', () => {
     const { pm, product, env, project } = await buildBase()
     const order = await seedOrder(project.id, product.id, env.id, pm.id)
 
-    const result = await getOrderById(makeSession(pm), order.id)
+    const result = await getOrderById(makeSession(pm), order.id, 'en')
     expect(result.ok).toBe(true)
     if (result.ok) expect(result.data.id).toBe(order.id)
   })
@@ -128,14 +128,14 @@ describe('getOrderById', () => {
     const otherPm = await createUser({ role: 'project_manager', email: 'other@test.dev' })
     const order = await seedOrder(project.id, product.id, env.id, pm.id)
 
-    const result = await getOrderById(makeSession(otherPm), order.id)
+    const result = await getOrderById(makeSession(otherPm), order.id, 'en')
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.status).toBe(403)
   })
 
   it('returns 404 for a non-existent order', async () => {
     const { admin } = await buildBase()
-    const result = await getOrderById(makeSession(admin), 999_999)
+    const result = await getOrderById(makeSession(admin), 999_999, 'en')
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.status).toBe(404)
   })
@@ -931,10 +931,10 @@ describe('createOrder — product snapshot', () => {
     const created = await createOrder(makeSession(ctx.admin), ctx.base)
     if (!created.ok) throw new Error('setup failed')
 
-    const detail = await getOrderById(makeSession(ctx.admin), created.data.id)
+    const detail = await getOrderById(makeSession(ctx.admin), created.data.id, 'en')
     expect(detail.ok && detail.data.productSnapshot?.price).toBe('10.00')
 
-    const listed = await listOrders(makeSession(ctx.admin))
+    const listed = await listOrders(makeSession(ctx.admin), 'en')
     expect(listed.ok && listed.data[0].productSnapshot?.price).toBe('10.00')
   })
 })

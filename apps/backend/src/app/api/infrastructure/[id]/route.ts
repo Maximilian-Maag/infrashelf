@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from 'next/server'
 import { requireAuth, isAuth } from '@/lib/auth/middleware'
-import { toResponse, parseRouteId } from '@/lib/http'
+import { toResponse, parseRouteId, requestLang } from '@/lib/http'
 import { getInfrastructureElement } from '@/lib/services/infrastructure'
 
 /**
@@ -23,5 +23,5 @@ export async function GET(
     return NextResponse.json({ error: 'Invalid infrastructure id' }, { status: 400 })
   }
 
-  return toResponse(await getInfrastructureElement(session, elementId))
+  return toResponse(await getInfrastructureElement(session, elementId, requestLang(req)))
 }

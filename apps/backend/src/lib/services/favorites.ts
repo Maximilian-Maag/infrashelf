@@ -3,6 +3,7 @@ import { db } from '@/lib/db/client'
 import { productFavorites, products } from '@/lib/db/schema'
 import { and, eq, sql } from 'drizzle-orm'
 import { ok, err, type Result } from '@/lib/services/result'
+import { productNameSql, productDescriptionSql } from '@/lib/services/productName'
 
 export interface FavoriteProduct {
   productId: number
@@ -33,18 +34,8 @@ export const listFavorites = async (
       categoryId: products.categoryId,
       imageAlt: products.imageAlt,
       createdAt: productFavorites.createdAt,
-      name: sql<string>`COALESCE(
-        (SELECT name FROM product_translations WHERE product_id = ${products.id} AND language_code = ${lang}),
-        (SELECT name FROM product_translations WHERE product_id = ${products.id} AND language_code = 'en'),
-        (SELECT name FROM product_translations WHERE product_id = ${products.id} AND language_code = 'de'),
-        (SELECT name FROM product_translations WHERE product_id = ${products.id} LIMIT 1)
-      )`,
-      description: sql<string>`COALESCE(
-        (SELECT description FROM product_translations WHERE product_id = ${products.id} AND language_code = ${lang}),
-        (SELECT description FROM product_translations WHERE product_id = ${products.id} AND language_code = 'en'),
-        (SELECT description FROM product_translations WHERE product_id = ${products.id} AND language_code = 'de'),
-        ''
-      )`,
+      name: productNameSql(products.id, lang),
+      description: productDescriptionSql(products.id, lang),
     })
     .from(productFavorites)
     // Inner join, not left: a favourite whose product is gone has nothing to
