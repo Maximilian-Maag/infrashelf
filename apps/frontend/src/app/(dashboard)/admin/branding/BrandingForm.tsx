@@ -63,8 +63,8 @@ export function BrandingForm({ initial, token }: Props) {
 
       toast(t('brandingSavedToast', lang))
       router.refresh()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : t('failedToSaveBranding', lang))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('failedToSaveBranding', lang))
     } finally {
       setSaving(false)
     }

@@ -1,11 +1,14 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest'
 import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import { AuditTable } from './AuditTable'
 
 vi.mock('@/lib/api', () => ({ get: vi.fn() }))
 import { get } from '@/lib/api'
 
-const mockGet = get as unknown as ReturnType<typeof vi.fn>
+// Typed with the signature it actually has. Bare `ReturnType<typeof vi.fn>`
+// is a void-returning mock, so every `mockImplementation` below was handing a
+// promise to something declared not to want one — and the component awaits it.
+const mockGet = get as unknown as Mock<(path: string, token?: string) => Promise<unknown>>
 
 describe('AuditTable', () => {
   beforeEach(() => {

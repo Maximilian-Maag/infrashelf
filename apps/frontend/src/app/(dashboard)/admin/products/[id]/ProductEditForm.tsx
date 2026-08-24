@@ -149,8 +149,8 @@ export function ProductEditForm({ product, categories, environments, translation
       setHistoryKey((k) => k + 1)
       setSuccess(true)
       router.refresh()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to save.')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save.')
     } finally {
       setSaving(false)
     }
@@ -182,7 +182,7 @@ export function ProductEditForm({ product, categories, environments, translation
         .catch(() => null)
       if (updated) setTranslations(updated)
       else {
-        const t: ProductTranslation = {
+        const savedTranslation: ProductTranslation = {
           productId: product.id,
           languageCode: translationLang,
           name: translationName.trim(),
@@ -190,13 +190,13 @@ export function ProductEditForm({ product, categories, environments, translation
         }
         setTranslations((prev) => {
           const idx = prev.findIndex((x) => x.languageCode === translationLang)
-          if (idx >= 0) { const next = [...prev]; next[idx] = t; return next }
-          return [...prev, t]
+          if (idx >= 0) { const next = [...prev]; next[idx] = savedTranslation; return next }
+          return [...prev, savedTranslation]
         })
       }
       setTransModal(false)
-    } catch (e) {
-      setTransError(e instanceof Error ? e.message : 'Failed to save translation.')
+    } catch (err) {
+      setTransError(err instanceof Error ? err.message : 'Failed to save translation.')
     } finally {
       setTransSaving(false)
     }
@@ -231,8 +231,8 @@ export function ProductEditForm({ product, categories, environments, translation
       setWebhooks((prev) => [...prev, created])
       setWebhookModal(false)
       setWhName(''); setWhUrl(''); setWhToken(''); setWhOrder('0')
-    } catch (e) {
-      setWhError(e instanceof Error ? e.message : 'Failed to create webhook.')
+    } catch (err) {
+      setWhError(err instanceof Error ? err.message : 'Failed to create webhook.')
     } finally {
       setWhSaving(false)
     }
@@ -248,20 +248,26 @@ export function ProductEditForm({ product, categories, environments, translation
     }
   }
 
+  // The failure used to be dropped, which is indistinguishable from "this product
+  // has no stacks" — and the empty state invites you to add one that already
+  // exists. #136.
+  const [stackLoadError, setStackLoadError] = useState<string | null>(null)
   useEffect(() => {
     get<PipelineStack[]>(`/api/admin/products/${product.id}/pipeline-stacks`, token)
-      .then(setStacks)
-      .catch(() => {})
+      .then((loaded) => { setStacks(loaded); setStackLoadError(null) })
+      .catch((err: unknown) => setStackLoadError(err instanceof Error ? err.message : 'Failed to load pipeline stacks.'))
   }, [product.id, token])
 
-  // Order Callbacks, same shape as the pipeline stacks fetch above. Without
-  // this, `webhooks` was only ever written by add/delete — reloading the page
-  // made every existing callback invisible and its Delete button unreachable
-  // (#145).
+  // Order Callbacks, same shape as the pipeline stacks fetch above. Without this,
+  // `webhooks` was only ever written by add/delete — reloading the page made every
+  // existing callback invisible and its Delete button unreachable (#145). Dropping
+  // the failure reintroduced exactly that symptom whenever the GET failed, which is
+  // why it is reported now.
+  const [whLoadError, setWhLoadError] = useState<string | null>(null)
   useEffect(() => {
     get<ProductWebhook[]>(`/api/admin/products/${product.id}/webhooks`, token)
-      .then(setWebhooks)
-      .catch(() => {})
+      .then((loaded) => { setWebhooks(loaded); setWhLoadError(null) })
+      .catch((err: unknown) => setWhLoadError(err instanceof Error ? err.message : 'Failed to load order callbacks.'))
   }, [product.id, token])
 
   function openStackModal() {
@@ -367,8 +373,8 @@ export function ProductEditForm({ product, categories, environments, translation
         setStacks((prev) => [...prev, created])
       }
       setStackModal(false)
-    } catch (e) {
-      setPsError(e instanceof Error ? e.message : 'Failed to save pipeline stack.')
+    } catch (err) {
+      setPsError(err instanceof Error ? err.message : 'Failed to save pipeline stack.')
     } finally {
       setPsSaving(false)
     }
@@ -456,8 +462,8 @@ export function ProductEditForm({ product, categories, environments, translation
         setProductParams((prev) => [...prev, created])
       }
       setParamModal(false)
-    } catch (e) {
-      setParamError(e instanceof Error ? e.message : 'Failed to save parameter.')
+    } catch (err) {
+      setParamError(err instanceof Error ? err.message : 'Failed to save parameter.')
     } finally {
       setParamSaving(false)
     }
@@ -540,11 +546,11 @@ export function ProductEditForm({ product, categories, environments, translation
           <p className="text-sm text-slate-600">No translations yet.</p>
         ) : (
           <div className="space-y-2">
-            {translations.map((t) => (
-              <div key={t.languageCode} className="rounded-lg border border-slate-100 p-3">
-                <span className="text-xs font-mono text-slate-600 uppercase">{t.languageCode}</span>
-                <p className="font-medium text-slate-900">{t.name}</p>
-                <p className="text-sm text-slate-500 line-clamp-2">{t.description}</p>
+            {translations.map((tr) => (
+              <div key={tr.languageCode} className="rounded-lg border border-slate-100 p-3">
+                <span className="text-xs font-mono text-slate-600 uppercase">{tr.languageCode}</span>
+                <p className="font-medium text-slate-900">{tr.name}</p>
+                <p className="text-sm text-slate-500 line-clamp-2">{tr.description}</p>
               </div>
             ))}
           </div>
@@ -626,6 +632,7 @@ export function ProductEditForm({ product, categories, environments, translation
         <Button size="sm" onClick={() => { setWhError(null); setWebhookModal(true) }}>Add Webhook</Button>
       }>
         <p className="text-xs text-slate-500 mb-3">Optional HTTP callbacks the platform calls after an order is processed — use these to notify external systems such as ticketing or monitoring tools. Pipeline Stacks handle the actual provisioning.</p>
+        {whLoadError && <Alert className="mb-3">{whLoadError}</Alert>}
         {whDeleteError && <Alert className="mb-3">{whDeleteError}</Alert>}
         {webhooks.length === 0 ? (
           <p className="text-sm text-slate-600">No callbacks configured.</p>
@@ -648,6 +655,7 @@ export function ProductEditForm({ product, categories, environments, translation
       <Card title="Pipeline Stacks" action={
         <Button size="sm" onClick={openStackModal}>Add Stack</Button>
       }>
+        {stackLoadError && <Alert className="mb-3">{stackLoadError}</Alert>}
         {stackDeleteError && <Alert className="mb-3">{stackDeleteError}</Alert>}
         {stacks.length === 0 ? (
           <p className="text-sm text-slate-600">No pipeline stacks configured. Click &quot;Add Stack&quot; to configure one.</p>

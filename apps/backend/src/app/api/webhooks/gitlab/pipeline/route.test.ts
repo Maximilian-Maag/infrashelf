@@ -116,10 +116,6 @@ describe('POST /api/webhooks/gitlab/pipeline', () => {
   // webhook_token, a rotated trigger token must NOT unlock the webhook while
   // callback_secret still holds a different value.
   it('validates X-Gitlab-Token against callback_secret, not the outbound trigger token', async () => {
-    const { db } = await import('@/lib/db/client')
-    const { deploymentEnvironments } = await import('@/lib/db/schema')
-    const { eq } = await import('drizzle-orm')
-
     // Rotate webhook_token in the DB so it no longer matches the callback_secret
     // seeded by createEnvironment (which set both to VALID_TOKEN).
     await db.update(deploymentEnvironments).set({ webhookToken: 'rotated-trigger-only' })

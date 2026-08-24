@@ -54,7 +54,7 @@ export function ParametersManager({ token }: Props) {
     }
   }, [token, lang])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => { void load() }, [load])
 
   function setField<K extends keyof typeof form>(k: K, v: typeof form[K]) {
     setForm((f) => ({ ...f, [k]: v }))
@@ -84,9 +84,9 @@ export function ParametersManager({ token }: Props) {
         required: form.required, sensitive: form.sensitive,
       }
       await post('/api/admin/parameters', body, token)
-      setAddOpen(false); load()
-    } catch (e) {
-      setFormError(e instanceof Error ? e.message : t('genericFailed', lang))
+      setAddOpen(false); void load()
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : t('genericFailed', lang))
     } finally {
       setSaving(false)
     }
@@ -104,9 +104,9 @@ export function ParametersManager({ token }: Props) {
         required: form.required, sensitive: form.sensitive,
       }
       await put(`/api/admin/parameters/${editTarget.id}`, body, token)
-      setEditTarget(null); load()
-    } catch (e) {
-      setFormError(e instanceof Error ? e.message : t('genericFailed', lang))
+      setEditTarget(null); void load()
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : t('genericFailed', lang))
     } finally {
       setSaving(false)
     }
@@ -117,7 +117,7 @@ export function ParametersManager({ token }: Props) {
     setSaving(true); setDeleteError(null)
     try {
       await del(`/api/admin/parameters/${deleteTarget.id}`, token)
-      setDeleteTarget(null); load()
+      setDeleteTarget(null); void load()
     } catch (e) {
       setDeleteError(e instanceof Error ? e.message : t('failedToDeleteGeneric', lang))
     } finally {

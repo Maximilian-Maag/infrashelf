@@ -39,7 +39,7 @@ export function CostCentersManager({ token }: Props) {
     }
   }, [token, lang])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => { void load() }, [load])
 
   function openAdd() {
     setFormCode(''); setFormName(''); setFormActive(true); setFormError(null); setAddOpen(true)
@@ -55,9 +55,9 @@ export function CostCentersManager({ token }: Props) {
     try {
       const body: CreateCostCenterRequest = { code: formCode.trim(), name: formName.trim(), active: formActive }
       await post('/api/admin/cost-centers', body, token)
-      setAddOpen(false); load()
-    } catch (e) {
-      setFormError(e instanceof Error ? e.message : t('genericFailed', lang))
+      setAddOpen(false); void load()
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : t('genericFailed', lang))
     } finally {
       setSaving(false)
     }
@@ -70,9 +70,9 @@ export function CostCentersManager({ token }: Props) {
     try {
       const body: UpdateCostCenterRequest = { code: formCode.trim(), name: formName.trim(), active: formActive }
       await put(`/api/admin/cost-centers/${editTarget.id}`, body, token)
-      setEditTarget(null); load()
-    } catch (e) {
-      setFormError(e instanceof Error ? e.message : t('genericFailed', lang))
+      setEditTarget(null); void load()
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : t('genericFailed', lang))
     } finally {
       setSaving(false)
     }
@@ -83,7 +83,7 @@ export function CostCentersManager({ token }: Props) {
     setSaving(true); setDeleteError(null)
     try {
       await del(`/api/admin/cost-centers/${deleteTarget.id}`, token)
-      setDeleteTarget(null); load()
+      setDeleteTarget(null); void load()
     } catch (e) {
       setDeleteError(e instanceof Error ? e.message : t('failedToDeleteGeneric', lang))
     } finally {
@@ -94,7 +94,7 @@ export function CostCentersManager({ token }: Props) {
   async function toggleActive(cc: CostCenter) {
     try {
       await put(`/api/admin/cost-centers/${cc.id}`, { active: !cc.active }, token)
-      load()
+      void load()
     } catch (e) {
       setDeleteError(e instanceof Error ? e.message : t('failedToUpdateGeneric', lang))
     }

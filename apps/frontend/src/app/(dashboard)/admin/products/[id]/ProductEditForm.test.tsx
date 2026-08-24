@@ -333,6 +333,31 @@ describe('ProductEditForm order callbacks', () => {
     expect(mockedGet).toHaveBeenCalledWith('/api/admin/products/7/webhooks', 'test-token')
   })
 
+  it('reports a failed callbacks load rather than rendering "No callbacks configured." (#136)', async () => {
+    // Both mount fetches used to end in `.catch(() => {})`, so an outage was
+    // indistinguishable from a product that has none — and the Delete buttons for
+    // the callbacks that do exist never appeared.
+    mockedGet.mockReset().mockImplementation((async (path: string) => {
+      if (path === '/api/admin/products/7/webhooks') throw new Error('Callbacks unavailable')
+      return []
+    }) as never)
+
+    renderForm()
+
+    expect(await screen.findByText('Callbacks unavailable')).toBeInTheDocument()
+  })
+
+  it('reports a failed pipeline-stacks load the same way (#136)', async () => {
+    mockedGet.mockReset().mockImplementation((async (path: string) => {
+      if (path === '/api/admin/products/7/pipeline-stacks') throw new Error('Stacks unavailable')
+      return []
+    }) as never)
+
+    renderForm()
+
+    expect(await screen.findByText('Stacks unavailable')).toBeInTheDocument()
+  })
+
   it('makes the loaded callback deletable', async () => {
     mockedGet.mockReset().mockImplementation((async (path: string) => {
       if (path === '/api/admin/products/7/webhooks') return [webhook]

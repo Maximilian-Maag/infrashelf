@@ -32,7 +32,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const toast = useCallback((message: string, type: ToastType = 'success') => {
     const id = nextId++
     setToasts((prev) => [...prev, { id, message, type }])
-    setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 3500)
+    setTimeout(() => setToasts((prev) => prev.filter((x) => x.id !== id)), 3500)
   }, [])
 
   return (
@@ -42,11 +42,11 @@ export function ToastProvider({ children }: { children: ReactNode }) {
           an aria-live container wrapping children that declare their own live
           role nests two regions, and some screen readers then announce twice. */}
       <div className="fixed bottom-4 right-4 z-[9999] flex flex-col gap-2 pointer-events-none">
-        {toasts.map((t) => (
+        {toasts.map((item) => (
           <ToastBubble
-            key={t.id}
-            item={t}
-            onDismiss={() => setToasts((prev) => prev.filter((x) => x.id !== t.id))}
+            key={item.id}
+            item={item}
+            onDismiss={() => setToasts((prev) => prev.filter((x) => x.id !== item.id))}
           />
         ))}
       </div>

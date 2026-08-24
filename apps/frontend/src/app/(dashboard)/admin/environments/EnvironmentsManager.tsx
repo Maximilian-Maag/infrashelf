@@ -38,16 +38,25 @@ export function EnvironmentsManager({ token, ciSources }: Props) {
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
 
+  const [loadError, setLoadError] = useState<string | null>(null)
+
   const load = useCallback(async () => {
     setLoading(true)
     try {
       setEnvs((await get<DeploymentEnvironment[]>('/api/admin/environments', token)) ?? [])
+      setLoadError(null)
+    } catch (err) {
+      // This `try` had only a `finally`. Every caller drops the promise, so a
+      // failing GET became an unhandled rejection and the admin saw the empty
+      // "no environments yet" state instead of the failure — the one manager in
+      // this directory that did not report a load error.
+      setLoadError(err instanceof Error ? err.message : t('somethingWentWrong', lang))
     } finally {
       setLoading(false)
     }
-  }, [token])
+  }, [token, lang])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => { void load() }, [load])
 
   function setField(k: keyof typeof form, v: string) {
     setForm((f) => ({ ...f, [k]: v }))
@@ -85,9 +94,9 @@ export function EnvironmentsManager({ token, ciSources }: Props) {
       }
       await post('/api/admin/environments', body, token)
       setAddOpen(false)
-      load()
-    } catch (e) {
-      setFormError(e instanceof Error ? e.message : t('failedToCreateGeneric', lang))
+      void load()
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : t('failedToCreateGeneric', lang))
     } finally {
       setSaving(false)
     }
@@ -108,9 +117,9 @@ export function EnvironmentsManager({ token, ciSources }: Props) {
       }
       await put(`/api/admin/environments/${editTarget.id}`, body, token)
       closeEdit()
-      load()
-    } catch (e) {
-      setFormError(e instanceof Error ? e.message : t('failedToUpdateGeneric', lang))
+      void load()
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : t('failedToUpdateGeneric', lang))
     } finally {
       setSaving(false)
     }
@@ -178,7 +187,7 @@ export function EnvironmentsManager({ token, ciSources }: Props) {
     try {
       await del(`/api/admin/environments/${deleteTarget.id}`, token)
       setDeleteTarget(null)
-      load()
+      void load()
     } catch (e) {
       setDeleteError(e instanceof Error ? e.message : t('failedToDeleteEnvironment', lang))
     } finally {
@@ -191,6 +200,7 @@ export function EnvironmentsManager({ token, ciSources }: Props) {
   return (
     <>
       <Card title={t('environments', lang)} action={<Button size="sm" onClick={openAdd}>{t('addEnvironment', lang)}</Button>}>
+        {loadError && <Alert className="mb-4">{loadError}</Alert>}
         {loading ? (
           <div className="flex justify-center py-8"><div className="h-8 w-8 animate-spin rounded-full border-4 border-slate-200 border-t-blue-600" /></div>
         ) : envs.length === 0 ? (

@@ -66,7 +66,7 @@ export function UsersManager({ token }: Props) {
     }
   }, [token, lang])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => { void load() }, [load])
 
   function openAdd() {
     setFormEmail(''); setFormName(''); setFormRole('project_manager'); setFormPassword(''); setFormError(null); setAddOpen(true)
@@ -89,9 +89,9 @@ export function UsersManager({ token }: Props) {
       await post('/api/admin/users', body, token)
       setAddOpen(false)
       toast(t('userCreatedToast', lang))
-      load()
-    } catch (e) {
-      setFormError(e instanceof Error ? e.message : t('genericFailed', lang))
+      void load()
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : t('genericFailed', lang))
     } finally {
       setSaving(false)
     }
@@ -108,9 +108,9 @@ export function UsersManager({ token }: Props) {
       setEditTarget(null)
       setFlashId(id)
       toast(t('userUpdatedToast', lang))
-      load()
-    } catch (e) {
-      setFormError(e instanceof Error ? e.message : t('genericFailed', lang))
+      void load()
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : t('genericFailed', lang))
     } finally {
       setSaving(false)
     }
@@ -123,7 +123,7 @@ export function UsersManager({ token }: Props) {
       await del(`/api/admin/users/${deleteTarget.id}`, token)
       setDeleteTarget(null)
       toast(t('userDeletedToast', lang), 'info')
-      load()
+      void load()
     } catch (e) {
       setDeleteError(e instanceof Error ? e.message : t('failedToDeleteGeneric', lang))
     } finally {
@@ -134,7 +134,7 @@ export function UsersManager({ token }: Props) {
   async function toggleActive(user: User) {
     try {
       await put(`/api/admin/users/${user.id}`, { active: !user.active } satisfies UpdateUserRequest, token)
-      load()
+      void load()
     } catch (e) {
       setDeleteError(e instanceof Error ? e.message : t('failedToUpdateGeneric', lang))
     }

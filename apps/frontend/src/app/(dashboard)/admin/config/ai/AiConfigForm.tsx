@@ -46,8 +46,8 @@ export function AiConfigForm({ initial, token }: Props) {
       }
       await put('/api/admin/config/ai', body, token)
       toast(t('aiConfigSavedToast', lang))
-    } catch (e) {
-      setError(e instanceof Error ? e.message : t('failedToSaveAi', lang))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('failedToSaveAi', lang))
     } finally {
       setSaving(false)
     }

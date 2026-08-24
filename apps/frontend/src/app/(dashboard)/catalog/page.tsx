@@ -131,7 +131,7 @@ export default function CatalogPage() {
     }
   }, [token, pageUrl, loadFavorites])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => { void load() }, [load])
 
   /**
    * The next page, appended.

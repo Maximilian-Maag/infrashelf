@@ -191,7 +191,7 @@ export function ProductImageUpload({ productId, token, initialAlt, onChanged }: 
             disabled={busy}
             onChange={(e) => {
               const file = e.target.files?.[0]
-              if (file) upload(file)
+              if (file) void upload(file)
             }}
             className="block text-sm text-slate-700 file:mr-3 file:rounded-md file:border file:border-slate-300 file:bg-white file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-slate-700 hover:file:bg-slate-50"
           />

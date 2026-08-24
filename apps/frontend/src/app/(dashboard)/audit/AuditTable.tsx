@@ -83,7 +83,7 @@ export function AuditTable({ token }: Props) {
     }
   }, [token, page, debouncedUser, debouncedAction, fromFilter, toFilter])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => { void load() }, [load])
 
   async function handleExport(format: 'csv' | 'pdf') {
     const params = new URLSearchParams()

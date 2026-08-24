@@ -13,4 +13,6 @@ async function main() {
   }
 }
 
-main()
+// See seed.ts: main() ends in process.exit on both paths, so this is a
+// deliberate hand-off, not a forgotten await.
+void main()

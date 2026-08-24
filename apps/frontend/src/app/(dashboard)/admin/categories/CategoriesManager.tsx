@@ -58,7 +58,7 @@ export function CategoriesManager({ token }: Props) {
     }
   }, [token, lang])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => { void load() }, [load])
 
   function openAdd() {
     setFormName('')
@@ -83,9 +83,9 @@ export function CategoriesManager({ token }: Props) {
       await post('/api/admin/categories', body, token)
       setAddOpen(false)
       toast(t('categoryCreatedToast', lang))
-      load()
-    } catch (e) {
-      setFormError(e instanceof Error ? e.message : t('failedToCreateGeneric', lang))
+      void load()
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : t('failedToCreateGeneric', lang))
     } finally {
       setSaving(false)
     }
@@ -106,9 +106,9 @@ export function CategoriesManager({ token }: Props) {
       setEditTarget(null)
       setFlashId(id)
       toast(t('categoryUpdatedToast', lang))
-      load()
-    } catch (e) {
-      setFormError(e instanceof Error ? e.message : t('failedToUpdateGeneric', lang))
+      void load()
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : t('failedToUpdateGeneric', lang))
     } finally {
       setSaving(false)
     }
@@ -121,7 +121,7 @@ export function CategoriesManager({ token }: Props) {
       await del(`/api/admin/categories/${deleteTarget.id}`, token)
       setDeleteTarget(null)
       toast(t('categoryDeletedToast', lang), 'info')
-      load()
+      void load()
     } catch (e) {
       setError(e instanceof Error ? e.message : t('failedToDeleteGeneric', lang))
     } finally {

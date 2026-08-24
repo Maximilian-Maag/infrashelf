@@ -1111,11 +1111,11 @@ describe('sweepDueDecommissions', () => {
 
   it('processes the earliest-due element first', async () => {
     const { mk } = await build()
-    const later = await mk(new Date('2026-05-01T00:00:00.000Z'))
-    const earlier = await mk(new Date('2026-01-01T00:00:00.000Z'))
+    const laterEl = await mk(new Date('2026-05-01T00:00:00.000Z'))
+    const earlierEl = await mk(new Date('2026-01-01T00:00:00.000Z'))
 
     const result = await sweepDueDecommissions()
-    expect(result.decommissioned).toEqual([earlier.id, later.id])
+    expect(result.decommissioned).toEqual([earlierEl.id, laterEl.id])
   })
 
   it('returns empty lists when nothing is due', async () => {

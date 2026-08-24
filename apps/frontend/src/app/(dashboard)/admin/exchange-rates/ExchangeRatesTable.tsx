@@ -30,7 +30,7 @@ export function ExchangeRatesTable({ token }: Props) {
     }
   }, [token, lang])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => { void load() }, [load])
 
   async function handleRefresh() {
     setRefreshing(true)

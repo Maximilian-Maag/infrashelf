@@ -47,7 +47,7 @@ export function CiSourcesManager({ token }: Props) {
     }
   }, [token, lang])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => { void load() }, [load])
 
   function setField(k: keyof typeof form, v: string) {
     setForm((f) => ({ ...f, [k]: v }))
@@ -78,9 +78,9 @@ export function CiSourcesManager({ token }: Props) {
       }
       await post('/api/admin/ci-sources', body, token)
       setAddOpen(false)
-      load()
-    } catch (e) {
-      setFormError(e instanceof Error ? e.message : t('failedToCreateGeneric', lang))
+      void load()
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : t('failedToCreateGeneric', lang))
     } finally {
       setSaving(false)
     }
@@ -100,9 +100,9 @@ export function CiSourcesManager({ token }: Props) {
       }
       await put(`/api/admin/ci-sources/${editTarget.id}`, body, token)
       setEditTarget(null)
-      load()
-    } catch (e) {
-      setFormError(e instanceof Error ? e.message : t('failedToUpdateGeneric', lang))
+      void load()
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : t('failedToUpdateGeneric', lang))
     } finally {
       setSaving(false)
     }
@@ -114,7 +114,7 @@ export function CiSourcesManager({ token }: Props) {
     try {
       await del(`/api/admin/ci-sources/${deleteTarget.id}`, token)
       setDeleteTarget(null)
-      load()
+      void load()
     } catch (e) {
       setDeleteError(e instanceof Error ? e.message : t('failedToDeleteGeneric', lang))
     } finally {

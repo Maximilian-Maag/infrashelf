@@ -40,8 +40,8 @@ export function SmtpForm({ initial, token }: Props) {
       }
       await put('/api/admin/config/smtp', body, token)
       toast(t('smtpConfigSavedToast', lang))
-    } catch (e) {
-      setError(e instanceof Error ? e.message : t('failedToSaveSmtp', lang))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('failedToSaveSmtp', lang))
     } finally {
       setSaving(false)
     }
