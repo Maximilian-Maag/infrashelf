@@ -100,10 +100,12 @@ test.describe('Approvals', () => {
    * The decision row of the order this test placed — the block holding its id and
    * its Approve/Reject buttons, and nothing else on the page.
    *
-   * Note what this does NOT match: once Reject is clicked the row swaps its
-   * buttons for the note form (ApprovalRow's `{!rejecting && …}`), so there is no
-   * Reject button left to filter on and this resolves to nothing. That is used
-   * below as the assertion that the swap happened, rather than worked around.
+   * Only ever used while this order still HAS its buttons. `.last()` means
+   * "innermost div matching both filters", and once the buttons are swapped for
+   * the note form the innermost match becomes the list container — which holds
+   * this order's id and a neighbouring order's Reject button. So this must not be
+   * used to assert the absence of anything; see the rejection test for how that
+   * is scoped instead.
    */
   const decisionRow = (page: Page) =>
     page
@@ -166,9 +168,16 @@ test.describe('Approvals', () => {
     await expect(form.getByPlaceholder(/explain why/i)).toBeVisible()
     await expect(form.getByRole('button', { name: /confirm rejection/i })).toBeVisible()
     await expect(form.getByRole('button', { name: /cancel/i })).toBeVisible()
-    // The decision buttons gave way to the form, so there is one action in flight
-    // — see the comment on `decisionRow` for why this expresses exactly that.
-    await expect(decisionRow(page)).toHaveCount(0)
+    // The decision buttons gave way to the form, so there is one action in flight.
+    // Scoped to the card via the form's own parent, NOT by re-running
+    // `decisionRow`: with the queue holding more than one order, a `.last()` that
+    // no longer matches inside this card silently walks outward until it finds a
+    // div holding both this id and *some other row's* Reject button — the list
+    // container. That reads as "still showing Reject" and is the same
+    // accidental-scope mistake that made these tests vacuous to begin with.
+    const card = rejectionForm(page).locator('xpath=..')
+    await expect(card.getByRole('button', { name: /^approve$/i })).toHaveCount(0)
+    await expect(card.getByRole('button', { name: /^reject$/i })).toHaveCount(0)
   })
 
   test('cancel on the rejection form puts the decision buttons back', async ({ page }) => {
