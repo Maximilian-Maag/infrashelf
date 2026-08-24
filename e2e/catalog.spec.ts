@@ -36,17 +36,30 @@ test.describe('Product Catalog', () => {
     await expect(productCount.or(noProducts).first()).toBeVisible()
   })
 
-  test('every product tile links to its detail page', async ({ page }) => {
+  // Issue #154. The old last line was `expect(count > 0 || isEmpty).toBe(true)`,
+  // which the assertion above it already guarantees — one of the two locators was
+  // visible, so one of the two disjuncts is true by construction. It could not
+  // fail. The catalogue is seeded now, so the tiles can simply be checked.
+  test('every product tile links to its own detail page', async ({ page }) => {
     await goToCatalog(page)
     // `^details\b`, not `^details$`: every tile's Details link carries the product
     // name in an sr-only span (WCAG 2.4.9), so its accessible name is "Details: <product>".
-    const placeOrderLinks = page.getByRole('link', { name: /^details\b/i })
-    const noProducts = page.getByText(/no products found/i)
-    // Wait for catalog to finish loading (client component fetches async)
-    await expect(placeOrderLinks.or(noProducts).first()).toBeVisible({ timeout: 10000 })
-    const count = await placeOrderLinks.count()
-    const isEmpty = await noProducts.isVisible()
-    expect(count > 0 || isEmpty).toBe(true)
+    const detailLinks = page.getByRole('link', { name: /^details\b/i })
+    // Wait for the catalogue to finish loading (client component, async fetch).
+    await expect(detailLinks.first()).toBeVisible({ timeout: 10000 })
+
+    const hrefs = await detailLinks.evaluateAll((links) =>
+      links.map((l) => (l as HTMLAnchorElement).getAttribute('href')),
+    )
+    expect(hrefs.length).toBeGreaterThan(0)
+    // Every tile, and each to a DIFFERENT product: one href repeated across the
+    // grid is exactly what a mis-keyed map would produce, and counting links
+    // would not see it.
+    for (const href of hrefs) expect(href).toMatch(/^\/catalog\/\d+$/)
+    expect(new Set(hrefs).size).toBe(hrefs.length)
+
+    await detailLinks.first().click()
+    await expect(page).toHaveURL(new RegExp(`${hrefs[0]}$`), { timeout: 30_000 })
   })
 
   test('navigates to catalog from top nav', async ({ page }) => {

@@ -1,5 +1,32 @@
-import { test, expect } from '@playwright/test'
+import { test, expect, type APIRequestContext } from '@playwright/test'
 import { loginAsRoot, expectNoServerError } from './helpers'
+import { apiAsRoot, expectOk } from './api'
+
+/**
+ * Issue #156. The profile test used to rename the root user — the account every
+ * other spec signs in as and whose name the dashboard greets — and put nothing
+ * back. It hid that by re-saving the CURRENT name, which is a no-op that also
+ * cannot tell a working Save from one that throws its input away.
+ *
+ * So the name is captured once, a real change is made, and the original is
+ * restored afterwards.
+ */
+let root: APIRequestContext
+let originalName: string
+
+test.beforeAll(async () => {
+  root = await apiAsRoot()
+  originalName = (
+    (await (await expectOk(await root.get('/api/users/me'), 'read profile')).json()) as {
+      name: string
+    }
+  ).name
+})
+
+test.afterAll(async () => {
+  await root.put('/api/users/me', { data: { name: originalName } })
+  await root.dispose()
+})
 
 test.describe('Settings', () => {
   test.beforeEach(async ({ page }) => {
@@ -60,13 +87,24 @@ test.describe('Settings', () => {
     await expect(page.getByText(/passwords do not match/i)).toBeVisible()
   })
 
-  test('updating profile name shows success message', async ({ page }) => {
-    const nameInput = page.getByLabel(/^name/i).first()
-    const currentName = await nameInput.inputValue()
-    // Update to same name to avoid actually changing it
-    await nameInput.fill(currentName || 'Test User')
+  test('updating the profile name saves it', async ({ page }) => {
+    const changed = `${originalName} (e2e)`
+    await page.getByLabel(/^name/i).first().fill(changed)
     await page.getByRole('button', { name: /save profile/i }).click()
     await expect(page.getByText(/profile updated/i)).toBeVisible({ timeout: 10000 })
+
+    // "Updated" is a toast. Whether anything was stored is the actual claim, and
+    // re-saving the existing name — which is what this used to do — could never
+    // have distinguished the two.
+    await page.reload()
+    await expect(page.getByLabel(/^name/i).first()).toHaveValue(changed, { timeout: 15000 })
+
+    // Put it back immediately rather than only in afterAll: the name is rendered
+    // in the header of every page, and the tests after this one share the stack.
+    await expectOk(
+      await root.put('/api/users/me', { data: { name: originalName } }),
+      'restore the profile name',
+    )
   })
 
   // ── Active sessions (#37) ──────────────────────────────────────────────────

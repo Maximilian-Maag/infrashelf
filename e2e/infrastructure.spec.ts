@@ -38,13 +38,29 @@ test.describe('Infrastructure', () => {
     await expect(page).toHaveURL(/\/infrastructure/)
   })
 
-  test('infrastructure elements show status badges when present', async ({ page }) => {
-    const emptyState = page.getByText(/no infrastructure elements yet/i)
-    if (await emptyState.isVisible()) {
-      return // No infrastructure to test
+  // Issue #154. This returned on an empty list and otherwise asserted only
+  // `expectNoServerError` — it had never once looked at a badge, despite its name.
+  // The seeded stack always has two elements, so there is always a badge to read.
+  test('every infrastructure element shows a status badge', async ({ page }) => {
+    const rows = page.locator('a[href^="/infrastructure/"]')
+    await expect(rows.first()).toBeVisible({ timeout: 10000 })
+
+    // The badge vocabulary is fixed (components/ui/StatusBadge.tsx): an element is
+    // Active, Decommissioning or Decommissioned, and a failed deployment is stored
+    // 'active' but shown as failed. Anything else means the badge fell through to
+    // the raw enum value, which is the regression worth catching.
+    const count = await rows.count()
+    expect(count).toBeGreaterThan(0)
+    for (let i = 0; i < count; i++) {
+      // Scoped to the row, not the page: the filter bar's Status select carries
+      // the same words as <option>s, so an unscoped text match would "find" a
+      // badge for a row that has none.
+      const header = rows.nth(i).locator('xpath=..')
+      await expect(
+        header.getByText(/^(active|decommissioning…|decommissioned|failed)$/i),
+        'a row with no status badge claims nothing about what it is',
+      ).toHaveCount(1)
     }
-    // If there are elements, check that status information is rendered
-    await expectNoServerError(page)
   })
 })
 

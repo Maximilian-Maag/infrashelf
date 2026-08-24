@@ -1,5 +1,6 @@
-import { test, expect } from '@playwright/test'
-import { loginAs, rootEmail, rootPassword } from './helpers'
+import { test, expect, type APIRequestContext } from '@playwright/test'
+import { loginAs } from './helpers'
+import { apiAsRoot, ensureUser, type FixtureUser } from './api'
 
 const protectedRoutes = [
   '/',
@@ -37,52 +38,62 @@ test.describe('Authentication & route protection', () => {
   })
 })
 
+/**
+ * Issue #154. The old assertion here was `not.toHaveURL(/\/admin$/)`, which cannot
+ * tell "the project manager was turned away" from "nobody was signed in at all" —
+ * a failed login also leaves the browser somewhere that is not /admin. So the test
+ * would have passed just as happily if the sign-in it depends on had silently
+ * broken, which is the one failure it most needed to notice.
+ *
+ * What it asserts now is both halves of the claim: the session IS live, and it is
+ * turned away from /admin — to `/` specifically, which is where admin/page.tsx
+ * sends a non-root caller.
+ */
 test.describe('Role-based access control', () => {
-  test('non-admin user is redirected away from /admin', async ({ page }) => {
-    // Create a project_manager user via API then test access
-    // We test this by logging in as root, creating a PM user, logging in as PM, then checking /admin
-    const pmEmail = `e2e-pm-${Date.now()}@example.com`
-    const pmPassword = 'E2eTest123!'
+  // Its own clean context: this describe signs in as somebody else, and borrowing
+  // root's storageState only to overwrite it makes the starting state ambiguous.
+  test.use({ storageState: { cookies: [], origins: [] } })
 
-    // Create PM user via the admin panel (logged in as root)
-    await page.goto('/login')
-    await page.getByLabel(/email address/i).fill(rootEmail)
-    await page.getByLabel(/password/i).fill(rootPassword)
-    await page.getByRole('button', { name: /sign in/i }).click()
-    await page.waitForURL((url) => !url.pathname.includes('/login'), { timeout: 8000 })
+  let root: APIRequestContext
+  let pm: FixtureUser
 
-    await page.goto('/admin/users')
-    await expect(page.getByRole('button', { name: /add user/i })).toBeVisible({ timeout: 8000 })
-    await page.getByRole('button', { name: /add user/i }).click()
-    const addUserDialog = page.locator('dialog[open]')
-    await addUserDialog.getByLabel(/^email/i).fill(pmEmail)
-    await addUserDialog.getByLabel(/^name/i).fill('E2E PM User')
-    await addUserDialog.getByLabel(/^password/i).fill(pmPassword)
-    await page.getByRole('button', { name: /^create$/i }).click()
-    await expect(page.getByText(pmEmail)).toBeVisible({ timeout: 8000 })
+  test.beforeAll(async () => {
+    root = await apiAsRoot()
+    // A stable fixture account rather than `e2e-pm-${Date.now()}@example.com`,
+    // which created a new user on every run and left it behind whenever the
+    // browser-driven cleanup at the end did not get that far (#156).
+    pm = await ensureUser(root, 'project_manager', 'rbac-pm')
+  })
 
-    // Log out
-    await page.getByText(/my account/i).click()
-    await page.getByRole('button', { name: /sign out/i }).click()
-    await expect(page).toHaveURL(/\/login/, { timeout: 8000 })
+  test.afterAll(async () => {
+    await root.dispose()
+  })
 
-    // Log in as PM user
-    await loginAs(page, pmEmail, pmPassword)
+  test('a project manager is signed in, and still turned away from /admin', async ({ page }) => {
+    await loginAs(page, pm.email, pm.password)
 
-    // Attempt to access /admin — should be redirected away (not to /admin content)
+    // Half one: the session is real. Without this the rest proves nothing.
+    await expect(page.getByText(pm.name)).toBeVisible({ timeout: 30_000 })
+    await page.goto('/orders')
+    await expect(page).toHaveURL(/\/orders$/)
+    await expect(page.getByRole('heading', { name: /^orders$/i })).toBeVisible({ timeout: 30_000 })
+
+    // Half two: /admin is root-only, and the redirect goes to the dashboard —
+    // not to /login, which is what "not /admin" would also have accepted.
     await page.goto('/admin')
-    await expect(page).not.toHaveURL(/\/admin$/, { timeout: 6000 })
+    await expect(page).toHaveURL(/localhost:\d+\/$/, { timeout: 30_000 })
+    await expect(page).not.toHaveURL(/\/login/)
+    await expect(page.getByRole('heading', { name: /admin dashboard/i })).toHaveCount(0)
+  })
 
-    // Clean up: log back in as root and delete the PM user
-    await page.goto('/login')
-    await page.getByLabel(/email address/i).fill(rootEmail)
-    await page.getByLabel(/password/i).fill(rootPassword)
-    await page.getByRole('button', { name: /sign in/i }).click()
-    await page.waitForURL((url) => !url.pathname.includes('/login'), { timeout: 8000 })
-    await page.goto('/admin/users')
-    await expect(page.getByText(pmEmail)).toBeVisible({ timeout: 8000 })
-    const userRow = page.locator('div').filter({ has: page.getByText(pmEmail) }).filter({ has: page.getByRole('button', { name: /^delete$/i }) }).last()
-    await userRow.getByRole('button', { name: /^delete$/i }).click()
-    await page.getByRole('button', { name: /^delete$/i }).last().click()
+  test('a project manager sees no admin navigation to follow', async ({ page }) => {
+    await loginAs(page, pm.email, pm.password)
+    await page.goto('/')
+
+    // Turning the page away is the guard; not offering the link is the part the
+    // user actually experiences.
+    await expect(page.getByRole('link', { name: /^admin$/i })).toHaveCount(0)
+    await expect(page.getByRole('link', { name: /^approvals$/i })).toHaveCount(0)
+    await expect(page.getByRole('link', { name: /^catalog$/i })).toBeVisible()
   })
 })

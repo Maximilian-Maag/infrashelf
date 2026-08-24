@@ -36,14 +36,29 @@ export async function loginAs(page: Page, email: string, password: string): Prom
   await page.waitForURL((url) => !url.pathname.includes('/login'), { timeout: 8000 })
 }
 
+/** The cookie NextAuth (@auth/core) stores the session in. */
+const SESSION_COOKIE = 'authjs.session-token'
+
 export async function loginAsRoot(page: Page): Promise<void> {
-  // Fast path: skip re-login when already authenticated (e.g. via storageState)
-  await page.goto('/')
-  if (!page.url().includes('/login')) return
+  // Fast path: the context is already signed in, so there is nothing to do.
+  //
+  // This used to be `await page.goto('/')` followed by a URL check, in ~20
+  // `beforeEach` hooks — around 250 extra navigations against `next dev` per run,
+  // a real slice of the runtime, and a hidden coupling where a broken dashboard
+  // failed every spec in the suite for a reason none of them were about (#156).
+  //
+  // Asking the context for its cookies answers the same question without leaving
+  // the process: the session IS the cookie. Every authenticated project is seeded
+  // from e2e/.auth/root.json, so in practice this returns immediately and the
+  // login below only runs for a context that deliberately cleared its cookies.
+  const cookies = await page.context().cookies()
+  if (cookies.some((c) => c.name.endsWith(SESSION_COOKIE))) return
+
+  await page.goto('/login')
   await page.getByLabel(/email address/i).fill(rootEmail)
   await page.getByLabel(/password/i).fill(rootPassword)
   await page.getByRole('button', { name: /sign in/i }).click()
-  await page.waitForURL((url) => !url.pathname.includes('/login'), { timeout: 10000 })
+  await page.waitForURL((url) => !url.pathname.includes('/login'), { timeout: 30_000 })
 }
 
 /**

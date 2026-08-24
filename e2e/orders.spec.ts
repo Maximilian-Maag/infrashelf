@@ -44,13 +44,24 @@ test.describe('Orders', () => {
     await expect(table.getByRole('row').first()).toBeVisible()
   })
 
-  test('order rows link to order detail page', async ({ page }) => {
+  // Issue #154. This was `if (count > 0) { … }` with no `else`: on CI's empty
+  // database it clicked nothing, asserted nothing and reported passed. The seeded
+  // catalogue always has orders — three of them, in three different states (see
+  // apps/backend/src/lib/bootstrap/demo.ts) — so "there might not be any" is not a
+  // state this can be in any more.
+  test('an order row links to that order, not merely to an order', async ({ page }) => {
     const orderLinks = page.getByRole('link').filter({ hasText: /^#\d+$/ })
-    const count = await orderLinks.count()
-    if (count > 0) {
-      await orderLinks.first().click()
-      await expect(page).toHaveURL(/\/orders\/\d+/)
-    }
+    await expect(orderLinks.first()).toBeVisible({ timeout: 10000 })
+
+    const label = ((await orderLinks.first().textContent()) ?? '').trim()
+    expect(label).toMatch(/^#\d+$/)
+
+    await orderLinks.first().click()
+    // 30s, like auth.setup.ts: `next dev` compiles /orders/[id] on first request.
+    await expect(page).toHaveURL(new RegExp(`/orders/${label.slice(1)}$`), { timeout: 30_000 })
+    await expect(page.getByRole('heading', { name: /order details/i })).toBeVisible({
+      timeout: 10000,
+    })
   })
 })
 

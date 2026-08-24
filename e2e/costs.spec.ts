@@ -28,15 +28,21 @@ test.describe('Cost dashboard', () => {
     await expect(page.getByText(/not a projection over a period/i)).toBeVisible()
   })
 
-  test('shows the four breakdowns, or the no-spend state', async ({ page }) => {
-    const noSpend = page.getByText(/no spending recorded for this range/i).first()
-    const perProject = page.getByRole('heading', { name: /per project/i })
-    await expect(perProject.or(noSpend)).toBeVisible({ timeout: 10000 })
-    if (await perProject.count() === 0) return // nothing provisioned in this stack
-
+  // Issue #154. Every one of the four tests below used to bail with a bare
+  // `return` — not even `test.skip()`, so the run recorded a pass — the moment the
+  // stack had nothing provisioned, which on CI's empty database was always. The
+  // demo data provisions two infrastructure elements at known prices (see
+  // apps/backend/src/lib/bootstrap/demo.ts), so there is always spend to report and
+  // the branch is gone.
+  test('shows all four breakdowns', async ({ page }) => {
+    await expect(page.getByRole('heading', { name: /per project/i })).toBeVisible({
+      timeout: 10000,
+    })
     await expect(page.getByRole('heading', { name: /per cost centre/i })).toBeVisible()
     await expect(page.getByRole('heading', { name: /per product/i })).toBeVisible()
     await expect(page.getByRole('heading', { name: /per environment/i })).toBeVisible()
+    // A breakdown with no rows is the same silence as no breakdown at all.
+    await expect(page.getByText(/no spending recorded for this range/i)).toHaveCount(0)
   })
 
   // Issue #106. The charts are inline SVG with no client JavaScript, so what is
@@ -50,11 +56,10 @@ test.describe('Cost dashboard', () => {
     })
   })
 
-  test('draws the trend and the share charts when there is spend', async ({ page }) => {
-    const noSpend = page.getByText(/no spending recorded for this range/i).first()
-    const trend = page.getByRole('heading', { name: /spend over time/i })
-    await expect(trend.or(noSpend)).toBeVisible({ timeout: 10000 })
-    if (await trend.count() === 0) return // nothing provisioned in this stack
+  test('draws the trend and the share charts', async ({ page }) => {
+    await expect(page.getByRole('heading', { name: /spend over time/i })).toBeVisible({
+      timeout: 10000,
+    })
 
     // The picture carries an accessible name, not just a shape.
     await expect(page.getByRole('img', { name: /spend over time/i })).toBeVisible()
@@ -69,25 +74,26 @@ test.describe('Cost dashboard', () => {
   }) => {
     // A column per month looks exactly like a monthly run rate, which these figures
     // are not. One caveat at the top of the page would not be read next to a chart.
-    const trend = page.getByRole('heading', { name: /spend over time/i })
-    await expect(trend.or(page.getByText(/no spending recorded for this range/i).first())).toBeVisible({
+    await expect(page.getByRole('heading', { name: /spend over time/i })).toBeVisible({
       timeout: 10000,
     })
-    if (await trend.count() === 0) return
-
     expect(await page.getByText(/not a projection over a period/i).count()).toBeGreaterThan(1)
   })
 
   test('the trend exposes its figures as a table, not only as an SVG', async ({ page }) => {
-    const trend = page.getByRole('heading', { name: /spend over time/i })
-    await expect(trend.or(page.getByText(/no spending recorded for this range/i).first())).toBeVisible({
+    await expect(page.getByRole('heading', { name: /spend over time/i })).toBeVisible({
       timeout: 10000,
     })
-    if (await trend.count() === 0) return
 
     // Collapsed by default; the point is that nothing is gated behind seeing it.
     await page.getByText(/^details$/i).first().click()
-    await expect(page.getByRole('columnheader', { name: /^month$/i })).toBeVisible()
+    const table = page.getByRole('table').filter({
+      has: page.getByRole('columnheader', { name: /^month$/i }),
+    })
+    await expect(table.getByRole('columnheader', { name: /^month$/i })).toBeVisible()
+    // And it has figures in it, not just headers — a details panel that opens on
+    // an empty table is the same silence the SVG would have been.
+    await expect(table.getByRole('row')).not.toHaveCount(1)
   })
 
   test('navigates to costs from the top nav', async ({ page }) => {
@@ -139,9 +145,10 @@ test.describe('Cost dashboard filtering', () => {
   })
 
   test('a project filter can be set and undone in place', async ({ page }) => {
+    // The demo data always provides a project, so the old `test.skip()` on an
+    // empty option list has nothing left to guard against.
     const projectSelect = page.getByLabel(/^project$/i)
-    const options = await projectSelect.locator('option:not([value=""])').count()
-    if (options === 0) { test.skip(); return }
+    await expect(projectSelect.locator('option:not([value=""])').first()).toBeAttached()
 
     await projectSelect.selectOption({ index: 1 })
     await expect(page).toHaveURL(/[?&]projectId=\d+/)

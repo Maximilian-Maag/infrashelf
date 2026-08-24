@@ -164,33 +164,79 @@ test.describe('Order Placement Flow', () => {
 })
 
 test.describe('Catalog - Category Filter', () => {
-  test('clicking a category filters the product list', async ({ page }) => {
+  /**
+   * The catalogue's own count line: "N products", or "N / M products" when paged.
+   * The line is only rendered when `total > 0` (catalog/page.tsx), so a category
+   * holding nothing shows the empty state instead — which is a count of zero, and
+   * a perfectly good contribution to the sum below.
+   */
+  const totalShown = async (page: import('@playwright/test').Page): Promise<number> => {
+    const counter = page.getByText(/\d+\s+products/i).first()
+    const empty = page.getByText(/no products/i).first()
+    await expect(counter.or(empty)).toBeVisible({ timeout: 10000 })
+    if ((await counter.count()) === 0) return 0
+
+    const text = (await counter.textContent()) ?? ''
+    const match = /(?:(\d+)\s*\/\s*)?(\d+)\s+products/i.exec(text)
+    expect(match, `could not read a product count out of "${text}"`).toBeTruthy()
+    return Number(match![2])
+  }
+
+  /**
+   * Issue #154. The old test picked its category button with
+   *   page.getByRole('button').filter({ hasNot: page.getByText(/all products|^all$/i) })
+   * which matches EVERY button on the page that is not the All pill — the header's
+   * search submit, the language switcher, the favourite stars. It clicked whichever
+   * came first and then asserted only that the page still rendered tiles, so it
+   * never once checked that the product list had been filtered.
+   *
+   * The invariant asserted instead is one that holds for any catalogue: a product
+   * belongs to exactly one category, so the per-category counts must add up to the
+   * unfiltered total. That fails loudly if the filter is ignored (every category
+   * would report the total), if it over-filters, or if it drops a product.
+   */
+  test('each category filters the list, and the categories partition it', async ({ page }) => {
     await loginAsRoot(page)
     await page.goto('/catalog')
 
-    // Wait for catalog to finish loading
-    await expect(
-      page.getByRole('link', { name: /^details\b/i }).or(page.getByText(/no products found/i)).first()
-    ).toBeVisible({ timeout: 10000 })
+    const sidebar = page.locator('aside')
+    const allProducts = sidebar.getByRole('button', { name: /all products/i })
+    await expect(allProducts).toBeVisible({ timeout: 10000 })
+    await expect(page.getByRole('link', { name: /^details\b/i }).first()).toBeVisible({
+      timeout: 10000,
+    })
 
-    // Check if there are category filter buttons (sidebar for md+, pills for mobile)
-    const categoryButtons = page.getByRole('button').filter({ hasNot: page.getByText(/all products|^all$/i) })
-    const catCount = await categoryButtons.count()
-    if (catCount === 0) { test.skip(); return } // no categories configured
+    const unfiltered = await totalShown(page)
+    expect(unfiltered).toBeGreaterThan(0)
 
-    // Click the first category button
-    await categoryButtons.first().click()
+    // The first <li> is "All products"; the rest are the categories themselves.
+    const items = sidebar.locator('li')
+    const categoryCount = (await items.count()) - 1
+    expect(categoryCount, 'the seeded catalogue always has at least one category').toBeGreaterThan(0)
 
-    // After clicking, page still shows either products or empty state (no 500 error)
-    await expectNoServerError(page)
-    await expect(
-      page.getByRole('link', { name: /^details\b/i }).or(page.getByText(/no products found/i)).first()
-    ).toBeVisible({ timeout: 5000 })
+    let summed = 0
+    for (let i = 1; i <= categoryCount; i++) {
+      const settled = page.waitForResponse(
+        (r) => r.url().includes('/api/catalog') && r.request().method() === 'GET',
+      )
+      await items.nth(i).getByRole('button').click()
+      await settled
+      await expectNoServerError(page)
+      summed += await totalShown(page)
+    }
 
-    // Click "All products" to reset
-    await page.getByRole('button', { name: /all products/i }).click()
-    await expect(
-      page.getByRole('link', { name: /^details\b/i }).or(page.getByText(/no products found/i)).first()
-    ).toBeVisible({ timeout: 5000 })
+    expect(
+      summed,
+      'the per-category counts must add up to the unfiltered total — a filter that ' +
+        'is ignored makes every category report the whole catalogue',
+    ).toBe(unfiltered)
+
+    // And the filter can be undone in place.
+    const restored = page.waitForResponse(
+      (r) => r.url().includes('/api/catalog') && r.request().method() === 'GET',
+    )
+    await allProducts.click()
+    await restored
+    expect(await totalShown(page)).toBe(unfiltered)
   })
 })

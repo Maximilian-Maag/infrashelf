@@ -1,11 +1,63 @@
-import { test, expect } from '@playwright/test'
+import { test, expect, type APIRequestContext } from '@playwright/test'
 import { loginAsRoot } from './helpers'
+import { apiAsRoot, tryDelete } from './api'
+
+/**
+ * Issue #156. The callback-secret test below created a CI source AND a deployment
+ * environment and deleted neither, so every run — local and CI — added two more
+ * global rows for the next run's list assertions to sift through.
+ *
+ * Two changes fix that. The names are fixed strings under one prefix rather than
+ * clock-derived ones, so a run that dies mid-test leaves rows the NEXT run reuses
+ * instead of adding to a pile; and the fixtures are swept through the API before
+ * and after every test, whatever the browser managed to do.
+ *
+ * (The clock-derived names had a second cost. `E2E Env CB 1787319807500` once
+ * failed a green build against an unrelated `not.toContainText('500')`, because a
+ * timestamp is thirteen digits of anything. That assertion has since been replaced
+ * — see `expectNoServerError` in e2e/helpers.ts — but naming a fixture after the
+ * clock is what put the digits on the page in the first place.)
+ */
+
+/** Everything this file creates is named with this prefix, and swept on it. */
+const FIXTURE_PREFIX = 'E2E Env Spec'
+
+let root: APIRequestContext
+
+const sweepFixtures = async () => {
+  // Environments first: a CI source cannot be deleted while one refers to it.
+  for (const collection of ['/api/admin/environments', '/api/admin/ci-sources']) {
+    const res = await root.get(collection)
+    if (!res.ok()) continue
+    const rows = (await res.json()) as { id: number; name: string }[]
+    for (const row of rows.filter((r) => r.name.startsWith(FIXTURE_PREFIX))) {
+      await tryDelete(root, `${collection}/${row.id}`)
+    }
+  }
+}
+
+test.beforeAll(async () => {
+  root = await apiAsRoot()
+})
+
+test.afterAll(async () => {
+  await root.dispose()
+})
 
 test.describe('Admin - Environment Management', () => {
   test.beforeEach(async ({ page }) => {
+    // Before, not only after: a fixed name is only safe if leftovers are cleared
+    // first, and this is what makes a run that died mid-test self-healing.
+    await sweepFixtures()
     await loginAsRoot(page)
     await page.goto('/admin/environments')
     await expect(page.getByRole('button', { name: /add environment/i })).toBeVisible({ timeout: 8000 })
+  })
+
+  // The create/edit/delete test removes its own rows through the UI — that IS the
+  // test. This catches what a failure on the way there left behind.
+  test.afterEach(async () => {
+    await sweepFixtures()
   })
 
   test('environments page shows title and Add Environment button', async ({ page }) => {
@@ -27,8 +79,7 @@ test.describe('Admin - Environment Management', () => {
     await page.goto('/admin/ci-sources')
     await expect(page.getByRole('button', { name: /add ci source/i })).toBeVisible({ timeout: 8000 })
 
-    const ts = Date.now()
-    const ciName = `E2E CI for Env ${ts}`
+    const ciName = `${FIXTURE_PREFIX} CI (crud)`
 
     // Create a CI source for the environment to use
     await page.getByRole('button', { name: /add ci source/i }).click()
@@ -43,7 +94,7 @@ test.describe('Admin - Environment Management', () => {
     await page.goto('/admin/environments')
     await expect(page.getByRole('button', { name: /add environment/i })).toBeVisible({ timeout: 8000 })
 
-    const envName = `E2E Env ${ts}`
+    const envName = `${FIXTURE_PREFIX} (crud)`
 
     // --- Create environment ---
     await page.getByRole('button', { name: /add environment/i }).click()
@@ -93,8 +144,7 @@ test.describe('Admin - Environment Management', () => {
     // Ensure at least one CI source + one environment exist
     await page.goto('/admin/ci-sources')
     await expect(page.getByRole('button', { name: /add ci source/i })).toBeVisible({ timeout: 8000 })
-    const ts = Date.now()
-    const ciName = `E2E CI CB ${ts}`
+    const ciName = `${FIXTURE_PREFIX} CI (callback)`
     await page.getByRole('button', { name: /add ci source/i }).click()
     let dialog = page.locator('dialog[open]')
     await dialog.getByLabel(/^name/i).fill(ciName)
@@ -104,7 +154,7 @@ test.describe('Admin - Environment Management', () => {
     await expect(page.getByText(ciName)).toBeVisible({ timeout: 8000 })
 
     await page.goto('/admin/environments')
-    const envName = `E2E Env CB ${ts}`
+    const envName = `${FIXTURE_PREFIX} CB (callback)`
     await page.getByRole('button', { name: /add environment/i }).click()
     dialog = page.locator('dialog[open]')
     await dialog.getByLabel(/^name/i).fill(envName)

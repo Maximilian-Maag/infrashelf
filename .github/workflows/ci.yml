@@ -193,6 +193,17 @@ jobs:
       E2E_BASE_URL: http://localhost:3000
       E2E_ADMIN_EMAIL: root@test.dev
       E2E_ADMIN_PASSWORD: testpassword123
+      # The e2e specs talk to the backend directly to build and tear down their
+      # own fixtures (see e2e/api.ts) instead of leaving rows behind — issue #156.
+      E2E_API_URL: http://localhost:3001
+      # The GitLab the pipeline-callback journey triggers, and the same stub the
+      # dev compose file serves (infra/wiremock). Without it the order in
+      # e2e/webhook-callback.spec.ts has nothing to fire at, so the one seam that
+      # turns an approved order into infrastructure stays untested — issue #157.
+      E2E_WIREMOCK_URL: http://localhost:8080
+      # Also WireMock: the rate refresh is otherwise a live call to the public
+      # exchangerate.host, which makes a CI job depend on a third party being up.
+      EXCHANGE_RATE_API_URL: http://localhost:8080/latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -200,11 +211,52 @@ jobs:
 
       - uses: ./.github/actions/setup
 
+      # Not a `services:` entry: service containers start BEFORE the checkout, so
+      # there is nothing to mount yet, and these stubs are files in the repo.
+      - name: Start WireMock (stub GitLab)
+        run: |
+          docker run -d --name wiremock -p 8080:8080 \
+            -v "$PWD/infra/wiremock/mappings:/home/wiremock/mappings:ro" \
+            wiremock/wiremock:3.13.1 --global-response-templating
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:8080/__admin/mappings >/dev/null && exit 0
+            sleep 1
+          done
+          echo "WireMock did not become ready"; docker logs wiremock; exit 1
+
       - name: Install Playwright browsers
         run: pnpm exec playwright install --with-deps chromium
 
+      # The database is seeded by e2e/global-setup.ts rather than by a step here,
+      # so a local run and a CI run start from the same catalogue. See the comment
+      # there — a suite whose coverage depends on how much data happens to be
+      # present is what issue #154 turned out to be.
       - name: Run E2E tests
-        run: pnpm exec playwright test --grep-invert "Accessibility"
+        run: pnpm exec playwright test --grep-invert "Accessibility" --reporter=list,json
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_NAME: e2e-results.json
+
+      # A run that executes nothing reports green. Before #152 the report read
+      # {"total": 283, "expected": 0, "skipped": 283, "ok": true} — every test
+      # took an "empty database → test.skip()" branch and the job passed. The
+      # budget is what stops that coming back silently. Every skip that remains
+      # states its reason at the call site (the pattern a11y.spec.ts:368 already
+      # used), so the count is small and a jump in it is a real signal.
+      - name: Check the skip budget
+        run: |
+          node -e '
+            const s = require("./e2e-results.json").stats
+            console.log(`expected=${s.expected} skipped=${s.skipped} unexpected=${s.unexpected} flaky=${s.flaky}`)
+            if (s.skipped > 3) {
+              console.error(`${s.skipped} tests skipped — the budget is 3. A jump here means the`)
+              console.error(`database was not seeded, or a spec grew a new silent skip branch.`)
+              process.exit(1)
+            }
+            if (s.expected < 200) {
+              console.error(`only ${s.expected} tests actually ran — something is short-circuiting the suite.`)
+              process.exit(1)
+            }
+          '
 
       # Separate step so a red pipeline says which of the two broke. Covers
       # WCAG 2.1 A/AA on every page and dialog, plus the things axe cannot see:
