@@ -7,13 +7,13 @@ vi.mock('@/lib/notification', () => ({
 }))
 
 vi.mock('@/lib/ci/webhooks', () => ({
-  triggerProductWebhooks: vi.fn().mockResolvedValue(['pipe-1']),
-  triggerPipelineStacks: vi.fn().mockResolvedValue([]),
+  triggerProductWebhooksTracked: vi.fn().mockResolvedValue({ pipelineIds: ['pipe-1'], failures: [] }),
+  triggerPipelineStacksTracked: vi.fn().mockResolvedValue({ pipelineIds: [], failures: [] }),
 }))
 
 import { listOrders, getOrderById, createOrder } from './orders'
 import { sendOrderCreated, sendApprovalRequest } from '@/lib/notification'
-import { triggerProductWebhooks } from '@/lib/ci/webhooks'
+import { triggerProductWebhooksTracked, triggerPipelineStacksTracked } from '@/lib/ci/webhooks'
 import { db } from '@/lib/db/client'
 import { orders, infrastructureElements, parameters, productEnvironments } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
@@ -33,12 +33,14 @@ import {
 const makeSession = (u: { id: number; email: string; name: string; role: string }): SessionUser =>
   ({ id: u.id, email: u.email, name: u.name, role: u.role as SessionUser['role'] })
 
-const mockedTriggerWebhooks = vi.mocked(triggerProductWebhooks)
+const mockedTriggerWebhooks = vi.mocked(triggerProductWebhooksTracked)
+const mockedTriggerStacks = vi.mocked(triggerPipelineStacksTracked)
 const mockedSendOrderCreated = vi.mocked(sendOrderCreated)
 const mockedSendApprovalRequest = vi.mocked(sendApprovalRequest)
 
 beforeEach(() => {
-  mockedTriggerWebhooks.mockReset().mockResolvedValue(['pipe-1'])
+  mockedTriggerWebhooks.mockReset().mockResolvedValue({ pipelineIds: ['pipe-1'], failures: [] })
+  mockedTriggerStacks.mockReset().mockResolvedValue({ pipelineIds: [], failures: [] })
   mockedSendOrderCreated.mockReset().mockResolvedValue(undefined)
   mockedSendApprovalRequest.mockReset().mockResolvedValue(undefined)
 })
@@ -142,7 +144,7 @@ describe('getOrderById', () => {
 describe('createOrder (admin path)', () => {
   it('creates order with status provisioning, triggers webhooks with ORDER_ID, creates infra, notifies, returns infraId', async () => {
     const { admin, product, env, project } = await buildBase()
-    mockedTriggerWebhooks.mockResolvedValueOnce(['pipe-admin-1'])
+    mockedTriggerWebhooks.mockResolvedValueOnce({ pipelineIds: ['pipe-admin-1'], failures: [] })
     await db.insert(parameters).values({
       scope: 'product',
       scopeId: product.id,
@@ -829,6 +831,8 @@ describe('createOrder — time-boxed trials', () => {
       expect.anything(),
       expect.anything(),
       expect.objectContaining({ TRIAL: 'true', TRIAL_DURATION_MINUTES: '45' }),
+      // The recorder that stores each pipeline id as it starts (issue #132).
+      expect.any(Function),
     )
   })
 

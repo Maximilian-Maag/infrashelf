@@ -14,7 +14,13 @@ import {
 import { eq, and, sql, inArray } from 'drizzle-orm'
 import { logAudit } from '@/lib/audit'
 import { sendOrderCreated, sendApprovalRequest } from '@/lib/notification'
-import { triggerProductWebhooks, triggerPipelineStacks } from '@/lib/ci/webhooks'
+import { triggerProductWebhooksTracked, triggerPipelineStacksTracked } from '@/lib/ci/webhooks'
+import {
+  beginOrderTriggerRun,
+  recordOrderPipelineId,
+  finishOrderTriggerRun,
+  clearOrderTriggerRun,
+} from '@/lib/services/pipelineTracking'
 import { ELEMENT_SEQUENCE_VAR, STATE_KEY_NAMESPACE_VAR } from '@/lib/ci/stateKey'
 import { isReservedCiVariable, withoutReservedCiVariables } from '@/lib/ci/reserved'
 import { findProductName, findUserEmail, findUserName, findAdminEmails } from '@/lib/db/queries'
@@ -516,6 +522,13 @@ export interface ProvisionOutcome {
  * already handle (they undo their claim). A partial failure records a sentinel in
  * the order's pipeline status instead, so the order can never report itself
  * complete while one of its elements was never triggered at all.
+ *
+ * The pipeline ids are recorded ONE AT A TIME, as each trigger returns, rather
+ * than in one write at the end: the CI system can report a pipeline back before
+ * this loop finishes, and a callback that cannot find its order strands it in
+ * 'provisioning' with no retry path (issue #132). `beginOrderTriggerRun` and
+ * `finishOrderTriggerRun` bracket that — see pipelineTracking for what the
+ * bracket is holding shut.
  */
 export const provisionOrderElements = async (
   input: ProvisionInput,
@@ -529,6 +542,8 @@ export const provisionOrderElements = async (
   const pipelineIds: string[] = []
   const failures: string[] = []
   let firstError: unknown = null
+
+  await beginOrderTriggerRun(orderId)
 
   for (let sequence = 1; sequence <= quantity; sequence++) {
     const [element] = await db
@@ -561,17 +576,31 @@ export const provisionOrderElements = async (
       trialDurationMinutes,
     })
 
+    // Recorded against the ORDER as each one starts — that is the row the
+    // callback handler matches an event against. The element's own ids are
+    // written once its fan-out is done, which is still before any callback can
+    // act on them: the `triggering` sentinel keeps the order unsettleable until
+    // every element has been through this loop.
+    const onStarted = (pipelineId: string) => recordOrderPipelineId(orderId, pipelineId)
+
     let elementPipelineIds: string[]
     try {
-      const webhookIds = await triggerProductWebhooks(productId, environmentId, triggerVars)
-      const stackIds = await triggerPipelineStacks(productId, environmentId, triggerVars)
-      elementPipelineIds = [...webhookIds, ...stackIds]
+      // The *Tracked variants, because a trigger that fails without throwing is
+      // exactly the case that reported a half-deployed order as completed
+      // (issue #134): the webhook 502s, the stack starts, and the order ends up
+      // waiting on the stack alone.
+      const webhooks = await triggerProductWebhooksTracked(productId, environmentId, triggerVars, onStarted)
+      const stacks = await triggerPipelineStacksTracked(productId, environmentId, triggerVars, onStarted)
+      elementPipelineIds = [...webhooks.pipelineIds, ...stacks.pipelineIds]
+      failures.push(
+        ...[...webhooks.failures, ...stacks.failures].map((f) => `element ${sequence}: ${f}`),
+      )
     } catch (e) {
       // One element failing to start must not abandon the rest: the order is a
       // single decision, and nineteen of twenty VMs is still worth having. The
       // failure is recorded below so the order cannot be reported as complete.
       console.error(`[orders] Could not start element ${sequence} of order ${orderId}:`, e)
-      failures.push(e instanceof Error ? e.message : String(e))
+      failures.push(`element ${sequence}: ${e instanceof Error ? e.message : String(e)}`)
       if (firstError === null) firstError = e
       continue
     }
@@ -586,8 +615,11 @@ export const provisionOrderElements = async (
   }
 
   // Nothing at all started: the caller undoes its claim, exactly as it did when
-  // one order meant one trigger.
-  if (failures.length === quantity && firstError !== null) {
+  // one order meant one trigger. Measured on the pipelines rather than on a count
+  // of failed elements, because a trigger can now fail without throwing — an
+  // order whose only webhook 502s used to fall through here and sit in
+  // 'provisioning' waiting on nothing (issue #134).
+  if (pipelineIds.length === 0 && failures.length > 0) {
     // Take the rows with it. They were inserted before their triggers fired (see
     // above) and nothing else would ever remove them: `order_id` carries no ON
     // DELETE CASCADE, and approveOrder puts the order back to 'pending' so the
@@ -597,22 +629,20 @@ export const provisionOrderElements = async (
     if (elementIds.length > 0) {
       await db.delete(infrastructureElements).where(inArray(infrastructureElements.id, elementIds))
     }
-    throw firstError
+    await clearOrderTriggerRun(orderId)
+    throw firstError ?? new Error(`Could not start any pipeline: ${failures.join('; ')}`)
   }
 
-  if (pipelineIds.length > 0 || failures.length > 0) {
-    const pipelineStatus: Record<string, string> = {}
-    failures.forEach((failure, i) => {
-      // Same sentinel shape the teardown path uses: an entry that is not
-      // 'success' keeps the all-succeeded check in the callback handler false, so
-      // the order stays visibly unfinished instead of completing on its siblings.
-      pipelineStatus[`trigger-failed:${i}`] = failure
-    })
-    await db
-      .update(orders)
-      .set({ pipelineId: pipelineIds, pipelineStatus, updatedAt: new Date() })
-      .where(eq(orders.id, orderId))
-  }
+  // Closes the run: reconciles the recorded ids, replaces the `triggering` entry
+  // with one `trigger-failed:*` sentinel per trigger that never started, and —
+  // because a callback that arrived while `triggering` was set was refused the
+  // completion decision — re-asks whether the order is already finished.
+  await finishOrderTriggerRun(
+    orderId,
+    pipelineIds,
+    failures,
+    `All pipelines of order ${orderId} succeeded`,
+  )
 
   return { elementIds, pipelineIds }
 }
@@ -702,17 +732,32 @@ export const createPreparedOrder = async (
 
     // One order, N elements: the fan-out lives in provisionOrderElements so the
     // approval path cannot derive the state keys differently.
-    const provisioned = await provisionOrderElements({
-      orderId: order.id,
-      projectId,
-      productId,
-      environmentId,
-      sizeCode,
-      quantity,
-      parameters,
-      isTrial,
-      trialDurationMinutes,
-    })
+    let provisioned: Awaited<ReturnType<typeof provisionOrderElements>>
+    try {
+      provisioned = await provisionOrderElements({
+        orderId: order.id,
+        projectId,
+        productId,
+        environmentId,
+        sizeCode,
+        quantity,
+        parameters,
+        isTrial,
+        trialDurationMinutes,
+      })
+    } catch (e) {
+      // Not one pipeline started, so the row inserted a moment ago describes an
+      // order that is not being provisioned by anything. Left at 'provisioning'
+      // it would say the opposite forever — no callback can arrive to correct it
+      // and nothing polls (issue #132). The approval path releases its claim for
+      // the same reason; this one has no claim to release, so it records the
+      // truth instead.
+      await db
+        .update(orders)
+        .set({ status: 'failed', updatedAt: new Date() })
+        .where(eq(orders.id, order.id))
+      return err(502, `Could not start the deployment: ${e instanceof Error ? e.message : String(e)}`)
+    }
 
     await logAudit(
       session.id,

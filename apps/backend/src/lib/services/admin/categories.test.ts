@@ -1,7 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 vi.mock('@/lib/ci/webhooks', () => ({
-  triggerProductWebhooks: vi.fn().mockResolvedValue(['pipe-destroy']),
+  // The cascade fires BOTH kinds now (issue #133): stack-provisioned
+  // infrastructure used to leak because only the product webhooks were fired.
+  triggerProductWebhooksTracked: vi.fn().mockResolvedValue({ pipelineIds: ['pipe-destroy'], failures: [] }),
+  triggerPipelineStacksTracked: vi.fn().mockResolvedValue({ pipelineIds: [], failures: [] }),
 }))
 
 import {
@@ -11,7 +14,7 @@ import {
   updateCategory,
   deleteCategory,
 } from './categories'
-import { triggerProductWebhooks } from '@/lib/ci/webhooks'
+import { triggerProductWebhooksTracked, triggerPipelineStacksTracked } from '@/lib/ci/webhooks'
 import { db } from '@/lib/db/client'
 import {
   categories,
@@ -34,10 +37,12 @@ import {
   linkProductEnvironment,
 } from '@/test/helpers'
 
-const mockedWebhooks = vi.mocked(triggerProductWebhooks)
+const mockedWebhooks = vi.mocked(triggerProductWebhooksTracked)
+const mockedStacks = vi.mocked(triggerPipelineStacksTracked)
 
 beforeEach(() => {
-  mockedWebhooks.mockReset().mockResolvedValue(['pipe-destroy'])
+  mockedWebhooks.mockReset().mockResolvedValue({ pipelineIds: ['pipe-destroy'], failures: [] })
+  mockedStacks.mockReset().mockResolvedValue({ pipelineIds: [], failures: [] })
 })
 
 describe('listCategories', () => {
@@ -138,7 +143,7 @@ describe('deleteCategory', () => {
     expect(result.ok).toBe(true)
 
     expect(mockedWebhooks).toHaveBeenCalledTimes(2)
-    const calls = mockedWebhooks.mock.calls.map((c) => c[0]).sort()
+    const calls = mockedWebhooks.mock.calls.map((call) => call[0]).sort()
     expect(calls).toEqual([product1.id, product2.id].sort())
     // The products were ordered, so category and products are retired rather than
     // deleted (issue #142) and the infra rows stay put, mid-decommission, for the
@@ -146,6 +151,60 @@ describe('deleteCategory', () => {
     const rows = await db.select().from(infrastructureElements)
     expect(rows.length).toBe(2)
     expect(rows.every((r) => r.status === 'decommissioning')).toBe(true)
+  })
+
+  it('does not fire a second destroy at an element something else claimed first (issue #133)', async () => {
+    const pm = await createUser({ role: 'project_manager' })
+    const cat = await seedCategory('CatRace')
+    const product = await seedProduct(cat.id, 'P')
+    const ci = await createCiSource()
+    const env = await createEnvironment(ci.id)
+    const project = await createProject(pm.id)
+    const order = await seedOrder(project.id, product.id, env.id, pm.id)
+    await createInfraElement(order.id, project.id, env.id, product.id)
+    await createInfraElement(order.id, project.id, env.id, product.id)
+
+    // The decommission sweep claims the element this cascade has read as active but
+    // not reached yet, and fires its own `tofu destroy`. Driven from inside the
+    // first trigger rather than from a timer, so the interleaving is the one under
+    // test every run.
+    mockedWebhooks.mockImplementationOnce(async () => {
+      await db
+        .update(infrastructureElements)
+        .set({ status: 'decommissioning' })
+        .where(eq(infrastructureElements.status, 'active'))
+      return { pipelineIds: ['pipe-destroy'], failures: [] }
+    })
+
+    expect((await deleteCategory(cat.id)).ok).toBe(true)
+
+    // One destroy, not two: two concurrent `tofu destroy` runs against one
+    // TF_STATE_NAME is the failure this claim exists to prevent.
+    expect(mockedWebhooks).toHaveBeenCalledTimes(1)
+    // And the stack destroy fired too — stack-provisioned infrastructure used to
+    // leak here, because only the product webhooks were fired.
+    expect(mockedStacks).toHaveBeenCalledTimes(1)
+  })
+
+  it('records the destroy pipeline so the element can reach decommissioned (issue #133)', async () => {
+    const pm = await createUser({ role: 'project_manager' })
+    const cat = await seedCategory('CatTracked')
+    const product = await seedProduct(cat.id, 'P')
+    const ci = await createCiSource()
+    const env = await createEnvironment(ci.id)
+    const project = await createProject(pm.id)
+    const order = await seedOrder(project.id, product.id, env.id, pm.id)
+    const el = await createInfraElement(order.id, project.id, env.id, product.id)
+
+    expect((await deleteCategory(cat.id)).ok).toBe(true)
+
+    const [row] = await db
+      .select()
+      .from(infrastructureElements)
+      .where(eq(infrastructureElements.id, el.id))
+    // Without an id to match, the destroy's success callback finds nothing and the
+    // element stays 'decommissioning' forever even when the destroy worked.
+    expect(row.pipelineId).toEqual(['pipe-destroy'])
   })
 
   // FA-09.8: skip already-in-flight elements

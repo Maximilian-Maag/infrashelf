@@ -164,6 +164,13 @@
       "breakpoints": true
     },
     {
+      "idx": 25,
+      "version": "7",
+      "when": 1787702400000,
+      "tag": "0025_rotate_reused_callback_secret",
+      "breakpoints": true
+    },
+    {
       "idx": 26,
       "version": "7",
       "when": 1787788800000,

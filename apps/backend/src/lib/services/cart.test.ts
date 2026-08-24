@@ -7,8 +7,6 @@ vi.mock('@/lib/notification', () => ({
 }))
 
 vi.mock('@/lib/ci/webhooks', () => ({
-  triggerProductWebhooks: vi.fn().mockResolvedValue(['pipe-1']),
-  triggerPipelineStacks: vi.fn().mockResolvedValue([]),
   triggerProductWebhooksTracked: vi.fn().mockResolvedValue({ pipelineIds: ['pipe-1'], failures: [] }),
   triggerPipelineStacksTracked: vi.fn().mockResolvedValue({ pipelineIds: [], failures: [] }),
 }))
@@ -24,7 +22,7 @@ import {
   pruneOrphanedCartItems,
   MAX_CART_ITEMS,
 } from './cart'
-import { triggerProductWebhooks } from '@/lib/ci/webhooks'
+import { triggerProductWebhooksTracked } from '@/lib/ci/webhooks'
 import { db } from '@/lib/db/client'
 import { cartItems, orders, parameters, products, productEnvironments, auditLog } from '@/lib/db/schema'
 import { and, eq } from 'drizzle-orm'
@@ -42,10 +40,10 @@ import {
 const makeSession = (u: { id: number; email: string; name: string; role: string }): SessionUser =>
   ({ id: u.id, email: u.email, name: u.name, role: u.role as SessionUser['role'] })
 
-const mockedWebhooks = vi.mocked(triggerProductWebhooks)
+const mockedWebhooks = vi.mocked(triggerProductWebhooksTracked)
 
 beforeEach(() => {
-  mockedWebhooks.mockReset().mockResolvedValue(['pipe-1'])
+  mockedWebhooks.mockReset().mockResolvedValue({ pipelineIds: ['pipe-1'], failures: [] })
 })
 
 const setup = async () => {
@@ -413,7 +411,7 @@ describe('checkoutCart', () => {
     if (!a.ok || !b.ok) throw new Error('setup failed')
 
     mockedWebhooks
-      .mockResolvedValueOnce(['pipe-ok'])
+      .mockResolvedValueOnce({ pipelineIds: ['pipe-ok'], failures: [] })
       .mockRejectedValueOnce(new Error('CI unreachable'))
 
     const result = await checkoutCart(makeSession(ctx.admin), {

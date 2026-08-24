@@ -206,4 +206,39 @@ describe('POST /api/webhooks/bitbucket/pipeline', () => {
       )
     }
   })
+
+  // Issue #140. Migration 0004 backfilled callback_secret from the free-text
+  // webhook_token and 0006 rotated only duplicates, so an environment created
+  // with a blank trigger token keeps callback_secret = ''. HMAC keyed on a blank
+  // string is one anyone can compute, so before the fix these two requests —
+  // forged with no secret knowledge at all — were accepted, and could transition
+  // any pipeline id belonging to that environment.
+  it.each([
+    ['empty', ''],
+    ['whitespace', '   '],
+  ])('refuses a signature forged with a %s callback secret', async (_label, secret) => {
+    const ci = await createCiSource({ name: `CI-blank-${_label}` })
+    await db.insert(deploymentEnvironments).values({
+      name: 'Legacy Env',
+      ciSourceId: ci.id,
+      webhookUrl: 'https://example.com/trigger',
+      webhookToken: secret,
+      callbackSecret: secret,
+    })
+
+    const rawBody = JSON.stringify(validPipelineBody)
+    const res = await POST(
+      new NextRequest('http://localhost/api/webhooks/bitbucket/pipeline', {
+        method: 'POST',
+        body: rawBody,
+        headers: {
+          'content-type': 'application/json',
+          'x-hub-signature': `sha256=${createHmac('sha256', secret).update(rawBody).digest('hex')}`,
+        },
+      }),
+    )
+
+    expect(res.status).toBe(401)
+    expect(mockedHandle).not.toHaveBeenCalled()
+  })
 })

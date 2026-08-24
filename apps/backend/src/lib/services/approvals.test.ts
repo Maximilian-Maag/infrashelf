@@ -7,13 +7,13 @@ vi.mock('@/lib/notification', () => ({
 }))
 
 vi.mock('@/lib/ci/webhooks', () => ({
-  triggerProductWebhooks: vi.fn().mockResolvedValue(['pipe-42']),
-  triggerPipelineStacks: vi.fn().mockResolvedValue([]),
+  triggerProductWebhooksTracked: vi.fn().mockResolvedValue({ pipelineIds: ['pipe-42'], failures: [] }),
+  triggerPipelineStacksTracked: vi.fn().mockResolvedValue({ pipelineIds: [], failures: [] }),
 }))
 
 import { listApprovals, approveOrder, rejectOrder } from './approvals'
 import { sendOrderApproved, sendOrderRejected } from '@/lib/notification'
-import { triggerProductWebhooks } from '@/lib/ci/webhooks'
+import { triggerProductWebhooksTracked } from '@/lib/ci/webhooks'
 import { db } from '@/lib/db/client'
 import {
   orders,
@@ -38,12 +38,12 @@ import {
 const makeSession = (u: { id: number; email: string; name: string; role: string }): SessionUser =>
   ({ id: u.id, email: u.email, name: u.name, role: u.role as SessionUser['role'] })
 
-const mockedWebhooks = vi.mocked(triggerProductWebhooks)
+const mockedWebhooks = vi.mocked(triggerProductWebhooksTracked)
 const mockedApproved = vi.mocked(sendOrderApproved)
 const mockedRejected = vi.mocked(sendOrderRejected)
 
 beforeEach(() => {
-  mockedWebhooks.mockReset().mockResolvedValue(['pipe-42'])
+  mockedWebhooks.mockReset().mockResolvedValue({ pipelineIds: ['pipe-42'], failures: [] })
   mockedApproved.mockReset().mockResolvedValue(undefined)
   mockedRejected.mockReset().mockResolvedValue(undefined)
 })
@@ -108,7 +108,7 @@ describe('approveOrder', () => {
   it('updates order status to provisioning, creates infra, triggers webhooks, notifies, returns success', async () => {
     const { admin, pm, product, env, project } = await setup()
     const order = await seedOrder(project.id, product.id, env.id, pm.id, { status: 'pending' })
-    mockedWebhooks.mockResolvedValueOnce(['pipe-approved'])
+    mockedWebhooks.mockResolvedValueOnce({ pipelineIds: ['pipe-approved'], failures: [] })
 
     const result = await approveOrder(makeSession(admin), order.id)
     expect(result.ok).toBe(true)
@@ -221,6 +221,8 @@ describe('approveOrder — time-boxed trials', () => {
       expect.anything(),
       expect.anything(),
       expect.objectContaining({ TRIAL: 'true', TRIAL_DURATION_MINUTES: '45' }),
+      // The recorder that stores each pipeline id as it starts (issue #132).
+      expect.any(Function),
     )
   })
 
@@ -242,6 +244,7 @@ describe('approveOrder — time-boxed trials', () => {
       expect.anything(),
       expect.anything(),
       expect.objectContaining({ TRIAL_DURATION_MINUTES: '90' }),
+      expect.any(Function),
     )
   })
 
@@ -419,7 +422,7 @@ describe('approveOrder — auditing a delegation in use', () => {
         .update(approvalDelegations)
         .set({ revokedAt: new Date() })
         .where(eq(approvalDelegations.id, delegation.id))
-      return ['pipe-42']
+      return { pipelineIds: ['pipe-42'], failures: [] }
     })
 
     expect((await approveOrder(makeSession(substitute), order.id)).ok).toBe(true)

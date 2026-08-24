@@ -183,6 +183,8 @@ describe('deleteProduct', () => {
       product.id,
       env.id,
       expect.objectContaining({ TF_ACTION: 'destroy' }),
+      // The recorder that stores each pipeline id as it starts (issue #132).
+      expect.any(Function),
     )
     // Pipeline-stack destroy fired for every active element too.
     expect(mockedStacks).toHaveBeenCalledTimes(2)
@@ -190,6 +192,7 @@ describe('deleteProduct', () => {
       product.id,
       env.id,
       expect.objectContaining({ TF_ACTION: 'destroy' }),
+      expect.any(Function),
     )
     // The product was ordered, so it is retired rather than deleted (issue #142)
     // and its infrastructure rows stay put, mid-decommission, for the callback that

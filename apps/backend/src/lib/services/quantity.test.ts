@@ -12,15 +12,17 @@ let pipelineSeq = 0
 vi.mock('@/lib/ci/webhooks', () => ({
   // A distinct id per call, so "which pipelines belong to which element" is
   // actually observable rather than collapsing into one shared id.
-  triggerProductWebhooks: vi.fn().mockImplementation(async () => [`pipe-${++pipelineSeq}`]),
-  triggerPipelineStacks: vi.fn().mockResolvedValue([]),
+  triggerProductWebhooksTracked: vi
+    .fn()
+    .mockImplementation(async () => ({ pipelineIds: [`pipe-${++pipelineSeq}`], failures: [] })),
+  triggerPipelineStacksTracked: vi.fn().mockResolvedValue({ pipelineIds: [], failures: [] }),
 }))
 
 import { createOrder } from './orders'
 import { approveOrder } from './approvals'
 import { addToCart, checkoutCart, listCart, updateCartItem, MAX_CHECKOUT_ELEMENTS } from './cart'
 import { getCostReport, getCostRows } from './costs'
-import { triggerProductWebhooks } from '@/lib/ci/webhooks'
+import { triggerProductWebhooksTracked } from '@/lib/ci/webhooks'
 import { db } from '@/lib/db/client'
 import { infrastructureElements, orders } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
@@ -38,11 +40,13 @@ import {
 const makeSession = (u: { id: number; email: string; name: string; role: string }): SessionUser =>
   ({ id: u.id, email: u.email, name: u.name, role: u.role as SessionUser['role'] })
 
-const mockedWebhooks = vi.mocked(triggerProductWebhooks)
+const mockedWebhooks = vi.mocked(triggerProductWebhooksTracked)
 
 beforeEach(() => {
   pipelineSeq = 0
-  mockedWebhooks.mockReset().mockImplementation(async () => [`pipe-${++pipelineSeq}`])
+  mockedWebhooks
+    .mockReset()
+    .mockImplementation(async () => ({ pipelineIds: [`pipe-${++pipelineSeq}`], failures: [] }))
 })
 
 const setup = async () => {
@@ -192,7 +196,7 @@ describe('one order, N infrastructure elements (issue #104)', () => {
 
     // CI comes back, the admin approves again: three elements, not the six that
     // a second insert on top of the first batch produced.
-    mockedWebhooks.mockImplementation(async () => [`pipe-${++pipelineSeq}`])
+    mockedWebhooks.mockImplementation(async () => ({ pipelineIds: [`pipe-${++pipelineSeq}`], failures: [] }))
     const approved = await approveOrder(makeSession(admin), created.data.id)
 
     expect(approved.ok).toBe(true)

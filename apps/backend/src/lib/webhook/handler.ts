@@ -1,15 +1,11 @@
 import type { PipelineEvent } from '@open-hybrid-cloud/types'
 import { db } from '@/lib/db/client'
 import { orders, infrastructureElements } from '@/lib/db/schema'
-import { eq, sql } from 'drizzle-orm'
+import { sql } from 'drizzle-orm'
 import { logAudit } from '@/lib/audit'
-import {
-  sendProvisioningCompleted,
-  sendProvisioningFailed,
-  sendDecommissioned,
-} from '@/lib/notification'
-import { fetchJobTraces, parseTofuOutputs, supportsJobTrace } from '@/lib/ci'
-import { findProductName, findUserEmail, findCiSourceForEnv, findAdminEmails } from '@/lib/db/queries'
+import { sendProvisioningFailed } from '@/lib/notification'
+import { findProductName, findUserEmail, findAdminEmails } from '@/lib/db/queries'
+import { settleOrderIfComplete, settleElementIfComplete } from '@/lib/webhook/settle'
 
 export const handlePipelineEvent = async (
   event: PipelineEvent,
@@ -67,162 +63,20 @@ export const handlePipelineEvent = async (
 
       if (!merged.length) continue // already terminal — ignore stale/duplicate event
 
-      // Only complete the order once EVERY pipeline that belongs to it has
-      // succeeded (multi-pipeline products: webhooks + stacks).
-      const statusMap = merged[0].pipelineStatus
-      const allSucceeded =
-        merged[0].pipelineId.every((pid) => statusMap[pid] === 'success') &&
-        // Also require every recorded entry to be a success, mirroring the infra
-        // branch below. A trigger that never started contributes no pipeline id
-        // but does leave a `trigger-failed:*` sentinel (see retryProvisioning),
-        // so without this the order would complete as soon as the pipelines that
-        // DID start succeed — reporting a fully provisioned order while one
-        // webhook or stack was never fired at all.
-        Object.values(statusMap).every((status) => status === 'success')
-      if (!allSucceeded) continue
-
-      // Compare-and-swap: only the caller that flips provisioning → completed
-      // runs the terminal effects (audit, email, outputs), so concurrent final
-      // events don't double-notify.
-      const completed = await db
-        .update(orders)
-        .set({ status: 'completed', updatedAt: new Date() })
-        .where(sql`${orders.id} = ${order.id} AND ${orders.status} = 'provisioning'`)
-        .returning({ id: orders.id })
-      if (!completed.length) continue
-
-      await logAudit(null, 'order.completed', order.id, `Pipeline ${event.pipelineId} succeeded`)
-
-      // Every element of the order, not one of them: each is provisioned by its
-      // own pipelines and gets its own outputs below. Ordered by sequence so that
-      // "the order's first element" is element 1 rather than whichever row
-      // Postgres returned first.
-      const infraElements = await db
-        .select({ id: infrastructureElements.id, pipelineId: infrastructureElements.pipelineId })
-        .from(infrastructureElements)
-        .where(eq(infrastructureElements.orderId, order.id))
-        .orderBy(infrastructureElements.sequence, infrastructureElements.id)
-
-      const productName = await findProductName(order.productId)
-      // The order's FIRST element, and how many it has. One order can now provision
-      // N (issue #104), so naming one id and stopping told the customer about a
-      // twentieth of what they ordered — the count is what makes the mail true.
-      // Falls back to the order id when an order somehow has no element at all,
-      // which is what this line always did.
-      const infraId = infraElements[0]?.id ?? order.id
-      const email = await findUserEmail(order.userId)
-
-      if (email) {
-        await sendProvisioningCompleted(email, productName, infraId, infraElements.length)
-      }
-
-      if (infraElements.length > 0) {
-        try {
-          const ciSource = await findCiSourceForEnv(order.environmentId)
-          if (!ciSource) {
-            console.warn(`[webhook] No CI source for environment ${order.environmentId}; no outputs recorded.`)
-          } else if (!supportsJobTrace(ciSource.provider)) {
-            // Said out loud rather than silently producing an element with no
-            // outputs, which looked like a template that declared none.
-            console.warn(
-              `[webhook] Reading job logs is not implemented for ${ciSource.provider}; ` +
-                `order ${order.id} will have no Terraform outputs. See lib/ci/index.ts supportsJobTrace.`,
-            )
-          } else if (!ciSource.projectRef) {
-            // GitLab's job endpoints are project-scoped and the project is only
-            // named in the environment's trigger URL, so a URL of another shape
-            // means the log cannot be located at all. An operator can fix this, but
-            // only if they are told.
-            console.warn(
-              `[webhook] Cannot tell which GitLab project environment ${order.environmentId} triggers ` +
-                `(its webhook URL has no /projects/<id>/ segment); order ${order.id} will have no ` +
-                `Terraform outputs.`,
-            )
-          } else {
-            // Each element's outputs come from ITS OWN pipelines, which is why
-            // `provisionOrderElements` records them on the element row. Under
-            // quantity (#104) element 2's pipeline reports element 2's ip_address;
-            // merging the order's pipelines into one map dropped it as a duplicate
-            // key and stamped element 1's address onto all N — wrong, and silent.
-            //
-            // The merge still applies WITHIN one element: an element fans out over
-            // the product's webhooks and its pipeline stacks (#121), and reading
-            // only the pipeline whose event completed the order dropped the rest.
-            for (const element of infraElements) {
-              if (element.pipelineId.length === 0) {
-                // A row whose triggers never fired. Its outputs are unknown, and
-                // borrowing a sibling's is exactly the confusion this loop ends.
-                console.warn(
-                  `[webhook] Order ${order.id}: element ${element.id} has no pipeline of its own; ` +
-                    `no Terraform outputs recorded for it.`,
-                )
-                continue
-              }
-
-              const outputs: Record<string, string> = {}
-              for (const pipelineId of element.pipelineId) {
-                let traces: string[]
-                try {
-                  traces = await fetchJobTraces(ciSource, pipelineId)
-                } catch (err) {
-                  // One unreadable pipeline log must not cost the outputs of the
-                  // pipelines that did report.
-                  console.error(
-                    `[webhook] Could not read the job log of pipeline ${pipelineId} (order ${order.id}):`,
-                    err,
-                  )
-                  continue
-                }
-                for (const trace of traces) {
-                  for (const [key, value] of Object.entries(parseTofuOutputs(trace))) {
-                    // First writer wins, iterating this element's pipeline ids in the
-                    // order they were triggered: two of ITS pipelines both declaring
-                    // `ip_address` is a naming collision in the templates, and picking
-                    // by CI timing would make the recorded value change from run to
-                    // run. Two ELEMENTS reporting the same key is normal and no longer
-                    // reaches this check at all.
-                    if (key in outputs) {
-                      if (outputs[key] !== value) {
-                        console.warn(
-                          `[webhook] Order ${order.id}, element ${element.id}: output "${key}" is ` +
-                            `reported by more than one of its pipelines with different values; ` +
-                            `keeping the first.`,
-                        )
-                      }
-                      continue
-                    }
-                    outputs[key] = value
-                  }
-                }
-              }
-
-              if (Object.keys(outputs).length > 0) {
-                await db
-                  .update(infrastructureElements)
-                  .set({ outputs })
-                  .where(eq(infrastructureElements.id, element.id))
-              } else {
-                console.warn(
-                  `[webhook] No job log of element ${element.id} (order ${order.id}) contained an ` +
-                    `Outputs block.`,
-                )
-              }
-            }
-          }
-        } catch (err) {
-          console.error('[webhook] Failed to fetch/parse job trace:', err)
-        }
-      }
+      // Whether that success finishes the order — and what to do about it — is
+      // `settleOrderIfComplete`'s to decide, because the trigger fan-out has to
+      // reach the same decision when it outruns a callback (see pipelineTracking).
+      await settleOrderIfComplete(order, merged[0], `Pipeline ${event.pipelineId} succeeded`)
     }
 
     for (const infra of matchingInfra) {
       // Same all-pipelines rule as orders: a teardown can fan out to several
       // pipelines (product webhooks + pipeline stacks), so merge this one's
       // success into the JSONB map (`||` is a single atomic UPDATE, so
-      // concurrent events can't lose each other's keys) and only flip the
-      // element to 'decommissioned' once EVERY pipeline it is waiting on has
-      // succeeded. Guard on 'decommissioning' so a stale event can't resurrect
-      // an already-terminal element.
+      // concurrent events can't lose each other's keys) and let
+      // `settleElementIfComplete` decide whether that finished the teardown.
+      // Guard on 'decommissioning' so a stale event can't resurrect an
+      // already-terminal element.
       const successPatch = JSON.stringify({ [event.pipelineId]: 'success' })
       const merged = await db
         .update(infrastructureElements)
@@ -237,47 +91,7 @@ export const handlePipelineEvent = async (
 
       if (!merged.length) continue // already terminal — ignore stale/duplicate event
 
-      const statusMap = merged[0].pipelineStatus
-      const allSucceeded =
-        merged[0].pipelineId.every((pid) => statusMap[pid] === 'success') &&
-        // Also require every recorded entry to be a success. A destroy trigger
-        // that never started contributes no pipeline id but does leave a
-        // `trigger-failed:*` sentinel (see fireDestroyTriggers), so this is what
-        // stops a partially-fired teardown from reporting itself complete.
-        Object.values(statusMap).every((status) => status === 'success')
-      if (!allSucceeded) continue
-
-      // Compare-and-swap so only the caller that flips decommissioning →
-      // decommissioned runs the terminal effects (audit, notification).
-      const done = await db
-        .update(infrastructureElements)
-        .set({ status: 'decommissioned' })
-        .where(
-          sql`${infrastructureElements.id} = ${infra.id} AND ${infrastructureElements.status} = 'decommissioning'`,
-        )
-        .returning({ id: infrastructureElements.id })
-      if (!done.length) continue
-
-      await logAudit(
-        null,
-        'infra.decommissioned',
-        infra.id,
-        `Pipeline ${event.pipelineId} succeeded`,
-      )
-
-      const orderRows = await db
-        .select({ userId: orders.userId })
-        .from(orders)
-        .where(eq(orders.id, infra.orderId))
-        .limit(1)
-
-      if (orderRows[0]) {
-        const email = await findUserEmail(orderRows[0].userId)
-        const productName = await findProductName(infra.productId)
-        if (email) {
-          await sendDecommissioned(email, productName, infra.id)
-        }
-      }
+      await settleElementIfComplete(infra, merged[0], `Pipeline ${event.pipelineId} succeeded`)
     }
   } else if (event.status === 'failed' || event.status === 'canceled') {
     for (const order of matchingOrders) {

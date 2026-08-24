@@ -12,8 +12,7 @@ import {
 } from '@/lib/db/schema'
 import { count, eq, asc, and, isNull, inArray } from 'drizzle-orm'
 import { ok, err, type Result } from '@/lib/services/result'
-import { triggerProductWebhooks } from '@/lib/ci/webhooks'
-import { withoutReservedCiVariables } from '@/lib/ci/reserved'
+import { fireDestroyTriggers, destroyVariables } from '@/lib/services/teardown'
 import { logAudit, changedFields } from '@/lib/audit'
 import { isEmptyUpdate, EMPTY_UPDATE_MESSAGE } from '@/lib/services/updates'
 
@@ -116,20 +115,53 @@ export const deleteCategory = async (id: number, actorId?: number): Promise<Resu
   const activeInfra = await db
     .select({
       id: infrastructureElements.id,
+      orderId: infrastructureElements.orderId,
       productId: infrastructureElements.productId,
       environmentId: infrastructureElements.environmentId,
       parameters: infrastructureElements.parameters,
+      sequence: infrastructureElements.sequence,
+      sizeCode: infrastructureElements.sizeCode,
+      stateKeyNamespace: infrastructureElements.stateKeyNamespace,
     })
     .from(infrastructureElements)
     .innerJoin(products, eq(infrastructureElements.productId, products.id))
     .where(and(eq(products.categoryId, id), eq(infrastructureElements.status, 'active')))
 
+  // The same claim-then-fire the other three cascade paths use (deleteProduct,
+  // deleteProject, claimAndDestroy), for the same three reasons this one used to
+  // get wrong (issue #133). The status was written unconditionally on the strength
+  // of the select above, so a sweep or a Decommission button that had claimed the
+  // element moments earlier did not stop this from firing a SECOND `tofu destroy`
+  // at the same TF_STATE_NAME. Only product webhooks were fired, so
+  // stack-provisioned infrastructure leaked. And no pipeline id was kept, so an
+  // element could not reach 'decommissioned' even when its destroy succeeded.
+  const triggerFailures: string[] = []
   for (const infra of activeInfra) {
-    await db.update(infrastructureElements).set({ status: 'decommissioning' }).where(eq(infrastructureElements.id, infra.id))
-    triggerProductWebhooks(infra.productId, infra.environmentId, {
-      ...withoutReservedCiVariables(infra.parameters as Record<string, string>),
-      TF_ACTION: 'destroy',
-    }).catch(console.error)
+    const claimed = await db
+      .update(infrastructureElements)
+      .set({ status: 'decommissioning' })
+      .where(and(eq(infrastructureElements.id, infra.id), eq(infrastructureElements.status, 'active')))
+      .returning({ id: infrastructureElements.id })
+    if (!claimed.length) continue
+    try {
+      const outcome = await fireDestroyTriggers(infra, destroyVariables(infra))
+      triggerFailures.push(...outcome.failures.map((f) => `infra #${infra.id}: ${f}`))
+    } catch (e) {
+      console.error(e)
+      triggerFailures.push(`infra #${infra.id}: ${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
+
+  // Block the delete when any destroy could not be started: deleting cascades the
+  // infrastructure_elements rows away and would leave the provisioned
+  // infrastructure running with nothing left to reconcile it against. Retiring has
+  // the same problem in practice — the operator would have no list of what to
+  // clean up by hand — so both outcomes wait for the CI side to be fixed.
+  if (triggerFailures.length > 0) {
+    return err(
+      502,
+      `Cannot delete category: ${triggerFailures.length} destroy trigger(s) could not be started, so deleting now would leak infrastructure. Fix and retry — ${triggerFailures.join('; ')}`,
+    )
   }
 
   if (retire) {

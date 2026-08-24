@@ -295,6 +295,11 @@ at all levels are in `docs/TEST_PLAN.md`.
   status transitions are now atomic, the destroy rows are claimed before
   triggering, and the misleading "destroy complete before delete" comment was
   corrected. Full launch-failure propagation is tracked as a follow-up.
+  *Resolved (issues #132/#134).* The pipelines-only wrappers are gone: every
+  caller now uses the `*Tracked` variants and records a `trigger-failed:*`
+  sentinel, so an order waiting on a trigger that never started cannot complete,
+  and `deleteCategory` joined `deleteProject`/`deleteProduct` in refusing to
+  cascade when a destroy could not be launched (issue #133).
 - **Full `admin/**` CRUD form/manager i18n.** StatusBadge, detail pages, footer
   and imprint are done, but the admin create/edit/delete forms and manager
   headers remain hardcoded English — ~100 strings needing accurate translation

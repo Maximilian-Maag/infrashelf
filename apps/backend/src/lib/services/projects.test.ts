@@ -202,6 +202,8 @@ describe('deleteProject', () => {
       product.id,
       env.id,
       expect.objectContaining({ TF_ACTION: 'destroy' }),
+      // The recorder that stores each pipeline id as it starts (issue #132).
+      expect.any(Function),
     )
     // Pipeline-stack destroy fired for every active element too, so stack-
     // provisioned infra is not leaked on project deletion.
@@ -210,6 +212,7 @@ describe('deleteProject', () => {
       product.id,
       env.id,
       expect.objectContaining({ TF_ACTION: 'destroy' }),
+      expect.any(Function),
     )
     // The project is gone (its infra elements cascade-delete via FK)
     const rows = await db.select().from(infrastructureElements).where(eq(infrastructureElements.projectId, project.id))
@@ -239,6 +242,7 @@ describe('deleteProject', () => {
       product.id,
       env.id,
       expect.objectContaining({ TF_ACTION: 'destroy' }),
+      expect.any(Function),
     )
     expect(mockedStacks).toHaveBeenCalledTimes(1)
   })

@@ -4,7 +4,7 @@ vi.mock('@/lib/ci', () => ({
   triggerPipeline: vi.fn(),
 }))
 
-import { triggerProductWebhooks, triggerProductWebhooksTracked, triggerPipelineStacks } from './webhooks'
+import { triggerProductWebhooksTracked, triggerPipelineStacksTracked } from './webhooks'
 import { elementStateSuffix } from './stateKey'
 import { triggerPipeline } from './index'
 import { db } from '@/lib/db/client'
@@ -23,14 +23,14 @@ beforeEach(() => {
   mockedTriggerPipeline.mockResolvedValue('pipe-default')
 })
 
-describe('triggerProductWebhooks', () => {
+describe('triggerProductWebhooksTracked — pipeline ids', () => {
   it('returns an empty array when no webhooks are configured for the product/env', async () => {
     const cat = await createCategory()
     const product = await createProduct(cat.id)
     const ci = await createCiSource()
     const env = await createEnvironment(ci.id)
 
-    const result = await triggerProductWebhooks(product.id, env.id, { FOO: 'bar' })
+    const { pipelineIds: result } = await triggerProductWebhooksTracked(product.id, env.id, { FOO: 'bar' })
     expect(result).toEqual([])
     expect(mockedTriggerPipeline).not.toHaveBeenCalled()
   })
@@ -65,7 +65,7 @@ describe('triggerProductWebhooks', () => {
       .mockResolvedValueOnce('pipe-1')
       .mockResolvedValueOnce('pipe-2')
 
-    const result = await triggerProductWebhooks(product.id, env.id, { ORDER_ID: '42' })
+    const { pipelineIds: result } = await triggerProductWebhooksTracked(product.id, env.id, { ORDER_ID: '42' })
 
     expect(result).toEqual(['pipe-1', 'pipe-2'])
     expect(mockedTriggerPipeline).toHaveBeenCalledTimes(2)
@@ -80,7 +80,7 @@ describe('triggerProductWebhooks', () => {
     const cat = await createCategory()
     const product = await createProduct(cat.id)
     // No env created at all — environmentId 999 won't resolve to a CI source
-    const result = await triggerProductWebhooks(product.id, 999, { FOO: 'bar' })
+    const { pipelineIds: result } = await triggerProductWebhooksTracked(product.id, 999, { FOO: 'bar' })
     expect(result).toEqual([])
     expect(mockedTriggerPipeline).not.toHaveBeenCalled()
   })
@@ -117,7 +117,7 @@ describe('triggerProductWebhooks', () => {
     // Silence the expected console.error
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
 
-    const result = await triggerProductWebhooks(product.id, env.id, {})
+    const { pipelineIds: result } = await triggerProductWebhooksTracked(product.id, env.id, {})
 
     expect(result).toEqual(['pipe-ok'])
     expect(mockedTriggerPipeline).toHaveBeenCalledTimes(2)
@@ -227,11 +227,11 @@ describe('TF_STATE_NAME per element (issue #104)', () => {
   it('derives the state key from ORDER_ID and suffixes it per element', async () => {
     const { product, env } = await seedStack('hostname')
 
-    await triggerPipelineStacks(product.id, env.id, { ORDER_ID: '42', ELEMENT_SEQUENCE: '1' })
+    await triggerPipelineStacksTracked(product.id, env.id, { ORDER_ID: '42', ELEMENT_SEQUENCE: '1' })
     expect(stateNameOf()).toBe('42')
 
     mockedTriggerPipeline.mockClear()
-    await triggerPipelineStacks(product.id, env.id, { ORDER_ID: '42', ELEMENT_SEQUENCE: '3' })
+    await triggerPipelineStacksTracked(product.id, env.id, { ORDER_ID: '42', ELEMENT_SEQUENCE: '3' })
     // Element three of order 42 gets its own state, so it cannot apply on top of
     // element one's.
     expect(stateNameOf()).toBe('42-3')
@@ -240,7 +240,7 @@ describe('TF_STATE_NAME per element (issue #104)', () => {
   it("suffixes the stack's own stateKeyParam too", async () => {
     const { product, env } = await seedStack('hostname')
 
-    await triggerPipelineStacks(product.id, env.id, {
+    await triggerPipelineStacksTracked(product.id, env.id, {
       hostname: 'web-01',
       ORDER_ID: '42',
       ELEMENT_SEQUENCE: '2',
@@ -254,7 +254,7 @@ describe('TF_STATE_NAME per element (issue #104)', () => {
   it('never produces a bare suffix when nothing identifies the state', async () => {
     const { product, env } = await seedStack('hostname')
 
-    await triggerPipelineStacks(product.id, env.id, { ELEMENT_SEQUENCE: '2' })
+    await triggerPipelineStacksTracked(product.id, env.id, { ELEMENT_SEQUENCE: '2' })
 
     // '-2' is not a state name; empty is the existing signal for "unidentified".
     expect(stateNameOf()).toBe('')
@@ -265,7 +265,7 @@ describe('TF_STATE_NAME per element (issue #104)', () => {
   it('namespaces the stateKeyParam value with the order id', async () => {
     const { product, env } = await seedStack('hostname')
 
-    await triggerPipelineStacks(product.id, env.id, {
+    await triggerPipelineStacksTracked(product.id, env.id, {
       hostname: 'web-01',
       ORDER_ID: '42',
       ELEMENT_SEQUENCE: '1',
@@ -278,7 +278,7 @@ describe('TF_STATE_NAME per element (issue #104)', () => {
   it('gives two orders that typed the same hostname different states', async () => {
     const { product, env } = await seedStack('hostname')
 
-    await triggerPipelineStacks(product.id, env.id, {
+    await triggerPipelineStacksTracked(product.id, env.id, {
       hostname: 'web-01', ORDER_ID: '42', ELEMENT_SEQUENCE: '1', TF_STATE_NAMESPACE: '42',
     })
     const first = stateNameOf()
@@ -287,7 +287,7 @@ describe('TF_STATE_NAME per element (issue #104)', () => {
     // A different user, same product, same value typed into the same field. This
     // pipeline used to point at the state the first one created — and destroying
     // this element then destroyed the first user's infrastructure.
-    await triggerPipelineStacks(product.id, env.id, {
+    await triggerPipelineStacksTracked(product.id, env.id, {
       hostname: 'web-01', ORDER_ID: '43', ELEMENT_SEQUENCE: '1', TF_STATE_NAMESPACE: '43',
     })
 
@@ -298,7 +298,7 @@ describe('TF_STATE_NAME per element (issue #104)', () => {
   it('strips what a state key may not contain from the typed value', async () => {
     const { product, env } = await seedStack('hostname')
 
-    await triggerPipelineStacks(product.id, env.id, {
+    await triggerPipelineStacksTracked(product.id, env.id, {
       hostname: '../../other/state',
       ORDER_ID: '42',
       ELEMENT_SEQUENCE: '1',
@@ -313,7 +313,7 @@ describe('TF_STATE_NAME per element (issue #104)', () => {
   it('still suffixes a namespaced key per element', async () => {
     const { product, env } = await seedStack('hostname')
 
-    await triggerPipelineStacks(product.id, env.id, {
+    await triggerPipelineStacksTracked(product.id, env.id, {
       hostname: 'web-01', ORDER_ID: '42', ELEMENT_SEQUENCE: '3', TF_STATE_NAMESPACE: '42',
     })
 
@@ -326,7 +326,7 @@ describe('TF_STATE_NAME per element (issue #104)', () => {
     // No TF_STATE_NAMESPACE: the element predates #183, and its Terraform state
     // exists under the raw value. Re-deriving it would point the teardown at a
     // state that was never created.
-    await triggerPipelineStacks(product.id, env.id, {
+    await triggerPipelineStacksTracked(product.id, env.id, {
       hostname: 'web-01',
       ORDER_ID: '42',
       ELEMENT_SEQUENCE: '2',

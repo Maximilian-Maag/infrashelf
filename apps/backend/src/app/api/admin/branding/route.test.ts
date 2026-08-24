@@ -15,10 +15,27 @@ const makeReq = (method = 'GET', body?: unknown, auth?: string) =>
 
 const validPayload = { shopName: 'Test Shop', primaryColor: '#ff0000' }
 
+// The OpenAPI entry for this path has said `[root]` with bearerAuth and 401/403
+// responses since it was written; the handler took no request at all (issue
+// #140). Anonymous callers now use /api/public/branding, which serves the same
+// six fields on purpose.
 describe('GET /api/admin/branding', () => {
-  it('returns 200 without auth (public endpoint)', async () => {
-    const res = await GET()
+  it('returns 401 without auth', async () => {
+    const res = await GET(makeReq())
+    expect(res.status).toBe(401)
+  })
+
+  it('returns 403 for admin role (requires root)', async () => {
+    const admin = await createUser({ role: 'admin' })
+    const res = await GET(makeReq('GET', undefined, await makeAuthHeader(admin)))
+    expect(res.status).toBe(403)
+  })
+
+  it('returns the settings for root', async () => {
+    const root = await createUser({ role: 'root' })
+    const res = await GET(makeReq('GET', undefined, await makeAuthHeader(root)))
     expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ shopName: expect.any(String) })
   })
 })
 

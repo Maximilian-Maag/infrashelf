@@ -39,6 +39,13 @@ const mapGitLabStatus = (
 export async function POST(req: NextRequest) {
   const token = req.headers.get('x-gitlab-token')
 
+  // This is also what keeps an environment with a blank callback_secret
+  // unreachable, which is why this route needed no change for issue #140 while
+  // the two HMAC routes did. The lookup below is an equality and the runtime
+  // strips surrounding whitespace from header values (`new Headers({x: '  '})`
+  // reads back as ''), so a token that gets past this line is non-blank and can
+  // only ever match a non-blank secret. What did affect GitLab is the reuse of
+  // the outbound trigger token as the inbound secret — migration 0025.
   if (!token) {
     return NextResponse.json({ error: 'Missing token' }, { status: 401 })
   }

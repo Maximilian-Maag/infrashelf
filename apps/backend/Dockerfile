@@ -38,6 +38,10 @@ ENV NODE_ENV=production
 # to the same nested path, not to the image root.
 COPY --from=builder /app/apps/backend/.next/standalone/. .
 COPY --from=builder /app/apps/backend/.next/static ./apps/backend/.next/static
+# next build does not fold public/ into the standalone output. /api/docs serves
+# Swagger UI from here rather than from a CDN (issue #146), so without this the
+# docs page renders as an empty div.
+COPY --from=builder /app/apps/backend/public ./apps/backend/public
 # Migration files are needed at runtime for the programmatic migrator
 COPY --from=builder /app/apps/backend/drizzle ./apps/backend/drizzle
 

@@ -25,6 +25,9 @@ const config = [
       'coverage/**',
       'next-env.d.ts',
       'drizzle/**',
+      // Swagger UI's minified bundle, vendored verbatim (issue #146). Linting
+      // someone else's build output produces 8000 findings and no information.
+      'public/swagger-ui/**',
     ],
   },
   ...compat.extends('next/core-web-vitals', 'next/typescript'),

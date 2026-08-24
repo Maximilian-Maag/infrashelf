@@ -13,7 +13,7 @@ export default async function LoginPage() {
     imprintText: '',
   }
   try {
-    const res = await fetch(`${API_SSR}/api/admin/branding`, { cache: 'no-store' })
+    const res = await fetch(`${API_SSR}/api/public/branding`, { cache: 'no-store' })
     if (res.ok) branding = await res.json()
   } catch { /* use defaults */ }
 

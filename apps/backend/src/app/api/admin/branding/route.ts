@@ -12,7 +12,16 @@ const UpdateBrandingSchema = z.object({
   imprintText: z.string().optional(),
 })
 
-export async function GET() {
+// Root-only, matching PUT. The payload is the same six fields
+// /api/public/branding serves anonymously, so this closed no leak that existed
+// on the day it was written — it closes the one that arrives with the next
+// column added to brandingPublicColumns (issue #140). Callers that legitimately
+// have no session (the login page) and callers whose role is below root (the
+// dashboard shell, rendered for project managers) use the public route.
+export async function GET(req: NextRequest) {
+  const session = await requireRole('root')(req)
+  if (!isAuth(session)) return session
+
   return toResponse(await getBranding())
 }
 

@@ -41,10 +41,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
     imprintText: '',
   }
   try {
-    const res = await fetch(`${API_SSR}/api/admin/branding`, {
-      headers: { Authorization: `Bearer ${token}` },
-      cache: 'no-store',
-    })
+    // The public route, not /api/admin/branding: this shell renders for every
+    // role and that route is root-only. Same six fields.
+    const res = await fetch(`${API_SSR}/api/public/branding`, { cache: 'no-store' })
     if (res.ok) branding = await res.json()
   } catch { /* use defaults */ }
 

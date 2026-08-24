@@ -2,6 +2,9 @@ packages:
   - 'apps/*'
   - 'packages/*'
 allowBuilds:
+  # swagger-ui-dist pulls this in; its install script reports the install to
+  # scarf.sh. Nothing in the app needs it to have run.
+  '@scarf/scarf': false
   esbuild: true
   msw: true
   sharp: true

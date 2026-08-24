@@ -645,6 +645,7 @@ describe('retryProvisioning', () => {
         product.id,
         env.id,
         expect.objectContaining({ hostname: 'web-01' }),
+        expect.any(Function),
       )
     }
   })
@@ -659,6 +660,8 @@ describe('retryProvisioning', () => {
       expect.anything(),
       expect.anything(),
       expect.objectContaining({ ORDER_ID: String(order.id) }),
+      // The recorder that stores each pipeline id as it starts (issue #132).
+      expect.any(Function),
     )
   })
 
@@ -1025,6 +1028,7 @@ describe('sweepDueDecommissions', () => {
       expect.anything(),
       expect.anything(),
       expect.objectContaining({ TF_ACTION: 'destroy' }),
+      expect.any(Function),
     )
   })
 

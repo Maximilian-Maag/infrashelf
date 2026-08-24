@@ -11,6 +11,8 @@ import {
 import { eq, and, sql, gte, lte } from 'drizzle-orm'
 import { logAudit } from '@/lib/audit'
 import { fireDestroyTriggers, destroyVariables } from '@/lib/services/teardown'
+import { TRIGGERING_KEY, TRIGGERING_VALUE } from '@/lib/webhook/settle'
+import { recordOrderPipelineId, finishOrderTriggerRun } from '@/lib/services/pipelineTracking'
 import { triggerProductWebhooksTracked, triggerPipelineStacksTracked } from '@/lib/ci/webhooks'
 import { ELEMENT_SEQUENCE_VAR, STATE_KEY_NAMESPACE_VAR } from '@/lib/ci/stateKey'
 import { withoutReservedCiVariables } from '@/lib/ci/reserved'
@@ -302,9 +304,20 @@ export const retryProvisioning = async (
   // attempt's pipeline tracking in the same statement. Only one concurrent
   // caller can win, so a double-clicked Retry cannot fire two sets of pipelines
   // against the same infrastructure.
+  //
+  // The claim opens this retry's trigger run as well (see pipelineTracking): the
+  // ids below are recorded as they start, so a pipeline that fails instantly can
+  // still find its order — and the `triggering` entry is what stops the FIRST of
+  // them succeeding from completing an order whose remaining elements have not
+  // been re-fired yet.
   const claimed = await db
     .update(orders)
-    .set({ status: 'provisioning', pipelineId: [], pipelineStatus: {}, updatedAt: new Date() })
+    .set({
+      status: 'provisioning',
+      pipelineId: [],
+      pipelineStatus: { [TRIGGERING_KEY]: TRIGGERING_VALUE },
+      updatedAt: new Date(),
+    })
     .where(and(eq(orders.id, order.id), eq(orders.status, 'failed')))
     .returning({ id: orders.id })
 
@@ -360,9 +373,11 @@ export const retryProvisioning = async (
       ...(order.isTrial ? trialVariables(trialDurationMinutes) : {}),
     }
 
+    const onStarted = (pipelineId: string) => recordOrderPipelineId(order.id, pipelineId)
+
     try {
-      const webhooks = await triggerProductWebhooksTracked(element.productId, element.environmentId, variables)
-      const stacks = await triggerPipelineStacksTracked(element.productId, element.environmentId, variables)
+      const webhooks = await triggerProductWebhooksTracked(element.productId, element.environmentId, variables, onStarted)
+      const stacks = await triggerPipelineStacksTracked(element.productId, element.environmentId, variables, onStarted)
       const started = [...webhooks.pipelineIds, ...stacks.pipelineIds]
       perElementPipelines.set(element.id, started)
       outcome.pipelineIds.push(...started)
@@ -395,20 +410,10 @@ export const retryProvisioning = async (
     return err(502, `Could not start the deployment: ${outcome.failures.join('; ')}`)
   }
 
-  // Sentinel per trigger that failed to start, mirroring fireDestroyTriggers. A
-  // failed trigger contributes no pipeline id, so without this the order would
-  // complete as soon as the pipelines that DID start succeed — reporting a
-  // successful retry while one webhook never fired.
-  const pipelineStatus: Record<string, string> = {}
-  outcome.failures.forEach((failure, i) => {
-    pipelineStatus[`trigger-failed:${i}`] = failure
-  })
-
-  await db
-    .update(orders)
-    .set({ pipelineId: outcome.pipelineIds, pipelineStatus, updatedAt: new Date() })
-    .where(eq(orders.id, order.id))
-
+  // The elements are rewritten BEFORE the order's run is closed: closing it can
+  // complete the order there and then (every pipeline may already have reported
+  // while this loop was still firing), and completing an order reads each
+  // element's pipeline ids to attribute the Terraform outputs.
   for (const element of elements) {
     await db
       .update(infrastructureElements)
@@ -430,6 +435,18 @@ export const retryProvisioning = async (
       })
       .where(eq(infrastructureElements.id, element.id))
   }
+
+  // Closes the run: reconciles the recorded ids and replaces the `triggering`
+  // entry with one sentinel per trigger that failed to start. A failed trigger
+  // contributes no pipeline id, so without the sentinel the order would complete
+  // as soon as the pipelines that DID start succeed — reporting a successful
+  // retry while one webhook never fired.
+  await finishOrderTriggerRun(
+    order.id,
+    outcome.pipelineIds,
+    outcome.failures,
+    `All pipelines of order ${order.id} succeeded`,
+  )
 
   await logAudit(
     session.id,
@@ -472,10 +489,18 @@ const resolveTrialDuration = async (productId: number, environmentId: number): P
   return offering && offering.trialDurationMinutes > 0 ? offering.trialDurationMinutes : 30
 }
 
+/**
+ * Hand a claimed order back to 'failed' after a retry that started nothing.
+ *
+ * The tracking goes with it: the claim above opened a trigger run, and a
+ * `triggering` entry left in the map would still be there on the next retry —
+ * which resets it, but only after the operator has been shown an order that can
+ * never settle.
+ */
 const releaseRetryClaim = async (orderId: number): Promise<void> => {
   await db
     .update(orders)
-    .set({ status: 'failed', updatedAt: new Date() })
+    .set({ status: 'failed', pipelineId: [], pipelineStatus: {}, updatedAt: new Date() })
     .where(eq(orders.id, orderId))
 }
 
@@ -567,6 +592,30 @@ const assertMayTeardown = async (
   return ok(undefined)
 }
 
+/**
+ * "The order that provisions this element is not still being provisioned."
+ *
+ * A trial's clock starts when its pipelines are TRIGGERED, not when they finish
+ * (`trialExpiry`, and see `provisionOrderElements`), and the element row exists
+ * and is 'active' from that same moment. A 5-minute trial of a product whose
+ * apply takes 8 therefore came due while its own apply was still running: the
+ * sweep claimed it and fired TF_ACTION=destroy at a state file Terraform was
+ * mid-write on, and the apply's later success callback — which matches the ORDER,
+ * untouched by any of this — completed the order and mailed the customer a
+ * success for infrastructure that was being destroyed (issue #135).
+ *
+ * Expressed as NOT EXISTS rather than a join so the callers keep selecting plain
+ * element rows, and deliberately as "not provisioning" rather than "completed": an
+ * element of a FAILED order can be real, half-applied infrastructure with a trial
+ * clock on it, and refusing to ever sweep it would trade this race for a permanent
+ * leak. A retry moves its order back to 'provisioning', which closes this again
+ * for the duration.
+ */
+const orderNotProvisioning = sql`NOT EXISTS (
+  SELECT 1 FROM ${orders}
+  WHERE ${orders.id} = ${infrastructureElements.orderId} AND ${orders.status} = 'provisioning'
+)`
+
 export interface SweepResult {
   /** Elements whose teardown was started. */
   decommissioned: number[]
@@ -603,6 +652,11 @@ export const sweepDueDecommissions = async (now: Date = new Date()): Promise<Swe
         eq(infrastructureElements.status, 'active'),
         sql`${infrastructureElements.scheduledDecommissionAt} IS NOT NULL`,
         lte(infrastructureElements.scheduledDecommissionAt, now),
+        // Skipped rather than reported as a failure: the element is due and will
+        // be swept by the first run after its order stops provisioning, which is
+        // the same "at or after its scheduled time" guarantee the sweep already
+        // makes.
+        orderNotProvisioning,
       ),
     )
     .orderBy(infrastructureElements.scheduledDecommissionAt)
@@ -654,10 +708,36 @@ const claimAndDestroy = async (
   const claimed = await db
     .update(infrastructureElements)
     .set({ status: 'decommissioning' })
-    .where(and(eq(infrastructureElements.id, infra.id), eq(infrastructureElements.status, 'active')))
+    .where(
+      and(
+        eq(infrastructureElements.id, infra.id),
+        eq(infrastructureElements.status, 'active'),
+        // In the claim, not only in the sweep's query above: the sweep reads its
+        // due rows and then claims them one at a time, and a retry started in
+        // between would put the order back to 'provisioning' while a destroy went
+        // out at the apply it just restarted.
+        orderNotProvisioning,
+      ),
+    )
     .returning({ id: infrastructureElements.id })
 
-  if (!claimed.length) return err(400, 'Infrastructure element is not active')
+  if (!claimed.length) {
+    // Which of the two guards refused is worth the extra read: "not active" sends
+    // an operator looking for a teardown that already happened, and this case is
+    // the opposite — the element is fine and the answer is to wait.
+    const [current] = await db
+      .select({ status: infrastructureElements.status })
+      .from(infrastructureElements)
+      .where(eq(infrastructureElements.id, infra.id))
+      .limit(1)
+    if (current?.status === 'active') {
+      return err(
+        409,
+        'This element is still being provisioned — destroying it now would run against a Terraform state its own apply is writing. Try again once the order has finished.',
+      )
+    }
+    return err(400, 'Infrastructure element is not active')
+  }
 
   // "Decommission 3 of 20" is per element, which is what the infrastructure list
   // already offers — the order gets no teardown of its own. `destroyVariables`
