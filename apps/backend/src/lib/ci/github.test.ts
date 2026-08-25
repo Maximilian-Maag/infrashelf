@@ -10,9 +10,15 @@ import {
 const jsonRes = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
 
-// The run lookup accepts runs created no earlier than the dispatch; these two
-// stand for "created just now" and "created long before this order existed".
-const NOW_ISO = new Date().toISOString()
+// The run lookup accepts runs created no earlier than the dispatch, less a 10s
+// clock-skew allowance. These two stand for "created just now" and "created long
+// before this order existed".
+//
+// `nowIso` is a function, not a constant: a constant is stamped once at module
+// load, and by the time the last case in this file runs, real time has moved on
+// far enough to eat into that 10s allowance and fail for a reason that has
+// nothing to do with what the test is checking.
+const nowIso = () => new Date().toISOString()
 const LONG_AGO_ISO = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
 
 /**
@@ -64,7 +70,7 @@ describe('github ci client', () => {
         String(url).includes('/dispatches')
           ? Promise.resolve(new Response(null, { status: 204 }))
           : Promise.resolve(
-              jsonRes({ workflow_runs: [{ id: 1234567890, created_at: NOW_ISO, event: 'workflow_dispatch', head_branch: 'main' }] }),
+              jsonRes({ workflow_runs: [{ id: 1234567890, created_at: nowIso(), event: 'workflow_dispatch', head_branch: 'main' }] }),
             )) as unknown as typeof fetch)
 
       const id = await withoutWaiting(() =>
@@ -109,7 +115,7 @@ describe('github ci client', () => {
                 ? [{ id: 111, created_at: LONG_AGO_ISO, event: 'workflow_dispatch', head_branch: 'main' }]
                 : [
                     { id: 111, created_at: LONG_AGO_ISO, event: 'workflow_dispatch', head_branch: 'main' },
-                    { id: 222, created_at: NOW_ISO, event: 'workflow_dispatch', head_branch: 'main' },
+                    { id: 222, created_at: nowIso(), event: 'workflow_dispatch', head_branch: 'main' },
                   ],
           }),
         )

@@ -101,7 +101,9 @@ changed blind.
   stayed `provisioning` forever. `workflow_dispatch` still answers 204 with no
   body; the run is now looked up afterwards on
   `/actions/workflows/{workflow}/runs`, filtered to `event=workflow_dispatch`,
-  the dispatched branch, and a `created_at` no earlier than the dispatch.
+  the dispatched branch, and a `created_at` no earlier than the dispatch less a
+  10-second clock-skew allowance — `created_at` is GitHub's clock, and a portal
+  running a few seconds fast would otherwise reject the run it just asked for.
 
   A correlation, not an identity: two orders dispatching the same workflow on
   the same branch within the lookup window are indistinguishable, and eliminating
