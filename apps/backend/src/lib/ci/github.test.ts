@@ -10,6 +10,36 @@ import {
 const jsonRes = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
 
+// The run lookup accepts runs created no earlier than the dispatch; these two
+// stand for "created just now" and "created long before this order existed".
+const NOW_ISO = new Date().toISOString()
+const LONG_AGO_ISO = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
+
+/**
+ * Drive `triggerGitHubWorkflow` through its retry schedule without waiting for
+ * it. The schedule is ~8.7s of real time, which is right in production and
+ * absurd in a unit test; fake timers keep the delays under test (the retry
+ * count still matters) while costing nothing.
+ */
+const withoutWaiting = async <T>(run: () => Promise<T>): Promise<T> => {
+  vi.useFakeTimers({ shouldAdvanceTime: false })
+  try {
+    const promise = run()
+    // Attached before any timer runs: an assertion on the settled promise must
+    // not race the rejection that `runAllTimersAsync` can produce.
+    const settled = promise.then(
+      (value) => ({ value }),
+      (error: unknown) => ({ error }),
+    )
+    await vi.runAllTimersAsync()
+    const outcome = await settled
+    if ('error' in outcome) throw outcome.error
+    return outcome.value
+  } finally {
+    vi.useRealTimers()
+  }
+}
+
 const linkedRes = (body: unknown, nextUrl?: string) =>
   new Response(JSON.stringify(body), {
     status: 200,
@@ -25,18 +55,29 @@ describe('github ci client', () => {
   })
 
   describe('triggerGitHubWorkflow', () => {
-    it('POSTs to workflow_dispatch with ref + inputs and returns a synthetic id', async () => {
-      const fetchMock = vi.spyOn(global, 'fetch').mockResolvedValue(new Response(null, { status: 204 }))
+    // The run id used to be a synthetic `owner/repo/workflow@branch` string,
+    // because workflow_dispatch answers 204 with no body. The `workflow_run`
+    // callback reports the real numeric id, so nothing ever matched and every
+    // GitHub order stayed in `provisioning` forever (#207).
+    it('POSTs to workflow_dispatch with ref + inputs, then returns the real run id', async () => {
+      const fetchMock = vi.spyOn(global, 'fetch').mockImplementation(((url: string | URL) =>
+        String(url).includes('/dispatches')
+          ? Promise.resolve(new Response(null, { status: 204 }))
+          : Promise.resolve(
+              jsonRes({ workflow_runs: [{ id: 1234567890, created_at: NOW_ISO, event: 'workflow_dispatch', head_branch: 'main' }] }),
+            )) as unknown as typeof fetch)
 
-      const id = await triggerGitHubWorkflow(
-        'https://github.com/acme/infra',
-        'ghp_token',
-        'deploy.yml',
-        'main',
-        { HOSTNAME: 'web-01' },
+      const id = await withoutWaiting(() =>
+        triggerGitHubWorkflow(
+          'https://github.com/acme/infra',
+          'ghp_token',
+          'deploy.yml',
+          'main',
+          { HOSTNAME: 'web-01' },
+        ),
       )
 
-      expect(id).toBe('acme/infra/deploy.yml@main')
+      expect(id).toBe('1234567890')
       const [url, init] = fetchMock.mock.calls[0]
       expect(String(url)).toBe('https://api.github.com/repos/acme/infra/actions/workflows/deploy.yml/dispatches')
       expect(init?.method).toBe('POST')
@@ -44,6 +85,78 @@ describe('github ci client', () => {
       expect(body).toEqual({ ref: 'main', inputs: { HOSTNAME: 'web-01' } })
       const headers = new Headers(init?.headers as HeadersInit)
       expect(headers.get('authorization')).toBe('Bearer ghp_token')
+
+      // The lookup is scoped to the workflow, the branch, and dispatch events —
+      // an unrelated push build of the same workflow must not be picked up.
+      const lookupUrl = String(fetchMock.mock.calls[1][0])
+      expect(lookupUrl).toContain('/actions/workflows/deploy.yml/runs')
+      expect(lookupUrl).toContain('event=workflow_dispatch')
+      expect(lookupUrl).toContain('branch=main')
+    })
+
+    it('ignores runs that predate the dispatch, and keeps looking', async () => {
+      // An older run of the same workflow on the same branch is the normal case
+      // — the list endpoint returns history. Attributing an order to a run that
+      // finished last week would settle it instantly against the wrong result.
+      let lookups = 0
+      vi.spyOn(global, 'fetch').mockImplementation(((url: string | URL) => {
+        if (String(url).includes('/dispatches')) return Promise.resolve(new Response(null, { status: 204 }))
+        lookups += 1
+        return Promise.resolve(
+          jsonRes({
+            workflow_runs:
+              lookups === 1
+                ? [{ id: 111, created_at: LONG_AGO_ISO, event: 'workflow_dispatch', head_branch: 'main' }]
+                : [
+                    { id: 111, created_at: LONG_AGO_ISO, event: 'workflow_dispatch', head_branch: 'main' },
+                    { id: 222, created_at: NOW_ISO, event: 'workflow_dispatch', head_branch: 'main' },
+                  ],
+          }),
+        )
+      }) as unknown as typeof fetch)
+
+      const id = await withoutWaiting(() =>
+        triggerGitHubWorkflow('https://github.com/a/b', 't', 'w.yml', 'main', {}),
+      )
+
+      expect(id).toBe('222')
+      expect(lookups).toBe(2)
+    })
+
+    it('reports that the workflow may be running untracked when no run appears', async () => {
+      // The dispatch SUCCEEDED. That distinction is the whole message: a run is
+      // executing and this order will not be tracking it, which is a different
+      // thing to go and check than a trigger that never fired.
+      vi.spyOn(global, 'fetch').mockImplementation(((url: string | URL) =>
+        String(url).includes('/dispatches')
+          ? Promise.resolve(new Response(null, { status: 204 }))
+          : Promise.resolve(jsonRes({ workflow_runs: [] }))) as unknown as typeof fetch)
+
+      await expect(
+        withoutWaiting(() =>
+          triggerGitHubWorkflow('https://github.com/acme/infra', 't', 'w.yml', 'main', {}),
+        ),
+      ).rejects.toThrow(/dispatch succeeded but its run could not be identified[\s\S]*untracked/)
+    })
+
+    it('names the missing scope when the run lookup is forbidden', async () => {
+      // A 403 on the runs endpoint is a token without `actions:read`, not a
+      // transient fault — retrying it four more times only delays the order.
+      const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+      let lookups = 0
+      vi.spyOn(global, 'fetch').mockImplementation(((url: string | URL) => {
+        if (String(url).includes('/dispatches')) return Promise.resolve(new Response(null, { status: 204 }))
+        lookups += 1
+        return Promise.resolve(new Response('{"message":"Resource not accessible"}', { status: 403 }))
+      }) as unknown as typeof fetch)
+
+      await expect(
+        withoutWaiting(() =>
+          triggerGitHubWorkflow('https://github.com/acme/infra', 't', 'w.yml', 'main', {}),
+        ),
+      ).rejects.toThrow(/actions:read/)
+      expect(lookups).toBe(1)
+      errSpy.mockRestore()
     })
 
     it('throws a descriptive error on non-2xx', async () => {

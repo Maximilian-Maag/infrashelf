@@ -53,6 +53,97 @@ const parseRepoUrl = (repoUrl: string): { owner: string; repo: string } => {
   return { owner: parts[0], repo: parts[1] }
 }
 
+/**
+ * How long, and how patiently, to wait for GitHub to materialise the run.
+ *
+ * `workflow_dispatch` answers 204 with no body, so the run id has to be looked
+ * up afterwards — and the run does not exist the instant the dispatch returns.
+ * In practice it appears within a second; the later, longer attempts are for a
+ * queue that is briefly busy. The whole schedule is bounded because this runs
+ * INLINE while an order is being placed: `triggerPipelineStacksTracked` awaits
+ * one trigger per pipeline stack, so the worst case here is paid per stack.
+ */
+const RUN_LOOKUP_DELAYS_MS = [400, 800, 1500, 2500, 3500]
+
+/**
+ * How far before the dispatch a run may claim to have been created and still be
+ * accepted as ours. GitHub stamps `created_at` from its own clock, so a portal
+ * running a few seconds fast would otherwise reject the very run it just asked
+ * for. Kept small: every second of skew widens the window in which a DIFFERENT
+ * dispatch of the same workflow could be mistaken for this one.
+ */
+const RUN_CLOCK_SKEW_MS = 10_000
+
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
+
+interface WorkflowRun {
+  id: number
+  created_at: string
+  event: string
+  head_branch: string | null
+}
+
+/**
+ * Find the run that a just-issued `workflow_dispatch` created.
+ *
+ * Returns the run id as a string, or `null` if none appeared within the
+ * schedule above.
+ *
+ * **This is a correlation, not an identity.** GitHub gives the dispatcher no
+ * handle on the run it created, so the run is identified by everything we do
+ * know: same workflow, same branch, `event=workflow_dispatch`, and created no
+ * earlier than the moment we dispatched. Two orders dispatching the SAME
+ * workflow on the SAME branch inside this window are indistinguishable, and the
+ * newest run wins for both — so one order can end up tracking the other's run.
+ * The window is short and the collision needs both orders to target one
+ * workflow and branch, but it is real and it is not fixable from this side:
+ * eliminating it needs the workflow's cooperation (a portal-generated id passed
+ * as an input and echoed into `run-name:`), which cannot be required of a
+ * customer's existing workflow.
+ */
+const resolveDispatchedRunId = async (
+  owner: string,
+  repo: string,
+  workflow: string,
+  branch: string,
+  token: string,
+  dispatchedAt: number,
+): Promise<string | null> => {
+  const url =
+    `https://api.github.com/repos/${owner}/${repo}/actions/workflows/${encodeURIComponent(workflow)}/runs` +
+    `?event=workflow_dispatch&branch=${encodeURIComponent(branch)}&per_page=20`
+
+  for (const delay of RUN_LOOKUP_DELAYS_MS) {
+    await sleep(delay)
+
+    const res = await fetch(url, { headers: ghHeaders(token) })
+    if (!res.ok) {
+      // A 403 here is almost always the token missing `actions:read` rather than
+      // a transient fault, and retrying it four more times only delays the order.
+      // Say which it was: the operator's fix differs.
+      throw await triggerFailure(
+        res.status === 403 || res.status === 404
+          ? 'GitHub run lookup (token needs actions:read on this repository)'
+          : 'GitHub run lookup',
+        res,
+      )
+    }
+
+    const body = (await res.json()) as { workflow_runs?: WorkflowRun[] }
+    const candidates = (body.workflow_runs ?? []).filter(
+      (run) => Date.parse(run.created_at) >= dispatchedAt - RUN_CLOCK_SKEW_MS,
+    )
+    if (candidates.length === 0) continue
+
+    // Newest first; `id` breaks a tie, because `created_at` has second
+    // granularity and two runs a few hundred milliseconds apart share it.
+    candidates.sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at) || b.id - a.id)
+    return String(candidates[0].id)
+  }
+
+  return null
+}
+
 export const triggerGitHubWorkflow = async (
   repoUrl: string,
   token: string,
@@ -61,6 +152,9 @@ export const triggerGitHubWorkflow = async (
   inputs: Record<string, string>,
 ): Promise<string> => {
   const { owner, repo } = parseRepoUrl(repoUrl)
+  // Stamped BEFORE the dispatch: a run created while the POST is in flight is
+  // ours, and a timestamp taken after it would exclude exactly that run.
+  const dispatchedAt = Date.now()
   const res = await fetch(
     `https://api.github.com/repos/${owner}/${repo}/actions/workflows/${encodeURIComponent(workflow)}/dispatches`,
     {
@@ -72,8 +166,29 @@ export const triggerGitHubWorkflow = async (
 
   if (!res.ok) throw await triggerFailure('GitHub workflow dispatch', res)
 
-  // GitHub workflow_dispatch returns 204 with no body; return a synthetic ID
-  return `${owner}/${repo}/${workflow}@${branch}`
+  // `workflow_dispatch` answers 204 with no body. This used to return a
+  // synthetic `owner/repo/workflow@branch` string, which was stored in
+  // `pipeline_id` — and the `workflow_run` callback reports the REAL numeric run
+  // id, so the two never matched. Every GitHub callback selected zero rows and
+  // every GitHub order stayed in `provisioning` forever, with no error, because
+  // from the handler's side the event simply belonged to nothing it knew about
+  // (issue #207).
+  const runId = await resolveDispatchedRunId(owner, repo, workflow, branch, token, dispatchedAt)
+
+  if (!runId) {
+    // The workflow WAS dispatched. Saying so matters: the run is executing and
+    // may be creating infrastructure that this order will not be tracking, which
+    // is a different thing for an operator to go and check than a trigger that
+    // never fired.
+    throw new Error(
+      `GitHub workflow dispatch succeeded but its run could not be identified: ` +
+        `no ${workflow} run on ${branch} appeared within ` +
+        `${RUN_LOOKUP_DELAYS_MS.reduce((a, b) => a + b, 0) / 1000}s. ` +
+        `The workflow may be running untracked — check ${owner}/${repo} in GitHub Actions.`,
+    )
+  }
+
+  return runId
 }
 
 export const listGitHubRepos = async (

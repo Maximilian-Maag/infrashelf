@@ -93,15 +93,27 @@ changed blind.
 
 ---
 
-## Deferred — confirmed findings needing a decision (not changed)
+## Fixed since the audit
 
-- **GitHub-backed orders never complete (HIGH).** `triggerGitHubWorkflow` returns
-  a synthetic id `owner/repo/workflow@branch` (workflow_dispatch has no run id),
-  but the callback stores the numeric `workflow_run.id`. They can never match in
-  `handlePipelineEvent`, so GitHub orders stay `provisioning` forever. Proper fix
-  requires correlating on a unique dispatch input (e.g. `ORDER_ID` echoed into
-  the run) and can't be verified without a live GitHub — needs design + real
-  testing. *File:* `lib/ci/github.ts`, `webhook/handler.ts`.
+- **GitHub-backed orders never complete (HIGH).** `triggerGitHubWorkflow`
+  returned a synthetic id `owner/repo/workflow@branch` while the callback stored
+  the numeric `workflow_run.id`, so the two never matched and GitHub orders
+  stayed `provisioning` forever. `workflow_dispatch` still answers 204 with no
+  body; the run is now looked up afterwards on
+  `/actions/workflows/{workflow}/runs`, filtered to `event=workflow_dispatch`,
+  the dispatched branch, and a `created_at` no earlier than the dispatch.
+
+  A correlation, not an identity: two orders dispatching the same workflow on
+  the same branch within the lookup window are indistinguishable, and eliminating
+  that needs the customer's workflow to echo a portal-generated input into
+  `run-name:` — which cannot be required of an existing workflow. A dispatch
+  whose run cannot be found raises an error that says the workflow may be running
+  untracked, rather than recording an id that will never match.
+  *File:* `lib/ci/github.ts`. Issue #207.
+
+---
+
+## Deferred — confirmed findings needing a decision (not changed)
 
 - **Multi-pipeline orders complete on the first success (HIGH).**
   `handlePipelineEvent` completes an order as soon as *any* pipeline in its array
