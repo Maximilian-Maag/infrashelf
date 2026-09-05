@@ -1,4 +1,4 @@
-.PHONY: help install dev dev-down run run-backend run-frontend build lint type-check policy policy-facts policy-install-opa test-db test-db-prune test test-e2e docker-build-backend docker-build-frontend docker-build db-push db-studio db-seed db-seed-demo handbook handbook-clean clean
+.PHONY: help install dev dev-down run run-backend run-frontend build lint type-check policy policy-facts policy-install-opa test-db test-db-prune test test-e2e docker-build-backend docker-build-frontend docker-build db-push db-studio db-seed db-seed-demo handbook handbook-clean diagrams diagrams-install diagrams-png diagrams-pdf diagrams-clean clean
 
 # pnpm is installed via standalone script — add its bin dir to PATH so make can find it
 PNPM_HOME ?= $(HOME)/.local/share/pnpm
@@ -128,7 +128,27 @@ db-seed-demo:
 db-seed:
 	cd apps/backend && ../../node_modules/.bin/tsx --env-file=.env --tsconfig tsconfig.json src/seed.ts
 
-handbook:
+diagrams-install:
+	@node_modules/.bin/tsx scripts/diagramTools.ts
+
+# The C4 pictures, from docs/architecture/workspace.dsl — the model is the source
+# of truth and the handbook includes what this writes. Both formats by default:
+# --jpeg writes PNG (line art, so JPEG's block artefacts would land on the glyph
+# edges), --pdf writes ONE vector PDF of the C4 diagrams in reading order.
+diagrams: diagrams-install
+	@node_modules/.bin/tsx scripts/diagrams.ts --jpeg --pdf
+
+diagrams-png: diagrams-install
+	@node_modules/.bin/tsx scripts/diagrams.ts --jpeg
+
+diagrams-pdf: diagrams-install
+	@node_modules/.bin/tsx scripts/diagrams.ts --pdf
+
+diagrams-clean:
+	@rm -rf docs/architecture/diagrams .diagrams/puml
+	@echo "Removed generated diagrams (the pinned jars in .diagrams/ are kept)"
+
+handbook: diagrams-png
 	@command -v pdflatex >/dev/null 2>&1 || \
 	  { echo "ERROR: pdflatex not found. Install TeX Live: sudo pacman -S texlive-most"; exit 1; }
 	@echo "Compiling handbook (pass 1/2)..."

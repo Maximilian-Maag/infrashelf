@@ -102,3 +102,6 @@ playwright-report/
 # The pinned opa binary for `make policy` (50 MB, fetched by `make policy-install-opa`)
 # Same reason as node_modules above: no trailing slash.
 .opa
+
+# Pinned diagram tooling (see scripts/diagramTools.ts) and its scratch output.
+.diagrams
