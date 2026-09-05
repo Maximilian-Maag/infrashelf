@@ -474,6 +474,43 @@ const glyphContrast = () => {
     })
 }
 
+/**
+ * Controls inside `container` whose selected state is painted by their OWN
+ * inline `style.backgroundColor` and nothing else — the shape of #186's
+ * second defect, which lived in the catalogue sidebar, the mobile category
+ * pills and the language menu. The one assertion this file had for that
+ * defect (`nav a[aria-current="page"]`, further down) proves the point for the
+ * top nav and nothing else, because the nav is marked with a CSS class, not an
+ * inline style, so a check for the actual defect could not reuse it (#298).
+ *
+ * Scoped to one container per call rather than the whole document: a plain
+ * action button (`loadMore` on /catalog) is ALSO painted with an inline
+ * background and rightly carries no state attribute — it is a single action,
+ * not one of a set of alternatives, and flagging it would be a false
+ * positive. Restricting the scan to a container known to hold a set of
+ * choices keeps the check honest without hand-listing every offending
+ * element by name; `item` names the repeated control inside it.
+ *
+ * The accessible-state attributes are listed INSIDE the function rather than
+ * as a module-level constant: `page.evaluate` ships this function to the
+ * browser as its own source text, with no closure over anything outside it —
+ * a module-level array here would be `undefined` in the page and every check
+ * would throw a ReferenceError rather than measure anything.
+ */
+const colourOnlySelection = ({ container, item }: { container: string; item: string }) => {
+  const STATE_ATTRS = ['aria-current', 'aria-pressed', 'aria-selected']
+  const root = document.querySelector(container)
+  if (!root) return { offenders: [`no "${container}" on this page — the selector may have gone stale`], painted: 0 }
+  const painted = Array.from(root.querySelectorAll<HTMLElement>(item)).filter((el) => el.style.backgroundColor)
+  const offenders = painted
+    .filter((el) => !STATE_ATTRS.some((attr) => el.hasAttribute(attr)))
+    .map((el) => {
+      const name = el.getAttribute('aria-label') ?? el.textContent?.trim().slice(0, 40) ?? '(no accessible name)'
+      return `${el.tagName.toLowerCase()} "${name}" in ${container}`
+    })
+  return { offenders, painted: painted.length }
+}
+
 type Page = import('@playwright/test').Page
 
 const scan = async (page: Page) =>
@@ -1030,11 +1067,122 @@ test.describe('Accessibility — things axe cannot check', () => {
     )
   })
 
+  /*
+   * The check above proves the point for three elements on one page —
+   * /admin/categories, which #186 picked because it was the worst offender in
+   * the app at 22 untranslated strings, and which it only ever scanned in
+   * English before that fix. Neither limit was load-bearing: a hard-coded
+   * string can go untranslated on any page, and #186 fixed /admin, not just
+   * /admin/categories. Widened here to more elements — every nav link, the
+   * skip link, the h1 and the language toggle — and to the same four pages
+   * the focus-indicator sweep above already visits, which keeps the runtime
+   * bounded without scanning all 23 authenticated pages twice (#298).
+   */
+  test('accessible names follow the document language on more than one page', async ({ page }) => {
+    const PAGES = ['/admin/categories', '/catalog', '/', '/orders']
+
+    // Words this app deliberately leaves exactly as English spells them,
+    // because German spells them the same way too. admin/page.test.tsx had to
+    // allow exactly one of these ("Branding") for the same reason (#186) — a
+    // byte-identical string that is NOT on this list is a real untranslated
+    // string, not a coincidence of the language.
+    const IDENTICAL_IN_GERMAN = new Set(['Audit'])
+
+    // Nav hrefs are language-independent, so they make a stable key to compare
+    // the English and German harvests by. The account menu is deliberately
+    // left out: its text is the signed-in user's own name, which is data, not
+    // a translated string, and comparing it would fail for the wrong reason.
+    const harvest = () => {
+      const clean = (s: string | null | undefined) => (s ?? '').trim().replace(/\s+/g, ' ')
+      const named = (el: Element) => clean(el.getAttribute('aria-label')) || clean(el.textContent)
+      const out: Record<string, string> = {}
+      document.querySelectorAll('nav a').forEach((a) => {
+        out[`nav link → ${a.getAttribute('href')}`] = named(a)
+      })
+      const skip = document.querySelector('a[href="#main"]')
+      if (skip) out['skip link'] = named(skip)
+      const h1 = document.querySelector('main h1')
+      if (h1) out['h1'] = named(h1)
+      const langToggle = document.querySelector('button[aria-expanded]')
+      if (langToggle) out['language toggle'] = named(langToggle)
+      return out
+    }
+
+    for (const path of PAGES) {
+      // Set explicitly rather than cleared: `clearCookies()` also throws away
+      // the root session this describe block's tests are signed in with, so
+      // the "English" load after the first iteration was actually the login
+      // page — which has no nav, no h1 and no language toggle, and is why the
+      // very first version of this test failed with "nothing harvested" on
+      // the FIRST page too (the setup project's cookies are not this test's
+      // own). `getLang` treats an explicit 'en' exactly like no cookie at all.
+      // The SAME url both times, and not `page.url()` for the second one: a
+      // cookie added against `/admin/categories` gets path `/admin/`, which
+      // does not replace the `path: '/'` cookie from the first call — the
+      // browser then holds TWO `lang` cookies and sends both, and whichever
+      // one the server's cookie parser prefers wins regardless of which this
+      // test just set. The first version of this test set 'de' that way and
+      // could not reproduce a failure locally: `html[lang]` stayed 'en' no
+      // matter what value was requested, because it was reading the shadowed
+      // cookie, not the new one.
+      const baseURL = test.info().project.use.baseURL!
+      await page.context().addCookies([{ name: 'lang', value: 'en', url: baseURL }])
+      await page.goto(path)
+      await settled(page, path)
+      const en = await page.evaluate(harvest)
+      expect(Object.keys(en).length, `${path} — nothing harvested to compare; the selectors may have gone stale`).toBeGreaterThan(3)
+
+      await page.context().addCookies([{ name: 'lang', value: 'de', url: baseURL }])
+      await page.reload()
+      await settled(page, `${path} (de)`)
+      await expect(page.locator('html')).toHaveAttribute('lang', 'de')
+      const de = await page.evaluate(harvest)
+
+      for (const [where, text] of Object.entries(en)) {
+        if (!text || IDENTICAL_IN_GERMAN.has(text)) continue
+        expect(de[where], `${path} — "${where}" reads "${text}" in German too`).not.toBe(text)
+      }
+    }
+  })
+
   test('the current page is exposed to assistive tech, not signalled by colour alone', async ({ page }) => {
     await page.goto('/catalog')
     const current = page.locator('nav a[aria-current="page"]')
     await expect(current).toHaveCount(1)
     await expect(current).toHaveAttribute('href', '/catalog')
+  })
+
+  /*
+   * The same defect as the test above, everywhere the nav-only check cannot
+   * see it. #186's second defect was never in the nav — the check above only
+   * ever proved the nav was fine. It was here: a category picked in the
+   * catalogue sidebar or the mobile pills, and a language picked in the
+   * header menu, all painted with `style.backgroundColor` alone and nothing
+   * an assistive technology can query (#298).
+   */
+  test('a selection carried only by colour is exposed to assistive tech beyond the top nav', async ({ page }) => {
+    await page.goto('/catalog')
+    await settled(page, '/catalog')
+
+    const GROUPS: [string, string, string][] = [
+      // The desktop sidebar's <ul> and the `md:hidden` mobile pills both
+      // render the same category list from the same state, so both need
+      // their own check — a fix applied to only one of them still leaves
+      // the other broken for whichever viewport shows it.
+      ['catalogue sidebar', 'aside ul', 'button'],
+      ['mobile category pills', 'div.md\\:hidden', 'button'],
+    ]
+    for (const [label, container, item] of GROUPS) {
+      const { offenders, painted } = await page.evaluate(colourOnlySelection, { container, item })
+      expect(painted, `${label} on /catalog — no colour-painted control found; the selector may have gone stale`).toBeGreaterThan(0)
+      expect(offenders, `${label} on /catalog:\n  ${offenders.join('\n  ')}`).toEqual([])
+    }
+
+    // The language menu's options only exist in the DOM once it is opened.
+    await page.getByRole('button', { name: /language/i }).click()
+    const { offenders, painted } = await page.evaluate(colourOnlySelection, { container: '.grid-cols-3', item: 'button' })
+    expect(painted, 'language menu on /catalog — no colour-painted option found; the selector may have gone stale').toBeGreaterThan(0)
+    expect(offenders, `language menu on /catalog:\n  ${offenders.join('\n  ')}`).toEqual([])
   })
 
   test('reduced-motion is honoured', async ({ page }) => {
