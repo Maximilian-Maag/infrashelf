@@ -129,15 +129,31 @@ export default defineConfig({
       testMatch: SINGLETON_SPECS,
     },
   ],
+  /*
+   * Production builds in CI, `next dev` locally (#374).
+   *
+   * `next dev` compiles a route the first time it is requested, inside the
+   * test's own 30s clock. `next start` serves a build, so that cost moves to the
+   * `build` job — which already makes exactly this build and publishes it, so no
+   * job compiles twice.
+   *
+   * Locally it stays `dev`: somebody running one spec wants their edit
+   * reflected without a rebuild, and one worker's compile starves nothing.
+   *
+   * If `next start` reports "Could not find a production build", the artifact
+   * did not land where it should. `upload-artifact` roots the archive at the
+   * least common ancestor of its paths, so `apps/*/.next` arrives as
+   * `backend/.next` — the download must use `path: apps`, not `path: .`.
+   */
   webServer: [
     {
-      command: 'pnpm --filter backend dev',
+      command: process.env.CI ? 'pnpm --filter backend start' : 'pnpm --filter backend dev',
       url: 'http://localhost:3001/api/health',
       reuseExistingServer: true,
       timeout: 180_000,
     },
     {
-      command: 'pnpm --filter frontend dev',
+      command: process.env.CI ? 'pnpm --filter frontend start' : 'pnpm --filter frontend dev',
       url: 'http://localhost:3000/api/ping',
       reuseExistingServer: true,
       timeout: 180_000,

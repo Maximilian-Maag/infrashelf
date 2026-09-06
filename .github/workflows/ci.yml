@@ -216,6 +216,28 @@ jobs:
           NEXTAUTH_URL: http://localhost:3000
           NEXTAUTH_SECRET: ci-build-placeholder-not-used-at-runtime
           API_URL: http://localhost:3001
+          # Inlined into the client bundle at build time, so it has to be what
+          # the e2e run will actually talk to — this build is what those jobs
+          # now serve (#374).
+          NEXT_PUBLIC_API_URL: http://localhost:3001
+
+      # Published so the e2e and accessibility jobs SERVE this build rather than
+      # running `next dev` and compiling each route inside a test's timeout
+      # (#374). This job already makes the build; nothing compiles twice.
+      #
+      # `.next/cache` is excluded: it is the incremental-build cache, the bulk of
+      # the directory, and unread by anything that only serves a build.
+      - name: Publish the builds for the test jobs
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: next-builds
+          path: |
+            apps/backend/.next
+            apps/frontend/.next
+            !apps/backend/.next/cache
+            !apps/frontend/.next/cache
+          retention-days: 1
+          include-hidden-files: true
 
   # ── E2E ──────────────────────────────────────────────────────────────────────
   e2e:
@@ -339,6 +361,17 @@ jobs:
       # which is why this can sit before the webServer Playwright starts. Not
       # `make db-seed-demo`: that passes `--env-file=.env`, and CI has its
       # configuration in the job env rather than in a file.
+      # The build made once in the `build` job. `path: apps`, NOT `path: .`:
+      # upload-artifact roots the archive at the least common ancestor of its
+      # paths, so `apps/backend/.next` arrives in the archive as
+      # `backend/.next` and extracting to `.` would put it in the wrong place —
+      # where `next start` fails with "Could not find a production build".
+      - name: Fetch the builds to serve
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: next-builds
+          path: apps
+
       - name: Seed the demo catalogue
         working-directory: apps/backend
         run: ../../node_modules/.bin/tsx --tsconfig tsconfig.json src/seed-demo.ts
@@ -610,6 +643,17 @@ jobs:
       # (#223). `seed-demo.ts` runs its own bootstrap, so it does not need the app
       # up. Not `make db-seed-demo`: that passes `--env-file=.env`, and CI has its
       # configuration in the job env rather than in a file.
+      # The build made once in the `build` job. `path: apps`, NOT `path: .`:
+      # upload-artifact roots the archive at the least common ancestor of its
+      # paths, so `apps/backend/.next` arrives in the archive as
+      # `backend/.next` and extracting to `.` would put it in the wrong place —
+      # where `next start` fails with "Could not find a production build".
+      - name: Fetch the builds to serve
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: next-builds
+          path: apps
+
       - name: Seed the demo catalogue
         working-directory: apps/backend
         run: ../../node_modules/.bin/tsx --tsconfig tsconfig.json src/seed-demo.ts
