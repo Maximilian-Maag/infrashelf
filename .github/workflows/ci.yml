@@ -94,6 +94,16 @@ jobs:
       - name: Lint frontend
         run: pnpm --filter frontend lint
 
+      # Parses playwright.config.ts and every spec, without a browser.
+      #
+      # Here rather than in the e2e job because a broken config fails FIVE jobs
+      # at once, ninety seconds in, with a stack trace nobody reads as "syntax
+      # error". It has already happened: `apps/*/.next` written inside a block
+      # comment ends the comment at the `*/`, and the whole run died on it.
+      # `--list` costs a couple of seconds and says so immediately.
+      - name: Parse the Playwright config and specs
+        run: pnpm exec playwright test --list > /dev/null
+
       # A step in THIS job rather than a job of its own, deliberately: `dev` and
       # `staging` require four checks by exact name, and a new required job would
       # have to be added to both protections before it gated anything — while an

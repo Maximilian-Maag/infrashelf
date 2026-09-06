@@ -142,8 +142,9 @@ export default defineConfig({
    *
    * If `next start` reports "Could not find a production build", the artifact
    * did not land where it should. `upload-artifact` roots the archive at the
-   * least common ancestor of its paths, so `apps/*/.next` arrives as
-   * `backend/.next` — the download must use `path: apps`, not `path: .`.
+   * least common ancestor of its paths, so the two `.next` directories arrive
+   * as `backend/.next` and `frontend/.next` — the download must use
+   * `path: apps`, not `path: .`.
    */
   webServer: [
     {
