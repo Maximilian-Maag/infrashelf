@@ -49,10 +49,33 @@ const skipped = []
 for (const suite of report.suites ?? []) {
   for (const spec of specs(suite)) {
     for (const test of spec.tests ?? []) {
-      // `status` is the expected outcome ('skipped' for test.skip at declaration
-      // time); the result carries a runtime skip. Either counts.
-      const runtime = test.results?.some((r) => r.status === 'skipped')
-      if (test.status !== 'skipped' && !runtime) continue
+      /*
+       * Did this test END UP skipped — not "was it ever skipped once".
+       *
+       * `test.status` is Playwright's own verdict and covers both a
+       * declaration-time `test.skip` and a runtime `test.skip(cond, reason)`:
+       * a runtime skip rewrites the test's expected status, so the outcome is
+       * 'skipped' either way. It is the same field `stats.skipped` is built
+       * from, which is what made #152's report say `"skipped": 283`.
+       *
+       * The old check ALSO counted any test with a skipped RESULT, and that is
+       * the wrong question in a serial group. When one test there fails,
+       * Playwright skips the rest of the group and then retries the whole
+       * group — so a test that flaked once and passed on the retry has results
+       * `['skipped', 'passed']`. It ran. It passed. Playwright reported
+       * `skipped: 0, flaky: 1`, and this script reported one skip and failed a
+       * job whose accessibility gate was entirely green (#374): the branding
+       * describe block is `mode: 'serial'`, its first test flaked on a contrast
+       * assertion, and the test after it was collateral.
+       *
+       * So: the LAST result is the one that says what happened. A test still
+       * skipped at the end of its retries counts, and it stays counted even if
+       * the group failed — that job fails on the failure anyway, and a skip
+       * hidden behind a failure is exactly the thing worth printing.
+       */
+      const results = test.results ?? []
+      const ended = results[results.length - 1]?.status
+      if (test.status !== 'skipped' && ended !== 'skipped') continue
       const reason = test.annotations?.find((a) => a.type === 'skip' || a.type === 'fixme')?.description
       skipped.push(`${spec.file} › ${spec.title}${reason ? ` — ${reason}` : ''}`)
     }

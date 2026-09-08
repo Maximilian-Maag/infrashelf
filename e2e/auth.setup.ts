@@ -93,12 +93,27 @@ async function enrolSecondFactorIfRequired(page: import('@playwright/test').Page
   // neither appearing is a real failure rather than something to shrug at.
   await page.goto('/')
   const passwordField = page.getByLabel(/confirm with your password/i)
+  // Why each side gave up, kept for the error below.
+  //
+  // These used to be discarded (`() => null`), and a `Promise.race` resolves on
+  // the FIRST settle — including a rejection. A strict mode violation rejects
+  // instantly rather than waiting out the timeout, so when #374 put a second
+  // copy of the page in the DOM for 200ms, this returned `null` in 1.2s and
+  // reported "neither screen appeared" about a page that was plainly showing the
+  // enrolment prompt. The reason was in the discarded rejection all along.
+  const why: string[] = []
   const outcome = await Promise.race([
-    passwordField.waitFor({ state: 'visible', timeout: 60_000 }).then(() => 'enrol' as const, () => null),
+    passwordField.waitFor({ state: 'visible', timeout: 60_000 }).then(
+      () => 'enrol' as const,
+      (e: unknown) => { why.push(`enrolment prompt: ${e instanceof Error ? e.message : String(e)}`); return null },
+    ),
     page
       .getByRole('link', { name: /browse catalog/i })
       .waitFor({ state: 'visible', timeout: 60_000 })
-      .then(() => 'ready' as const, () => null),
+      .then(
+        () => 'ready' as const,
+        (e: unknown) => { why.push(`dashboard: ${e instanceof Error ? e.message : String(e)}`); return null },
+      ),
   ])
 
   if (outcome === 'ready') return
@@ -107,7 +122,8 @@ async function enrolSecondFactorIfRequired(page: import('@playwright/test').Page
     // the whole suite failing later on symptoms that point at the wrong file.
     throw new Error(
       `After signing in, neither the dashboard nor the second-factor enrolment prompt appeared. ` +
-        `Currently at ${page.url()}.`,
+        `Currently at ${page.url()}.` +
+        (why.length ? `\n\nWhat each side reported:\n  - ${why.join('\n  - ')}` : ''),
     )
   }
 

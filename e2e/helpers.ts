@@ -351,6 +351,31 @@ export function requireStack(ok: boolean, reason: string): void {
  * which is worse than not waiting, because it reads like a guarantee.
  * `data-hydrated-path` follows the route, so `hydrated(page, /^\/orders\/\d+$/)`
  * waits for the page you actually arrived at.
+ *
+ * ── AND the streamed copy has to be gone (#374) ──────────────────────────────
+ *
+ * A production build STREAMS. `next start` sends the shell first and delivers
+ * each Suspense boundary's real content later, parked in a `<div hidden
+ * id="S:0">` at the end of `<body>`, where an inline script then moves it into
+ * place. For the ~200ms between those two events the page's content is in the
+ * document TWICE — once where it belongs, once in the staging div.
+ *
+ * `getByRole` never saw this, because a `[hidden]` subtree is not in the
+ * accessibility tree. `getByText`, `getByLabel` and CSS locators do see it, and
+ * they see it as a strict mode violation: "resolved to 2 elements", one of them
+ * the same `<p>` or the same `<input>`. Duplicate `id`s too — `locator('#order')`
+ * matched two nodes.
+ *
+ * Which is how #374 presented. `next dev` does not stream like this, so moving
+ * the e2e jobs onto production builds failed fifteen tests across four specs
+ * that nobody had touched, plus `auth.setup` itself: its `Promise.race` on two
+ * locators got an instant rejection from the strict mode violation rather than a
+ * timeout, and reported "neither the dashboard nor the enrolment prompt
+ * appeared" about a page that was showing the enrolment prompt.
+ *
+ * So this waits for the staging divs to drain, and every page-level locator in
+ * the suite is sound again without being rewritten. Same reasoning as the `goto`
+ * wrapper in fixtures.ts: 249 call sites cannot each remember a rule.
  */
 export async function hydrated(page: Page, path?: RegExp): Promise<void> {
   await page
@@ -358,6 +383,11 @@ export async function hydrated(page: Page, path?: RegExp): Promise<void> {
       (source: string | null) => {
         const el = document.documentElement
         if (el.dataset.hydrated !== 'true') return false
+        // React's own staging containers for streamed Suspense content. Matched
+        // by the `S:` id prefix rather than by `[hidden]` alone: the root layout
+        // leaves an empty `<div hidden>` of its own in place permanently, and
+        // waiting for THAT to go would wait 15s on every single navigation.
+        if (document.querySelector('div[hidden][id^="S:"]') !== null) return false
         return source === null || new RegExp(source).test(el.dataset.hydratedPath ?? '')
       },
       path ? path.source : null,
