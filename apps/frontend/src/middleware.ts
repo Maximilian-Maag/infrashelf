@@ -43,6 +43,7 @@ export const config = {
      *   - /login and /impressum (public pages)
      *   - /api/auth/* (NextAuth internal endpoints)
      *   - /api/login-challenge (step one of signing in — see below)
+     *   - the PWA's own files (see below)
      *   - Next.js static files and images
      *
      * /api/login-challenge is reached by someone who is BY DEFINITION not signed
@@ -58,7 +59,33 @@ export const config = {
      * to. A middleware 307 to /login would be followed by `fetch` and the caller
      * would parse the login page as its JSON. The route does its own auth check
      * and answers 401, which lib/api.ts already turns into a sign-out.
+     *
+     * sw.js, manifest.webmanifest, the two icons and /offline are the PWA's own
+     * files, and #148 does not work with any of them behind the session — found
+     * while serving production builds (#374). None of the three is a request a
+     * browser will follow a redirect for and retry:
+     *
+     *   - A MANIFEST is fetched with credentials OMITTED, per spec, unless its
+     *     link carries `crossorigin="use-credentials"` — which Next's generated
+     *     metadata link does not. So it 307'd to /login for every visitor,
+     *     signed in or not, and the install prompt had no manifest to read. The
+     *     point of #148 — the operator's name and colours on a home screen —
+     *     was unreachable in the one place it exists for.
+     *   - A SERVICE WORKER script behind a redirect is refused outright ("The
+     *     script resource is behind a redirect, which is disallowed"), and
+     *     registration runs from the root layout, which renders on /login too.
+     *     A first-time visitor is signed out by definition, so the worker never
+     *     installed at all; an administrator who still owes a second factor is
+     *     redirected on every path, so it never installed for them either.
+     *   - /offline is precached at install and is the ONLY page the worker
+     *     caches. Redirected, the install caches a login page, and the offline
+     *     fallback offers a sign-in form with no network to sign in over.
+     *
+     * None of it is session data: the icons and the worker are static build
+     * output, /offline carries no data by construction, and the manifest is the
+     * `branding` row — already served publicly by /api/public/branding, which
+     * is where the dashboard shell itself reads it from.
      */
-    '/((?!login|impressum|api/auth|api/login-challenge|api/ping|api/proxy|_next/static|_next/image|favicon\\.ico).*)',
+    '/((?!login|impressum|api/auth|api/login-challenge|api/ping|api/proxy|sw\\.js|manifest\\.webmanifest|icon-maskable\\.svg|icon\\.svg|offline|_next/static|_next/image|favicon\\.ico).*)',
   ],
 }
