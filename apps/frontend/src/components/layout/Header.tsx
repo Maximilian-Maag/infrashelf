@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { signOut } from 'next-auth/react'
 import { clearServiceWorkerCaches } from '@/lib/serviceWorker'
+import { get, del } from '@/lib/api'
+import type { SessionInfo } from '@infrashelf/types'
 import { LanguageSwitcher } from './LanguageSwitcher'
 import { CartLink } from './CartLink'
 import { useLang } from '@/lib/useLang'
@@ -172,6 +174,35 @@ export function Header({
                     await clearServiceWorkerCaches()
                   } catch {
                     // Tidiness failed. Ending the session is what was asked for.
+                  }
+                  /*
+                   * End the session on the SERVER, not only in this browser.
+                   *
+                   * Clearing the cookie is not the same as ending the session,
+                   * and #391 is the gap between them: a `/api/auth/session`
+                   * read that was already in flight when sign-out landed still
+                   * carries the old cookie, so NextAuth validates it and mints
+                   * a FRESH one. The trace is unambiguous —
+                   * `set-cookie: authjs.session-token=; Max-Age=0` from the
+                   * sign-out, and a full token back from the very next read.
+                   * The session came back to life, on a machine whose user had
+                   * just left.
+                   *
+                   * A JWT cannot be un-issued, so the fix is to make the
+                   * resurrected one worthless: the backend checks every token
+                   * against the `sessions` table, and a revoked row fails that
+                   * check whatever the browser is still holding.
+                   *
+                   * Best-effort, by the same rule as the caches above (#359):
+                   * this must not become a second way for the only sign-out
+                   * affordance in the app to do nothing. A revoke that fails
+                   * leaves the old race exactly as it was and no worse.
+                   */
+                  try {
+                    const current = (await get<SessionInfo[]>('/api/sessions')).find((s) => s.current)
+                    if (current) await del(`/api/sessions/${current.id}`)
+                  } catch {
+                    // The cookie still goes, and the token still expires on its own.
                   }
                   /*
                    * `redirect: false`, then navigate ourselves.

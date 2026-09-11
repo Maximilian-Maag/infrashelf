@@ -10,10 +10,12 @@ vi.mock('next/navigation', () => ({
 }))
 vi.mock('next-auth/react', () => ({ signOut: vi.fn() }))
 vi.mock('@/lib/serviceWorker', () => ({ clearServiceWorkerCaches: vi.fn() }))
+vi.mock('@/lib/api', () => ({ get: vi.fn(), del: vi.fn() }))
 
 import { Header } from './Header'
 import { signOut } from 'next-auth/react'
 import { clearServiceWorkerCaches } from '@/lib/serviceWorker'
+import { get, del } from '@/lib/api'
 
 const accountPanel = () => screen.getByRole('link', { name: /orders/i }).closest('div')
 const details = () => document.querySelector('details') as HTMLDetailsElement
@@ -368,6 +370,10 @@ describe('signing out', () => {
     vi.mocked(signOut).mockReset()
     vi.mocked(clearServiceWorkerCaches).mockReset()
     vi.mocked(clearServiceWorkerCaches).mockResolvedValue(undefined)
+    vi.mocked(get).mockReset().mockResolvedValue([
+      { id: 7, current: true }, { id: 8, current: false },
+    ] as never)
+    vi.mocked(del).mockReset().mockResolvedValue(undefined as never)
   })
 
   it('ends the session and returns to the login page', async () => {
@@ -437,6 +443,54 @@ describe('signing out', () => {
     // The redirect would otherwise race the clearing, and the shell and this
     // operator's branding would survive on a shared device (#148).
     expect(order).toEqual(['cleared', 'signedOut'])
+  })
+
+  /*
+   * #391: clearing the cookie is not ending the session.
+   *
+   * A `/api/auth/session` read already in flight when sign-out lands still
+   * carries the old cookie, so NextAuth mints a fresh one and the session comes
+   * back. A JWT cannot be un-issued, so what has to happen is the server-side
+   * row being revoked — then the resurrected token authenticates nothing.
+   */
+  it('revokes this session on the server, not just the cookie', async () => {
+    const user = userEvent.setup()
+    render(<Header userName="Root Admin" lang="en" />)
+    await user.click(screen.getByText(/my account/i))
+    await user.click(screen.getByRole('button', { name: /sign out/i }))
+
+    await waitFor(() => expect(del).toHaveBeenCalledWith('/api/sessions/7'))
+    // The OTHER session is someone else's problem — "sign out everywhere" is a
+    // different affordance, and taking it here would be a surprise.
+    expect(del).toHaveBeenCalledTimes(1)
+  })
+
+  it('revokes before ending the session, so the token is dead when the cookie goes', async () => {
+    const order: string[] = []
+    vi.mocked(del).mockImplementation((async () => { order.push('revoked') }) as never)
+    vi.mocked(signOut).mockImplementation((async () => { order.push('signedOut') }) as never)
+    const user = userEvent.setup()
+    render(<Header userName="Root Admin" lang="en" />)
+    await user.click(screen.getByText(/my account/i))
+    await user.click(screen.getByRole('button', { name: /sign out/i }))
+
+    await waitFor(() => expect(order).toEqual(['revoked', 'signedOut']))
+  })
+
+  /*
+   * Same rule as the caches above (#359). This is the only sign-out affordance
+   * in the app, and a backend that cannot be reached must not be a second way
+   * for it to do nothing — a failed revoke leaves the old race exactly as it
+   * was, and no worse.
+   */
+  it('still ends the session when the revoke fails', async () => {
+    vi.mocked(get).mockRejectedValue(new Error('backend unreachable'))
+    const user = userEvent.setup()
+    render(<Header userName="Root Admin" lang="en" />)
+    await user.click(screen.getByText(/my account/i))
+    await user.click(screen.getByRole('button', { name: /sign out/i }))
+
+    await waitFor(() => expect(signOut).toHaveBeenCalledWith({ redirect: false }))
   })
 
   // The regression itself: whatever cache-clearing does, the session ends.
