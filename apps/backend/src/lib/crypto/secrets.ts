@@ -191,11 +191,30 @@ export const decryptSecret = (envelope: string): string => {
 }
 
 /**
- * True when `value` looks like one of our envelopes.
+ * True when `value` is structurally one of our envelopes.
  *
  * Used by tests asserting that ciphertext — not the plaintext — is what reached
- * the column, and by the probe path to tell an encrypted credential from a
- * legacy plaintext one should a future migration of `ci_sources` want that.
+ * the column, and by `lib/ci/token.ts` to tell an encrypted token from a legacy
+ * plaintext one while `ci_sources` carries both (#111).
+ *
+ * That second caller is why this checks the SHAPE and not just the `v1:` prefix.
+ * A stored value it misjudges is not a cosmetic error: a plaintext token read as
+ * an envelope throws on decrypt, and the prefix alone is three characters that a
+ * secret could begin with by coincidence. So the body has to be valid base64 and
+ * long enough to hold the IV and the tag it claims to carry — which no
+ * provider's token format does by accident.
+ *
+ * Still not proof: only `decryptSecret` can say whether it authenticates under
+ * the key. This narrows "might be an envelope" to "is shaped like one", and the
+ * decrypt is what decides.
  */
-export const isEncryptedEnvelope = (value: string): boolean =>
-  value.startsWith(`${ENVELOPE_VERSION}:`)
+export const isEncryptedEnvelope = (value: string): boolean => {
+  if (!value.startsWith(`${ENVELOPE_VERSION}:`)) return false
+  const body = value.slice(ENVELOPE_VERSION.length + 1)
+  // `base64` decoding in node is lenient — it skips characters it does not
+  // recognise rather than failing — so a round trip is what actually rejects a
+  // body that is not base64.
+  const decoded = Buffer.from(body, 'base64')
+  if (decoded.toString('base64').replace(/=+$/, '') !== body.replace(/=+$/, '')) return false
+  return decoded.length >= IV_BYTES + TAG_BYTES
+}

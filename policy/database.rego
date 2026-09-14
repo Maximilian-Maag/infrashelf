@@ -15,6 +15,7 @@ package repo.policy
 # caller needed — which is what a named projection makes visible.
 intentional_secret_reads := {
 	"apps/backend/src/lib/db/queries.ts accessToken": "the CI source's API token, sent as the PRIVATE-TOKEN header to GitLab; never returned to a portal client",
+	"apps/backend/src/lib/bootstrap/index.ts accessToken": "the one-time backfill that encrypts CI source tokens written before #111; it reads each plaintext value only to write the envelope back over it, logs the COUNT and never the value, and the rows never leave the function",
 	"apps/backend/src/lib/ci/webhooks.ts webhookToken": "the pipeline trigger token, sent to the CI provider to start a pipeline",
 	"apps/backend/src/lib/services/auth.ts passwordHash": "bcrypt.compare for a password change; the hash is compared and discarded",
 	"apps/backend/src/lib/services/twoFactor.ts passwordHash": "bcrypt.compare before enrolling or replacing a factor (#36 invariant 2: a password alone may not swap the factor out); TwoFactorAccount is service-internal and no route returns it",

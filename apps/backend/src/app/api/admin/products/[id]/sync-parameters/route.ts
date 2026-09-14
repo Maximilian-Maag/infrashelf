@@ -9,6 +9,7 @@ import { parseTerraformVariables } from '@/lib/tfparser'
 import { logAudit } from '@/lib/audit'
 import type { CiProvider } from '@infrashelf/types'
 import { isReservedCiVariable, isPipelineSuppliedVariable } from '@/lib/ci/reserved'
+import { readAccessTokenResult } from '@/lib/ci/token'
 
 export async function POST(
   req: NextRequest,
@@ -81,10 +82,18 @@ export async function POST(
 
   const src = ciSourceRows[0]
 
+  // Outside the try below, so a credential this server cannot read answers 503
+  // rather than being reported as "could not fetch the template" — which would
+  // send an operator to look at GitLab for a problem that is here.
+  const token = readAccessTokenResult(src.accessToken)
+  if (!token.ok) {
+    return NextResponse.json({ error: token.message }, { status: token.status })
+  }
+
   let content: string
   try {
     content = await getFileContent(
-      { url: src.url, accessToken: src.accessToken, provider: src.provider as CiProvider },
+      { url: src.url, accessToken: token.data, provider: src.provider as CiProvider },
       projectId,
       'main',
       `templates/${template}/variables.tf`,

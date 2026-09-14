@@ -317,6 +317,13 @@ jobs:
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/infrashelf_e2e
       JWT_SECRET: ci-e2e-jwt-secret-not-used-in-prod
+      # Required since #111: the demo seed creates a CI source, and a CI source
+      # carries an access token that is encrypted at rest. Without a key
+      # `seedDemoData` refuses rather than writing plain text, and every e2e
+      # fixture that depends on the demo catalogue would be missing.
+      # A fixed value, because it is not protecting anything here — the database
+      # is created and dropped by this job.
+      SECRET_ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
       ADMIN_EMAIL: root@test.dev
       ADMIN_PASSWORD: testpassword123
       NEXTAUTH_URL: http://localhost:3000
@@ -607,6 +614,13 @@ jobs:
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/infrashelf_e2e
       JWT_SECRET: ci-e2e-jwt-secret-not-used-in-prod
+      # Required since #111: the demo seed creates a CI source, and a CI source
+      # carries an access token that is encrypted at rest. Without a key
+      # `seedDemoData` refuses rather than writing plain text, and every e2e
+      # fixture that depends on the demo catalogue would be missing.
+      # A fixed value, because it is not protecting anything here — the database
+      # is created and dropped by this job.
+      SECRET_ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
       ADMIN_EMAIL: root@test.dev
       ADMIN_PASSWORD: testpassword123
       NEXTAUTH_URL: http://localhost:3000

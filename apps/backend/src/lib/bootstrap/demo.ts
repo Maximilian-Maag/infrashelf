@@ -19,6 +19,7 @@ import {
 } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
 import { isLoopback } from '@/lib/ci/transport'
+import { encryptSecret, isSecretEncryptionConfigured, secretEncryptionUnavailableReason } from '@/lib/crypto/secrets'
 
 /**
  * A small, deterministic catalogue for a development database.
@@ -251,6 +252,23 @@ export const seedDemoData = async (): Promise<{ created: boolean }> => {
 
   if (refusedByEnvironment()) return { created: false }
 
+  /*
+   * Nowhere safe to put the demo CI token, so do not create one (#111).
+   *
+   * Before the transaction and beside the URL check above, for the same reason:
+   * a seed that cannot finish safely should not start. Throwing rather than
+   * returning `{ created: false }` — that value means "already present, nothing
+   * to do", and a misconfigured deployment silently reporting success is how a
+   * demo catalogue goes missing with nothing saying why.
+   */
+  if (!isSecretEncryptionConfigured()) {
+    throw new Error(
+      `Cannot seed demo data: ${secretEncryptionUnavailableReason()} ` +
+        'The demo CI source carries an access token, and SECRET_ENCRYPTION_KEY ' +
+        'is where it gets encrypted: 64 hex characters (openssl rand -hex 32).',
+    )
+  }
+
   // One transaction around the marker lookup AND every write. Without it a
   // failure halfway through left the marker category behind, so the next run
   // found it, reported "already present" and skipped a dataset that had never
@@ -276,7 +294,10 @@ export const seedDemoData = async (): Promise<{ created: boolean }> => {
     const [category] = await tx.insert(categories).values({ name: MARKER_CATEGORY }).returning()
     const [ci] = await tx
       .insert(ciSources)
-      .values({ name: 'Demo GitLab', url: ciBaseUrl, accessToken: demoSecret(), provider: 'gitlab' })
+      // Encrypted like any other, so the demo catalogue does not reintroduce the
+      // plaintext column #111 removed. Guarded by the caller: `seedDemo` refuses
+      // to run when there is nowhere safe to put it.
+      .values({ name: 'Demo GitLab', url: ciBaseUrl, accessToken: encryptSecret(demoSecret()), provider: 'gitlab' })
       .returning()
 
     const [frankfurt] = await tx

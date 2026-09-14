@@ -4,6 +4,13 @@ import { eq } from 'drizzle-orm'
 import { listProjects, listBranches, listFiles, getFileContent } from '@/lib/ci'
 import { parseTerraformVariables } from '@/lib/tfparser'
 import { ok, err, type Result } from '@/lib/services/result'
+import {
+  encryptSecret,
+  isSecretEncryptionConfigured,
+  secretEncryptionUnavailableReason,
+} from '@/lib/crypto/secrets'
+import { readAccessToken } from '@/lib/ci/token'
+export { readAccessToken } from '@/lib/ci/token'
 import { logAudit, logAuditWith, changedFields } from '@/lib/audit'
 import { isEmptyUpdate, EMPTY_UPDATE_MESSAGE } from '@/lib/services/updates'
 import type { CiProject, CiBranch, CiFile } from '@infrashelf/types'
@@ -29,6 +36,27 @@ export interface UpdateCiSourceInput {
   provider?: 'gitlab' | 'github' | 'bitbucket'
 }
 
+/**
+ * Refuse to write a token when there is nowhere safe to put it.
+ *
+ * The same rule `createIntegration` applies, and for the reason the crypto
+ * module states: storing plaintext "just for now" is the state #111 exists to
+ * get out of, and afterwards it is indistinguishable from a correctly encrypted
+ * column.
+ *
+ * READS are deliberately not gated on this. An existing deployment with no key
+ * keeps working with the plaintext tokens it already has; only writing a new one
+ * is refused, and the message tells the operator exactly what to set.
+ */
+const refuseUnlessEncryptable = (): Result<never> | null =>
+  isSecretEncryptionConfigured()
+    ? null
+    : err(
+        503,
+        `Cannot store a CI source access token: ${secretEncryptionUnavailableReason()} ` +
+          'Set SECRET_ENCRYPTION_KEY to 64 hex characters (openssl rand -hex 32) and restart the backend.',
+      )
+
 const safeColumns = {
   id: ciSources.id,
   name: ciSources.name,
@@ -36,13 +64,29 @@ const safeColumns = {
   provider: ciSources.provider,
 }
 
+/**
+ * One CI source, with its access token DECRYPTED (#111).
+ *
+ * Decrypted here rather than at the four browse functions below, for the reason
+ * `db/queries.ts` decrypts at its own edge: every caller wants a usable token
+ * and none of them should have to remember. Written the other way round, the
+ * browse endpoints handed a `v1:` envelope to GitLab as a PRIVATE-TOKEN header
+ * and the failure came back as an authentication error against the wrong
+ * component — which is what `ciSources.test.ts` caught.
+ *
+ * The row this returns therefore carries a plaintext secret. It is
+ * service-internal: nothing below returns it to a caller, and the public shapes
+ * go through `safeColumns`.
+ */
 const getSourceOrErr = async (id: number) => {
   const rows = await db
     .select()
     .from(ciSources)
     .where(eq(ciSources.id, id))
     .limit(1)
-  return rows[0] ?? null
+  const row = rows[0]
+  if (!row) return null
+  return { ...row, accessToken: readAccessToken(row.accessToken) }
 }
 
 export const listCiSources = async (): Promise<Result<CiSourcePublic[]>> => {
@@ -58,9 +102,15 @@ export const createCiSource = async (
   input: CreateCiSourceInput,
   actorId?: number,
 ): Promise<Result<CiSourcePublic>> => {
+  const refusal = refuseUnlessEncryptable()
+  if (refusal) return refusal
+
   const [source] = await db
     .insert(ciSources)
-    .values(input)
+    // Encrypted HERE and not in the route, so every caller gets it — the demo
+    // seeder and any future importer included. `input` is not spread onward
+    // anywhere below, so the plaintext ends at this statement.
+    .values({ ...input, accessToken: encryptSecret(input.accessToken) })
     .returning(safeColumns)
 
   // Name and URL only. `input` also carries the access token, and an audit log an
@@ -93,9 +143,23 @@ export const updateCiSource = async (
 ): Promise<Result<CiSourcePublic>> => {
   if (isEmptyUpdate(input)) return err(400, EMPTY_UPDATE_MESSAGE)
 
+  /*
+   * Only when a token is actually being written. An admin renaming a source on a
+   * deployment with no key configured must still be able to rename it — the
+   * refusal belongs to the secret, not to the row.
+   */
+  if (input.accessToken !== undefined) {
+    const refusal = refuseUnlessEncryptable()
+    if (refusal) return refusal
+  }
+
   const [updated] = await db
     .update(ciSources)
-    .set(input)
+    .set(
+      input.accessToken === undefined
+        ? input
+        : { ...input, accessToken: encryptSecret(input.accessToken) },
+    )
     .where(eq(ciSources.id, id))
     .returning(safeColumns)
 
