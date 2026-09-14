@@ -4122,12 +4122,14 @@ unconvertible currency is refused by a \code{block} budget: with no rate
 there is no way to show it fits, and the message names the missing rate
 as the remedy.
 
-Under concurrency the block is best-effort. The check and the insert are
-separate operations, so two orders placed against one cost centre in the
-same instant can both pass a check only one should have; the overspend is
-bounded by a single order. Making it strict means serialising all
-ordering against a cost centre, which is a throughput cost paid on every
-order --- the trade-off is recorded in issue \#403.
+Under concurrency the block holds. The check and the insert are one
+transaction, and it locks the cost centre before reading the committed
+figure, so two orders placed against one cost centre in the same instant
+cannot both pass a check only one should have --- the second waits for
+the first to commit and is measured against it. The cost is that
+ordering against a \emph{single} cost centre is serialised at checkout;
+different cost centres do not wait for each other, and provisioning,
+email and audit entries all happen after the lock is released.
 
 % ─────────────────────────────────────────────────────────────
 %  APPENDICES

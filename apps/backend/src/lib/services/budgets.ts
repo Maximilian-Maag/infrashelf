@@ -33,6 +33,44 @@ import { linePriceSql, lineCurrencySql } from '@/lib/services/sizes'
  */
 export const COMMITTED_STATUSES = ['pending', 'provisioning', 'completed'] as const
 
+type Db = typeof db
+/** The handle a `db.transaction` callback receives. */
+type Tx = Parameters<Parameters<Db['transaction']>[0]>[0]
+/**
+ * Where a budget read runs (#403).
+ *
+ * Every read below takes one, defaulting to the pool, exactly as `logAuditWith`
+ * does. It exists so the check and the insert it guards can share ONE
+ * connection: called through the module-level `db` from inside a transaction,
+ * these would each check out a SECOND connection while the first is held, and
+ * under load that is a pool deadlock on the checkout path — a worse failure
+ * than the overspend it is preventing.
+ */
+type Executor = Db | Tx
+
+/**
+ * The namespace half of the advisory lock key, so `pg_advisory_xact_lock` here
+ * cannot collide with any other use of advisory locks in this database. The
+ * value is arbitrary and only has to be stable.
+ */
+const BUDGET_LOCK_NAMESPACE = 40325
+
+/**
+ * Serialise everything ordering against one cost centre, for the rest of the
+ * transaction (#403).
+ *
+ * Taken BEFORE the budget is read, so a concurrent order cannot read the same
+ * `committed` and then insert against it. Released by Postgres at commit or
+ * rollback — there is no unlock path to forget.
+ *
+ * It serialises checkout for a single cost centre and nothing else. That cost is
+ * real in an estate where one cost centre carries most of the traffic, and it is
+ * the price of a `block` budget meaning what it says.
+ */
+export const lockCostCentreBudget = async (tx: Tx, costCentreId: number): Promise<void> => {
+  await tx.execute(sql`SELECT pg_advisory_xact_lock(${BUDGET_LOCK_NAMESPACE}, ${costCentreId})`)
+}
+
 /*
  * The wire types live in `@infrashelf/types` and are re-exported here.
  *
@@ -71,8 +109,8 @@ const convert = (
 const round = (value: number): number => Math.round(value * 100) / 100
 
 /** Every stored rate, keyed by currency code. EUR is the base and has no row. */
-const loadRates = async (): Promise<Record<string, number>> => {
-  const rows = await db
+const loadRates = async (executor: Executor = db): Promise<Record<string, number>> => {
+  const rows = await (executor as Db)
     .select({ code: exchangeRates.currencyCode, rate: exchangeRates.rate })
     .from(exchangeRates)
   return Object.fromEntries(rows.map((r) => [r.code, parseFloat(r.rate)]))
@@ -87,8 +125,12 @@ const loadRates = async (): Promise<Record<string, number>> => {
  * where the order deliberately stores none. A check that read only
  * `orders.cost_center_id` would ignore most orders in a normal catalogue.
  */
-export const loadBudgetState = async (costCenterId: number, now = new Date()): Promise<BudgetState | null> => {
-  const [centre] = await db
+export const loadBudgetState = async (
+  costCenterId: number,
+  now = new Date(),
+  executor: Executor = db,
+): Promise<BudgetState | null> => {
+  const [centre] = await (executor as Db)
     .select({
       id: costCenters.id,
       code: costCenters.code,
@@ -128,7 +170,7 @@ export const loadBudgetState = async (costCenterId: number, now = new Date()): P
   ]
   if (centre.period === 'monthly') conditions.push(gte(orders.createdAt, startOfMonthUtc(now)))
 
-  const rows = await db
+  const rows = await (executor as Db)
     .select({
       /*
        * The snapshot is what the customer was actually charged (#38); the live
@@ -157,7 +199,7 @@ export const loadBudgetState = async (costCenterId: number, now = new Date()): P
     )
     .where(and(...conditions))
 
-  const rates = await loadRates()
+  const rates = await loadRates(executor)
 
   let committed = 0
   let unpriced = 0
@@ -308,10 +350,11 @@ export const checkBudget = async (
   costCenterId: number | null,
   now = new Date(),
   incoming?: IncomingLine | null,
+  executor: Executor = db,
 ): Promise<BudgetVerdict> => {
   if (costCenterId === null) return { outcome: 'ok', state: null, message: null }
 
-  const state = await loadBudgetState(costCenterId, now)
+  const state = await loadBudgetState(costCenterId, now, executor)
   if (!state || state.amount === null || state.currency === null) {
     return { outcome: 'ok', state, message: null }
   }
@@ -337,7 +380,7 @@ export const checkBudget = async (
    * so an order that lands exactly on the limit is inside it and the next one
    * is not.
    */
-  const line = await convertIncoming(incoming, state.currency)
+  const line = await convertIncoming(incoming, state.currency, executor)
   const wouldExceed = line.amount !== null && state.committed + line.amount > state.amount
 
   /*
@@ -390,6 +433,7 @@ export const checkBudget = async (
 const convertIncoming = async (
   incoming: IncomingLine | null | undefined,
   budgetCurrency: string,
+  executor: Executor = db,
 ): Promise<{ amount: number | null; reason: string | null }> => {
   if (!incoming || incoming.price === null || incoming.price === undefined) {
     return { amount: null, reason: null }
@@ -399,7 +443,7 @@ const convertIncoming = async (
   if (!Number.isFinite(total)) return { amount: null, reason: null }
   if (from === budgetCurrency) return { amount: round(total), reason: null }
 
-  const converted = convert(total, from, budgetCurrency, await loadRates())
+  const converted = convert(total, from, budgetCurrency, await loadRates(executor))
   return converted === null
     ? { amount: null, reason: `${total.toFixed(2)} ${from}` }
     : { amount: round(converted), reason: null }
@@ -413,21 +457,32 @@ const convertIncoming = async (
  * carry, not what they think it will count against, so the gate and the report
  * cannot disagree.
  */
-export const checkBudgetForOrder = async (
+/**
+ * Which cost centre an order counts against (#403).
+ *
+ * Was the front half of `checkBudgetForOrder`, which resolved the centre and
+ * checked it in one call. The caller now has to know the answer BEFORE the
+ * check runs — it is the advisory-lock key, and a lock taken after the read
+ * would not close the window it exists to close — so the two halves are
+ * separate and `checkBudgetForOrder` has no callers left.
+ *
+ * The resolution itself is unchanged and still follows `costs.ts`: the order's
+ * own cost centre where it has one, its project's otherwise.
+ */
+export const resolveBudgetCostCentre = async (
   projectId: number,
   orderCostCenterId: number | null,
-  now = new Date(),
-  incoming?: IncomingLine | null,
-): Promise<BudgetVerdict> => {
-  if (orderCostCenterId !== null) return checkBudget(orderCostCenterId, now, incoming)
+  executor: Executor = db,
+): Promise<number | null> => {
+  if (orderCostCenterId !== null) return orderCostCenterId
 
-  const [project] = await db
+  const [project] = await (executor as Db)
     .select({ costCenterId: projects.costCenterId })
     .from(projects)
     .where(eq(projects.id, projectId))
     .limit(1)
 
-  return checkBudget(project?.costCenterId ?? null, now, incoming)
+  return project?.costCenterId ?? null
 }
 
 export type BudgetInput = SetCostCentreBudgetRequest
