@@ -20,6 +20,11 @@ export const listPipelineStacks = async (productId: number): Promise<Result<Pipe
     .select(publicColumns)
     .from(pipelineStacks)
     .where(eq(pipelineStacks.productId, productId))
+    // Ordered, or the list an administrator reads reshuffles between two page
+    // loads for no reason they can see. By id, which is the order they were
+    // added in; the steps INSIDE a stack are a jsonb array and keep their own
+    // order, so provisioning was never affected by this.
+    .orderBy(pipelineStacks.id)
 
   return ok(rows as PipelineStack[])
 }

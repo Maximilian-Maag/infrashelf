@@ -89,6 +89,21 @@ export const loadApplicableParameters = async (
     })
     .from(parameters)
     .where(and(...conditions))
+    /*
+     * Ordered, because these rows ARE the order form's controls and, worse,
+     * because `resolveParameterDefs` reads them in sequence.
+     *
+     * Without it the order is whatever plan Postgres chose. That decided two
+     * things it had no business deciding: the order a person fills the form in,
+     * and — where two rows tie on every precedence rule below — WHICH
+     * definition wins. See the tie-break there; this is the half that makes the
+     * input to it stable.
+     *
+     * By `id`, which is creation order: an administrator who adds parameters in
+     * a sensible order gets them back that way. `parameters` has no display
+     * column, and adding one is a bigger question than making this deterministic.
+     */
+    .orderBy(parameters.id)
 }
 
 /**
@@ -136,7 +151,39 @@ export const resolveParameterDefs = (rows: ApplicableParameter[]): ApplicablePar
       row.projectScoped === true &&
       current.projectScoped !== true
 
-    if (moreSpecificScope || sameScopeButEnvSpecific || sameScopeAndEnvButProjectScoped) {
+    /*
+     * The last tie-break, and it exists because without one the winner was
+     * decided by the QUERY PLAN.
+     *
+     * `parameters` has no uniqueness constraint and the admin API has no
+     * duplicate guard, so two rows can share a name at the same scope, the same
+     * environment and the same project narrowing. Every rule above then says
+     * "neither", the loop keeps whichever arrived first, and which `type`,
+     * `defaultValue`, `required` and `sensitive` apply to every order placed
+     * against that product becomes arbitrary.
+     *
+     * `sensitive` is the sharp edge: it decides whether the value is redacted
+     * everywhere downstream (#131). Two tying rows that disagree about it made
+     * "is this secret redacted?" a question about row order.
+     *
+     * Highest id wins — the most recently created definition, which is the rule
+     * a person would guess and the only one the data can answer. It does not
+     * make duplicates a good idea; it makes their effect repeatable. Removing
+     * the duplicates themselves needs a constraint and a migration to dedupe
+     * what is already stored.
+     */
+    const sameEverythingButNewer =
+      sameScope &&
+      row.environmentId === current.environmentId &&
+      row.projectScoped === current.projectScoped &&
+      row.id > current.id
+
+    if (
+      moreSpecificScope ||
+      sameScopeButEnvSpecific ||
+      sameScopeAndEnvButProjectScoped ||
+      sameEverythingButNewer
+    ) {
       byName.set(row.name, row)
     }
   }

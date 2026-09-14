@@ -306,6 +306,27 @@ Under **Administration → Global Parameters**:
 
 Parameters that apply to *all* products and *all* environments (e.g. project tag, cost center label). These are automatically added to the order form.
 
+**Which definition wins when several apply.** A parameter name can be defined at
+more than one level, and the order form resolves it to exactly one effective
+definition, in this order:
+
+1. **Scope** — product beats category beats global.
+2. **Environment** — at the same scope, a definition for one environment beats
+   one that applies to all environments.
+3. **Project narrowing** — at the same scope and environment, a definition
+   narrowed to specific projects beats an unnarrowed one, for those projects.
+4. **Most recent** — if two definitions are alike on all three, the one created
+   last wins.
+
+Rule 4 exists because nothing prevents two parameters with the same name at the
+same scope and environment: there is no uniqueness constraint, and **Add
+Parameter** does not refuse a duplicate. Before it, which of them applied — and
+therefore which default value, type, required flag and *sensitivity* an order
+was validated against — was whatever the database happened to return first, and
+could differ between two page loads. If you find two definitions of the same
+name at the same level, delete one; rule 4 makes the behaviour predictable, not
+correct.
+
 ### 4.5 Available Templates
 
 What to enter as **Template** when configuring a product or a pipeline-stack step.

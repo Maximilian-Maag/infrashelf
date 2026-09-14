@@ -226,3 +226,124 @@ describe('parameters narrowed to projects (#275)', () => {
     expect(rows.map((r) => r.name)).toContain('region')
   })
 })
+
+/**
+ * The tie-break that was missing, and what it was costing (#402).
+ *
+ * `parameters` has no uniqueness constraint and `createParameter` has no
+ * duplicate guard, so two rows can share a name at the same scope, the same
+ * environment and the same project narrowing. Every precedence rule then says
+ * "neither", and the resolver kept whichever arrived FIRST — which is plan
+ * order, not a decision anybody made.
+ */
+describe('two definitions that tie resolve the same way every time', () => {
+  const tying = (
+    over: Partial<{
+      id: number
+      scope: string
+      scopeId: number
+      environmentId: number | null
+      projectScoped: boolean
+      sensitive: boolean
+      defaultValue: string
+    }>,
+  ) =>
+    ({
+      id: 1,
+      scope: 'product',
+      scopeId: 7,
+      environmentId: null,
+      name: 'API_TOKEN',
+      label: '',
+      type: 'string',
+      description: '',
+      defaultValue: '',
+      required: false,
+      sensitive: false,
+      sizeValues: {},
+      projectScoped: false,
+      ...over,
+    }) as unknown as Parameters<typeof resolveParameterDefs>[0][number]
+
+  it('does not depend on the order the rows arrived in', () => {
+    // This is the whole bug, as a pure function: the same two rows, two orders,
+    // and before the tie-break they produced two different answers.
+    const older = tying({ id: 10, defaultValue: 'first' })
+    const newer = tying({ id: 11, defaultValue: 'second' })
+
+    const forward = resolveParameterDefs([older, newer])
+    const backward = resolveParameterDefs([newer, older])
+
+    expect(forward).toHaveLength(1)
+    expect(backward).toHaveLength(1)
+    expect(forward[0].defaultValue).toBe(backward[0].defaultValue)
+  })
+
+  it('resolves to the most recently created definition', () => {
+    // Highest id: the rule a person would guess, and the only one the data can
+    // answer. It does not make duplicates a good idea — it makes them repeatable.
+    const older = tying({ id: 10, defaultValue: 'first' })
+    const newer = tying({ id: 11, defaultValue: 'second' })
+    expect(resolveParameterDefs([older, newer])[0].defaultValue).toBe('second')
+    expect(resolveParameterDefs([newer, older])[0].defaultValue).toBe('second')
+  })
+
+  it('decides `sensitive` the same way every time, whichever order they arrive in', () => {
+    /*
+     * The sharp edge. `sensitive` decides whether the value is redacted
+     * everywhere downstream (#131), so two tying rows that disagreed about it
+     * made "is this secret redacted?" a question about row order.
+     */
+    const secret = tying({ id: 20, sensitive: true })
+    const plain = tying({ id: 21, sensitive: false })
+
+    expect(resolveParameterDefs([secret, plain])[0].sensitive).toBe(
+      resolveParameterDefs([plain, secret])[0].sensitive,
+    )
+  })
+
+  it('still lets a more specific scope win over a newer row', () => {
+    // The tie-break is the LAST rule, not a replacement for the others: an older
+    // product-scoped row must still beat a newer global one.
+    const globalNewer = tying({ id: 99, scope: 'global', scopeId: 0, defaultValue: 'global' })
+    const productOlder = tying({ id: 1, scope: 'product', scopeId: 7, defaultValue: 'product' })
+
+    expect(resolveParameterDefs([globalNewer, productOlder])[0].defaultValue).toBe('product')
+    expect(resolveParameterDefs([productOlder, globalNewer])[0].defaultValue).toBe('product')
+  })
+
+  it('still lets a project-narrowed row win over a newer unnarrowed one', () => {
+    // #275's rule is not subordinate to "newest wins": a global `region` narrowed
+    // to one project is the more specific statement, and adding an unnarrowed one
+    // afterwards must not silently take it over for that project.
+    const narrowedOlder = tying({ id: 1, projectScoped: true, defaultValue: 'narrowed' })
+    const broadNewer = tying({ id: 99, projectScoped: false, defaultValue: 'broad' })
+
+    expect(resolveParameterDefs([narrowedOlder, broadNewer])[0].defaultValue).toBe('narrowed')
+    expect(resolveParameterDefs([broadNewer, narrowedOlder])[0].defaultValue).toBe('narrowed')
+  })
+
+  it('still lets an environment-specific row win over a newer all-environments one', () => {
+    const anyEnvNewer = tying({ id: 99, environmentId: null, defaultValue: 'any' })
+    const envSpecificOlder = tying({ id: 1, environmentId: 3, defaultValue: 'specific' })
+
+    expect(resolveParameterDefs([anyEnvNewer, envSpecificOlder])[0].defaultValue).toBe('specific')
+    expect(resolveParameterDefs([envSpecificOlder, anyEnvNewer])[0].defaultValue).toBe('specific')
+  })
+})
+
+describe('the applicable rows come back in a defined order', () => {
+  it('orders by id, so the form and the resolver both see the same sequence', async () => {
+    const s = await setup()
+    // Created deliberately out of alphabetical order, so a plan that happened to
+    // return them sorted by name would fail this.
+    const zeta = await createParameter({ scope: 'product', scopeId: s.product.id, name: 'ZETA', type: 'string' })
+    const alpha = await createParameter({ scope: 'product', scopeId: s.product.id, name: 'ALPHA', type: 'string' })
+    const mid = await createParameter({ scope: 'product', scopeId: s.product.id, name: 'MID', type: 'string' })
+    expect(zeta.ok && alpha.ok && mid.ok).toBe(true)
+
+    const rows = await loadApplicableParameters(s.product.id, s.cat.id)
+    const ours = rows.filter((r) => ['ZETA', 'ALPHA', 'MID'].includes(r.name))
+    expect(ours.map((r) => r.name)).toEqual(['ZETA', 'ALPHA', 'MID'])
+  })
+})

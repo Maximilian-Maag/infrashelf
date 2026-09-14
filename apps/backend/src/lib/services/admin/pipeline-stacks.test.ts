@@ -64,6 +64,24 @@ describe('listPipelineStacks', () => {
     }
   })
 
+  it('lists the stacks in a defined order (#402)', async () => {
+    // Without an ORDER BY the list an administrator reads reshuffles between two
+    // page loads for no reason they can see. Names chosen so a plan that
+    // happened to sort by name would fail this — they come back in the order
+    // they were added, not alphabetically.
+    const { p, env } = await seedStack()
+    for (const name of ['Zulu Stack', 'Alpha Stack']) {
+      await db.insert(pipelineStacks).values({
+        productId: p.id, environmentId: env.id, name, stateKeyParam: 'hostname', steps: STEPS,
+      })
+    }
+
+    const result = await listPipelineStacks(p.id)
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.data.map((s) => s.name)).toEqual(['Seed Stack', 'Zulu Stack', 'Alpha Stack'])
+  })
+
   it('does not return stacks belonging to a different product', async () => {
     const { stack } = await seedStack()
     const cat2 = await createCategory()

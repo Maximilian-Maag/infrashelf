@@ -3927,13 +3927,33 @@ must always be captured.
 Use them to avoid repeating parameters shared by related products
 (e.g. all VM products share a \code{region} parameter).
 
-\textbf{Parameter hierarchy} (applied in this order on the order form):
+\textbf{Parameter hierarchy}. A name can be defined at more than one
+level, and the order form resolves it to exactly ONE effective
+definition --- the one a submitted value is validated against. The rules,
+in order:
+
 \begin{enumerate}
-  \item Global parameters
-  \item Category parameters
-  \item Product parameters
-  \item Environment-specific parameters (override per-environment)
+  \item \textbf{Scope}: product beats category beats global.
+  \item \textbf{Environment}: at the same scope, a definition for one
+        environment beats one that applies to all environments.
+  \item \textbf{Project narrowing}: at the same scope and environment, a
+        definition narrowed to specific projects beats an unnarrowed one,
+        for those projects.
+  \item \textbf{Most recent}: if two definitions are alike on all three,
+        the one created last wins.
 \end{enumerate}
+
+Rule 4 exists because nothing prevents two parameters sharing a name at
+the same scope and environment: \code{parameters} carries no uniqueness
+constraint and \textbf{Add Parameter} does not refuse a duplicate. Before
+it, which of them applied --- and therefore which default value, type,
+required flag and \emph{sensitivity} an order was validated against ---
+was whatever order the database happened to return the rows in, and could
+differ between two page loads. Sensitivity is the sharp edge: it decides
+whether the value is redacted everywhere downstream, so a pair of
+duplicates that disagreed about it made redaction a question about row
+order. Rule 4 makes duplicates predictable; it does not make them a good
+idea, and a duplicate found at the same level should be deleted.
 
 \section{Step 8: Test the Full Order Flow}
 
