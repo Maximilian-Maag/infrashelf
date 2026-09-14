@@ -104,7 +104,15 @@ export function LoginForm({ shopName, shopSubtitle, logoDataUrl, primaryColor, s
     setError(null)
     setLoading(true)
     try {
-      const res = await fetch('/api/proxy/api/auth/webauthn/options', { method: 'POST' })
+      // `/api/login-challenge`, not `/api/proxy`: the proxy checks the session and
+      // answers 401, and nobody on this page has one yet. See that route for why
+      // the passwordless options are folded into it rather than given a route of
+      // their own.
+      const res = await fetch('/api/login-challenge', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ passwordless: true }),
+      })
       if (!res.ok) {
         setError(t('unexpectedError', lang))
         return

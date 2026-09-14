@@ -133,6 +133,54 @@ describe('POST /api/login-challenge', () => {
     expect((await res.json()).error).toMatch(/15 minutes/)
   })
 
+  describe('passwordless step one (#241)', () => {
+    it('asks the backend for options that name no account', async () => {
+      const fetchMock = mockBackend({ challenge: 'c', rpId: 'localhost' })
+
+      const res = await POST(makeReq({ passwordless: true }))
+
+      expect(res.status).toBe(200)
+      expect(await res.json()).toMatchObject({ challenge: 'c' })
+      // The unauthenticated endpoint, reached server-side. Written against
+      // `/api/proxy` this 401'd for every visitor, because the proxy checks the
+      // session and nobody on the login page has one.
+      const [url, init] = fetchMock.mock.calls[0]
+      expect(url).toContain('/api/auth/webauthn/options')
+      expect(url).not.toContain('/api/proxy')
+      expect(init.method).toBe('POST')
+    })
+
+    it('sends no credentials with it', async () => {
+      // There are none to send. A body carrying an email would make this an
+      // account oracle for anyone who can reach the login page.
+      const fetchMock = mockBackend({ challenge: 'c' })
+      await POST(makeReq({ passwordless: true, email: 'someone@test.dev', password: 'hunter2' }))
+
+      const [, init] = fetchMock.mock.calls[0]
+      expect(init.body).toBeUndefined()
+    })
+
+    it('passes a backend refusal through rather than reporting success', async () => {
+      mockBackend({ error: 'Too many sign-in attempts.' }, 429)
+      const res = await POST(makeReq({ passwordless: true }))
+      expect(res.status).toBe(429)
+    })
+
+    it('answers 502 when the backend cannot be reached', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('ECONNREFUSED')))
+      const res = await POST(makeReq({ passwordless: true }))
+      expect(res.status).toBe(502)
+    })
+
+    it('does not take the passwordless branch without the flag', async () => {
+      // `passwordless: false`, or absent, is an ordinary password check — the
+      // branch is keyed on `=== true`, not on truthiness.
+      const fetchMock = mockBackend({ mfaRequired: false })
+      await POST(makeReq({ email: 'a@test.dev', password: 'pw', passwordless: false }))
+      expect(fetchMock.mock.calls[0][0]).toContain('/api/auth/login')
+    })
+  })
+
   it('rejects a request with no credentials without calling the backend', async () => {
     const fetchMock = mockBackend({})
     for (const body of [{}, { email: 'a@b.c' }, { password: 'pw' }, { email: 1, password: 2 }]) {

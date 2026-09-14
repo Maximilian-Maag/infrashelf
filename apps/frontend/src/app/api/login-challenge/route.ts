@@ -29,6 +29,43 @@ const API_URL = process.env.API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http:
 
 export async function POST(req: Request) {
   const body = await req.json().catch(() => null)
+
+  /*
+   * Passwordless step one (#241): the WebAuthn options for a ceremony that names
+   * nobody. No email, no password — the authenticator decides who is signing in.
+   *
+   * HERE rather than in a route of its own, for the three reasons the block
+   * below already gives for folding the second-factor options in: a new frontend
+   * /api route has to be exempted from the middleware matcher (an endpoint that
+   * is part of signing in cannot require being signed in — #36) and taught to
+   * both reverse-proxy configs, or it reaches the backend and 404s (#196).
+   *
+   * And NOT through `/api/proxy`, which is where this was originally written and
+   * was wrong: that route checks the session and answers 401 to anyone without
+   * one. The login form is unauthenticated by definition, so the button failed
+   * for every user. It was invisible to the unit test, which stubs `fetch`, and
+   * to e2e, which has no authenticator to click it with — it showed up the first
+   * time the deployed page was asked for options.
+   */
+  if ((body as { passwordless?: unknown } | null)?.passwordless === true) {
+    try {
+      const opt = await fetch(`${API_URL}/api/auth/webauthn/options`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        cache: 'no-store',
+      })
+      if (!opt.ok) {
+        return NextResponse.json({ ok: false, error: 'Sign-in failed' }, { status: opt.status })
+      }
+      // The options themselves: a random challenge and the RP id, and nothing
+      // about any account. There is nothing here to withhold from a caller who
+      // is not signed in — that is the point of the ceremony.
+      return NextResponse.json(await opt.json())
+    } catch {
+      return NextResponse.json({ ok: false, error: 'The server could not be reached.' }, { status: 502 })
+    }
+  }
+
   const email = typeof (body as LoginRequest | null)?.email === 'string' ? (body as LoginRequest).email : ''
   const password =
     typeof (body as LoginRequest | null)?.password === 'string' ? (body as LoginRequest).password : ''

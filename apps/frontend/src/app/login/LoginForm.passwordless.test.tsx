@@ -85,8 +85,20 @@ describe('the passwordless button', () => {
     await user.click(await screen.findByRole('button', { name: /use security key/i }))
 
     await waitFor(() => expect(push).toHaveBeenCalled())
-    // The challenge is asked for with no account named.
-    expect(vi.mocked(fetch).mock.calls[0][0]).toContain('/api/auth/webauthn/options')
+    /*
+     * The challenge is asked for through the PUBLIC login route, with no account
+     * named.
+     *
+     * Not `/api/proxy`: that route checks the session and answers 401, and
+     * nobody on this page has one — written that way the button failed for every
+     * user, and neither this test nor e2e caught it (this one stubs `fetch`; e2e
+     * has no authenticator to click it with). Asserting the endpoint, not just
+     * that something was fetched, is what makes that a regression.
+     */
+    const [url, init] = vi.mocked(fetch).mock.calls[0]
+    expect(url).toBe('/api/login-challenge')
+    expect(url).not.toContain('/api/proxy')
+    expect(JSON.parse(String((init as RequestInit).body))).toEqual({ passwordless: true })
     const credentials = signIn.mock.calls[0][1] as Record<string, unknown>
     expect(credentials.webauthn).toBe(JSON.stringify({ id: 'cred-1', response: {} }))
     // Absent, not empty: sending an empty email would have the backend look one
