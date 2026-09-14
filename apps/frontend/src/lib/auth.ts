@@ -61,7 +61,9 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         mfaToken: { type: 'text' },
         code: { type: 'text' },
         // A WebAuthn assertion, JSON-encoded because NextAuth credentials are
-        // form fields and cannot carry an object (#197 part 2).
+        // form fields and cannot carry an object (#197 part 2). Sent WITH an
+        // `mfaToken` as a second factor, and WITHOUT one for a passwordless
+        // sign-in (#241) — the absence is what tells the two apart.
         webauthn: { type: 'text' },
       },
       async authorize(credentials) {
@@ -83,6 +85,36 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ mfaToken, webauthn: parsed }),
+          })
+          if (!res.ok) return null
+          return toAuthUser(await res.json())
+        }
+
+        /*
+         * Passwordless (#241): an assertion with NO challenge in front of it.
+         *
+         * Distinguished from the branch above by the ABSENCE of `mfaToken`,
+         * which is the whole difference — there was no password step, so there
+         * is no challenge proving one happened. The backend resolves the
+         * account from the credential itself and mints the session.
+         *
+         * `email` is not sent and not needed. Requiring one would defeat the
+         * point: the authenticator is what says who is signing in.
+         */
+        if (webauthn && !mfaToken) {
+          let parsed: unknown
+          try {
+            parsed = JSON.parse(webauthn)
+          } catch {
+            return null
+          }
+          const res = await fetch(`${API_URL}/api/auth/webauthn/verify`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              response: parsed,
+              rememberMe: String(credentials.rememberMe ?? '') === 'true',
+            }),
           })
           if (!res.ok) return null
           return toAuthUser(await res.json())

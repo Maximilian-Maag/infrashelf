@@ -17,6 +17,8 @@ public_routes := {
 	"auth/callback": "the SSO redirect target; the identity provider is the caller and it carries no portal session",
 	"auth/login/mfa": "second half of the two-step login (#36) — the caller has no session yet, and the signed challenge from /auth/login is the proof this route checks",
 	"auth/login/webauthn/options": "the middle of a two-step login with a security key (#197) — the caller has no session yet, and the same signed challenge from /auth/login, checked against the account's current password hash, is the proof this route checks. It opens nothing: it returns the WebAuthn request options and the assertion is still redeemed at auth/login/mfa",
+	"auth/webauthn/options": "the FIRST step of a passwordless sign-in (#241) — there is no session and, unlike auth/login/webauthn/options above, no challenge either: the whole point is that no account is named. It returns a random challenge and the RP id, identical whether or not any key is registered, so it discloses nothing to rate-limit an answer out of",
+	"auth/webauthn/verify": "redeems a passwordless assertion for a session (#241) — it is the login endpoint for keys, so requiring a session would be the same contradiction as auth/login. The proof it checks is the assertion itself: a challenge this server issued and has not yet spent, a signature over the real origin, and user verification required",
 	"public/branding": "the login screen renders from it, before any session exists",
 	"public/exchange-rates": "read by the unauthenticated shell for price display",
 	"catalog/[id]/image": "loaded by the browser as an <img> src, which cannot carry a bearer token",
