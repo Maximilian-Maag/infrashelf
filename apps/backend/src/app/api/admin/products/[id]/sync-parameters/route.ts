@@ -9,6 +9,7 @@ import { parseTerraformVariables } from '@/lib/tfparser'
 import { logAudit } from '@/lib/audit'
 import type { CiProvider } from '@infrashelf/types'
 import { isReservedCiVariable, isPipelineSuppliedVariable } from '@/lib/ci/reserved'
+import { readAccessToken } from '@/lib/ci/token'
 
 export async function POST(
   req: NextRequest,
@@ -84,7 +85,7 @@ export async function POST(
   let content: string
   try {
     content = await getFileContent(
-      { url: src.url, accessToken: src.accessToken, provider: src.provider as CiProvider },
+      { url: src.url, accessToken: readAccessToken(src.accessToken), provider: src.provider as CiProvider },
       projectId,
       'main',
       `templates/${template}/variables.tf`,

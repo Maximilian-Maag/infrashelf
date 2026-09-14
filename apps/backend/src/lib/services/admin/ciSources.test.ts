@@ -37,6 +37,8 @@ import { db } from '@/lib/db/client'
 import { ciSources, auditLog } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
 import { createUser, createEnvironment } from '@/test/helpers'
+import { isEncryptedEnvelope } from '@/lib/crypto/secrets'
+import { readAccessToken } from '@/lib/ci/token'
 
 const mockedListProjects = vi.mocked(ciListProjects)
 const mockedListBranches = vi.mocked(ciListBranches)
@@ -76,7 +78,7 @@ describe('listCiSources', () => {
 })
 
 describe('createCiSource', () => {
-  it('persists with access token in DB but returns public shape', async () => {
+  it('persists the access token ENCRYPTED and returns the public shape', async () => {
     const result = await createCiSource({
       name: 'new',
       url: 'http://x',
@@ -88,7 +90,15 @@ describe('createCiSource', () => {
     expect((result.data as unknown as { accessToken?: string }).accessToken).toBeUndefined()
 
     const [dbRow] = await db.select().from(ciSources).where(eq(ciSources.id, result.data.id))
-    expect(dbRow.accessToken).toBe('persisted')
+    /*
+     * Was `toBe('persisted')` — the column held the token in plain text, which
+     * is the state #111 was about. It is AES-256-GCM encrypted now, so what has
+     * to hold is stronger than it was: the plaintext is NOT in the column, and
+     * the envelope still decrypts back to it.
+     */
+    expect(dbRow.accessToken).not.toBe('persisted')
+    expect(isEncryptedEnvelope(dbRow.accessToken)).toBe(true)
+    expect(readAccessToken(dbRow.accessToken)).toBe('persisted')
   })
 })
 

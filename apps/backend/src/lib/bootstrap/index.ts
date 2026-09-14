@@ -2,6 +2,12 @@ import path from 'node:path'
 import { readMigrationFiles } from 'drizzle-orm/migrator'
 import { db, client } from '@/lib/db/client'
 import { users, branding, ciSources } from '@/lib/db/schema'
+import { eq } from 'drizzle-orm'
+import {
+  encryptSecret,
+  isEncryptedEnvelope,
+  isSecretEncryptionConfigured,
+} from '@/lib/crypto/secrets'
 import bcrypt from 'bcryptjs'
 import { reportConfigProblems } from '@/lib/config/validate'
 import { insecureTransportRefusal, INSECURE_TRANSPORT_FLAG } from '@/lib/ci/transport'
@@ -44,6 +50,48 @@ async function runMigrations() {
     await client`INSERT INTO "__drizzle_migrations" (hash, created_at) VALUES (${migration.hash}, ${migration.folderMillis})`
     console.warn(`[bootstrap] migration applied: ${migration.hash.slice(0, 8)}`)
   }
+}
+
+/**
+ * Encrypt CI source tokens that predate encryption (#111).
+ *
+ * `ci_sources.access_token` was plain text while `integrations.credential` was
+ * already encrypted. New and updated tokens are encrypted at the service, and
+ * `readAccessToken` tolerates both — but tolerating plaintext forever is not the
+ * goal, so the rows already in the database are converted here, once, the first
+ * time a deployment boots with a key configured.
+ *
+ * Silent no-op without a key. A deployment that has not set one keeps working
+ * with the tokens it has; `validate.ts` is where that is reported, and refusing
+ * to boot over it would take an estate offline for a column that has been
+ * plaintext all along.
+ *
+ * Per row rather than one UPDATE: each value needs its own random IV, which is
+ * the whole point of the envelope, so there is nothing to batch. There are a
+ * handful of CI sources in any real deployment.
+ *
+ * Values are never logged — only how many moved.
+ */
+export const encryptLegacyCiTokens = async (): Promise<void> => {
+  if (!isSecretEncryptionConfigured()) return
+
+  const rows = await db
+    .select({ id: ciSources.id, accessToken: ciSources.accessToken })
+    .from(ciSources)
+
+  const legacy = rows.filter((row) => !isEncryptedEnvelope(row.accessToken))
+  if (legacy.length === 0) return
+
+  for (const row of legacy) {
+    await db
+      .update(ciSources)
+      .set({ accessToken: encryptSecret(row.accessToken) })
+      .where(eq(ciSources.id, row.id))
+  }
+
+  console.warn(
+    `[bootstrap] encrypted ${legacy.length} CI source access token(s) that were stored in plain text (#111)`,
+  )
 }
 
 let bootstrapped = false
@@ -96,6 +144,11 @@ export const runBootstrap = async (): Promise<void> => {
     bootstrapped = false
     throw err
   }
+
+  // Before anything reads a token, and after the migrations so the column is
+  // certainly there. A failure here is a real one — a key that decrypts nothing
+  // or a database that will not take the write — so it is not swallowed.
+  await encryptLegacyCiTokens()
 
   // After the migrations, so `ci_sources` is certainly there, and awaited rather
   // than fired and forgotten: the point is that it lands in the boot log next to

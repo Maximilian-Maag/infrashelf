@@ -3,6 +3,7 @@ import { users, products, ciSources, deploymentEnvironments } from '@/lib/db/sch
 import { productNameSql } from '@/lib/db/productText'
 import { eq, sql } from 'drizzle-orm'
 import { gitlabProjectRefFromTriggerUrl } from '@/lib/ci/gitlab'
+import { readAccessToken } from '@/lib/ci/token'
 
 export interface CiSource {
   url: string
@@ -97,7 +98,10 @@ export const findCiSourceForEnv = async (environmentId: number): Promise<CiSourc
 
   return {
     url: sourceRows[0].url,
-    accessToken: sourceRows[0].accessToken,
+    // Decrypted at the edge of the database, so every CI caller downstream keeps
+    // taking a plain token and none of them has to know how it is stored (#111).
+    // Rows written before encryption are returned unchanged — see readAccessToken.
+    accessToken: readAccessToken(sourceRows[0].accessToken),
     provider,
     // A CI source stores the host, not the project: `url` is what the browse
     // endpoints append `/api/v4/projects` to. The project is named only in the
