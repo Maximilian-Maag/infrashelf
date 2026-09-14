@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { eq } from 'drizzle-orm'
 import type { SessionUser } from '@infrashelf/types'
+// Type-only, so it is erased and cannot make the mock factory circular.
+import type * as BudgetsModule from './budgets'
 
 /*
  * #403. The budget check and the order insert used to be two statements against
@@ -66,7 +68,7 @@ const barrier = vi.hoisted(() => {
 })
 
 vi.mock('@/lib/services/budgets', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('./budgets')>()
+  const actual = await importOriginal<typeof BudgetsModule>()
   return {
     ...actual,
     checkBudget: async (...args: Parameters<typeof actual.checkBudget>) => {
