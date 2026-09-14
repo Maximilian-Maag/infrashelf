@@ -159,11 +159,39 @@ infrashelf/
 
 ### Prerequisites
 
-| Tool | Version | Install |
-|------|---------|---------|
-| Node.js | 22+ | https://nodejs.org or `nvm install 22` |
-| pnpm | 11.9.0 (pinned via `packageManager` in `package.json`) | `corepack enable` (Node ≥16.9 ships Corepack) |
-| Docker + Docker Compose | current | https://docs.docker.com/get-docker/ |
+Install these three yourself. Everything else — Node, pnpm, and every workspace
+dependency — comes from `make install`.
+
+| Tool | Why | Install |
+|------|-----|---------|
+| **make** | runs everything below | `apt install build-essential` · `xcode-select --install` · preinstalled on most Linux |
+| **mise** | installs and pins the toolchain | `curl https://mise.run \| sh` — see [mise.jdx.dev](https://mise.jdx.dev) |
+| **Docker + Docker Compose** | Postgres, Mailpit, WireMock, Structurizr | https://docs.docker.com/get-docker/ |
+
+That is the whole list. You do **not** need Node or pnpm on the machine first:
+
+```bash
+make install
+```
+
+reads `mise.toml`, installs the exact **Node 22.23.2** and **pnpm 11.9.0** this
+repository is pinned to, and then installs the workspace. (If mise happens to be
+missing it will fetch it for you, but installing it yourself is the documented
+path.)
+
+Every Make target runs its tools through `mise exec`, so the pinned versions are
+what actually execute — you do not have to activate mise in your shell for the
+build to be correct. If you want the same versions in your own terminal:
+
+```bash
+echo 'eval "$(mise activate bash)"' >> ~/.bashrc
+```
+
+**The pins are checked, not trusted.** `scripts/toolchain.test.ts` fails if
+`mise.toml` disagrees with `packageManager` in `package.json`, if its Node major
+disagrees with the one `.github/actions/setup/action.yml` installs, or if either
+pin is a range instead of an exact version. CI pins the Node **major** and takes
+the latest patch; `mise.toml` pins the patch, so local builds are reproducible.
 
 ### Make Targets
 
@@ -171,7 +199,8 @@ Run `make help` to see all available commands.
 
 | Target | Description |
 |--------|-------------|
-| `make install` | Install all workspace dependencies |
+| `make install` | Install the toolchain (mise → Node, pnpm) **and** all workspace dependencies |
+| `make tools` | Install just the pinned Node and pnpm from `mise.toml` |
 | `make dev` | Start infra containers (postgres, mailpit, wiremock, structurizr) |
 | `make dev-down` | Stop infra containers |
 | `make run` | Start backend **and** frontend dev servers together |
@@ -196,11 +225,18 @@ Run `make help` to see all available commands.
 
 #### 1. Clone and install dependencies
 
+With **make**, **mise** and **Docker** present (see
+[Prerequisites](#prerequisites)), this is the entire setup:
+
 ```bash
 git clone <repo-url>
 cd infrashelf
 make install
 ```
+
+That installs the pinned Node and pnpm from `mise.toml` and then every workspace
+dependency. It prints the versions it settled on, so the first line of a bug
+report can say which toolchain produced it.
 
 #### 2. Start the local infrastructure
 

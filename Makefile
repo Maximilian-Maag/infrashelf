@@ -1,14 +1,34 @@
-.PHONY: help install dev dev-down run run-backend run-frontend build lint type-check policy policy-facts policy-install-opa test-db test-db-prune test test-e2e docker-build-backend docker-build-frontend docker-build db-push db-studio db-seed db-seed-demo handbook handbook-clean diagrams diagrams-install diagrams-png diagrams-pdf diagrams-clean clean
+.PHONY: help install tools mise dev dev-down run run-backend run-frontend build lint type-check policy policy-facts policy-install-opa test-db test-db-prune test test-e2e docker-build-backend docker-build-frontend docker-build db-push db-studio db-seed db-seed-demo handbook handbook-clean diagrams diagrams-install diagrams-png diagrams-pdf diagrams-clean clean
 
-# pnpm is installed via standalone script — add its bin dir to PATH so make can find it
-PNPM_HOME ?= $(HOME)/.local/share/pnpm
-export PATH := $(PNPM_HOME)/bin:$(PATH)
-PNPM := pnpm
+# The toolchain comes from mise (see mise.toml), which pins the exact Node and
+# pnpm this repository is built with. `make install` bootstraps it, so a new
+# machine needs nothing installed beforehand.
+#
+# Resolved rather than assumed: mise installs itself to ~/.local/bin, which is not
+# on every distro's default PATH, and a login shell that has not been restarted
+# since will not see it. Looking in both places means `make install` works in the
+# same terminal that installed it.
+MISE := $(shell command -v mise 2>/dev/null || (test -x $(HOME)/.local/bin/mise && echo $(HOME)/.local/bin/mise))
+
+# Every tool runs THROUGH mise when it is available, so the versions in mise.toml
+# are the ones that actually execute — not whatever a globally installed pnpm
+# happens to be. Without mise this falls back to the previous behaviour: a
+# standalone pnpm on PATH.
+ifneq ($(MISE),)
+  RUN := $(MISE) exec --
+else
+  RUN :=
+  # pnpm installed via standalone script — add its bin dir so make can find it
+  PNPM_HOME ?= $(HOME)/.local/share/pnpm
+  export PATH := $(PNPM_HOME)/bin:$(PATH)
+endif
+PNPM := $(RUN) pnpm
 
 help:
 	@echo "Usage: make <target>"
 	@echo ""
-	@echo "  install               install all workspace dependencies"
+	@echo "  install               install the toolchain (mise) and all workspace dependencies"
+	@echo "  tools                 install just the pinned Node and pnpm from mise.toml"
 	@echo "  dev                   start infra containers (postgres, mailpit, wiremock, structurizr)"
 	@echo "  dev-down              stop infra containers"
 	@echo "  run                   start backend and frontend dev servers together (requires: make dev)"
@@ -35,8 +55,41 @@ help:
 	@echo "  handbook-clean        remove LaTeX auxiliary files"
 	@echo "  clean                 remove build artifacts"
 
-install:
+# Everything a developer needs, from a clean machine: the toolchain first, then
+# the workspace. Depends on `tools` rather than repeating it, so `make install`
+# stays the single answer to "how do I set this up".
+install: tools
 	$(PNPM) install
+
+# The pinned Node and pnpm from mise.toml.
+#
+# `mise install` is idempotent and fast once the versions are present, so this
+# costs a second on every `make install` and removes a whole class of "which Node
+# are you on" from bug reports.
+tools: mise
+	@$(MISE) trust --quiet 2>/dev/null || $(MISE) trust
+	$(MISE) install
+	@echo "toolchain: $$($(MISE) exec -- node -v), pnpm $$($(MISE) exec -- pnpm -v)"
+
+# Install mise itself if it is not already there.
+#
+# Guarded, so this is a no-op on a machine that has it — and it deliberately does
+# NOT edit anybody's shell profile. Activating mise in an interactive shell is the
+# developer's choice; everything in this Makefile goes through `mise exec`, so the
+# build does not need it and will not silently depend on it.
+mise:
+ifeq ($(MISE),)
+	@echo "mise not found — installing to ~/.local/bin"
+	@curl -fsSL https://mise.run | sh
+	@echo ""
+	@echo "  mise installed. To use the pinned tools in your own shell, add:"
+	@echo "      eval \"\$$($(HOME)/.local/bin/mise activate bash)\""
+	@echo "  to ~/.bashrc. The Makefile does not need it."
+	@echo ""
+	@$(MAKE) --no-print-directory tools MISE=$(HOME)/.local/bin/mise
+else
+	@echo "mise: $(MISE) ($$($(MISE) --version))"
+endif
 
 dev:
 	docker compose -f infra/docker-compose.dev.yml up -d --wait

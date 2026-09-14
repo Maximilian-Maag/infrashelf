@@ -110,3 +110,10 @@ playwright-report/
 # drifts from the model the moment nobody regenerates it, and the model is the
 # source of truth. `make handbook` regenerates them first.
 docs/architecture/diagrams/
+
+# Per-developer mise overrides. `mise.toml` is the committed pin that everyone
+# and CI agree on (see scripts/toolchain.test.ts); these are the local escape
+# hatch for trying another Node without changing what the repository claims.
+mise.local.toml
+.mise.local.toml
+.mise/
