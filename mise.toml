@@ -1,0 +1,26 @@
+# The toolchain this repository is built with (#dev-setup).
+#
+# `make install` installs these before it installs anything from npm, so a new
+# machine needs mise and nothing else — no system Node, no separately bootstrapped
+# pnpm, and no "works on mine" gap between two developers on different distros.
+#
+# Pinned to exact patch versions on purpose. A range would let two people run
+# different Node builds against the same lockfile, which is the class of problem
+# a lockfile exists to prevent one level up.
+
+[tools]
+# 22, matching `node-version: 22` in .github/actions/setup/action.yml — CI pins
+# the major and takes the latest patch, this pins the patch so local builds are
+# reproducible. `mise.node.test.ts` fails if the two majors ever disagree.
+node = "22.23.2"
+
+# The same version as `packageManager` in package.json, which is the real
+# authority: corepack and pnpm itself both read that field, and pnpm refuses to
+# run when the two disagree. This exists so the first `pnpm` on a new machine is
+# already the right one, rather than whatever was installed globally.
+# `mise.node.test.ts` fails if the two ever disagree.
+pnpm = "11.9.0"
+
+# NOT opa. `scripts/opa.ts` downloads the pinned v1.9.0 and verifies it against a
+# committed SHA-256 before the policy gate will execute it — a stronger guarantee
+# than a version string, and `make policy-install-opa` already does it.
