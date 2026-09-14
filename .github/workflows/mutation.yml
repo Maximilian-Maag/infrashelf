@@ -90,10 +90,21 @@ jobs:
           if [ -n "${SCOPE:-}" ]; then
             args+=(--mutate "$SCOPE")
           fi
+          # No colours and no progress bar, because this log is PARSED, not
+          # watched. The progress reporter redraws itself with carriage returns
+          # and `--allowConsoleColors` wraps every table cell in ANSI escapes —
+          # between them `stryker.log` stopped being line-oriented text, which is
+          # what the Summarise step below assumes it is reading. It is also what
+          # made that step write megabytes into a job summary capped at 1024k.
+          #
+          # Nothing is lost: a progress bar in a non-interactive runner log is
+          # 30,000 redraws of a bar nobody sees, and the HTML report uploaded
+          # below is where the detail actually lives.
           pnpm exec stryker run \
             --incremental \
             --incrementalFile reports/mutation/incremental.json \
-            --reporters clear-text,html,progress \
+            --reporters clear-text,html \
+            --allowConsoleColors false \
             "${args[@]}" \
             | tee stryker.log
 
@@ -104,14 +115,42 @@ jobs:
         if: always()
         working-directory: apps/${{ matrix.app }}
         run: |
-          score=$(grep -E '^[[:space:]]*All files' stryker.log | head -1 | awk -F'|' '{gsub(/ /,"",$2); print $2}')
+          # `stryker.log` is a TERMINAL transcript, not a text file. The progress
+          # reporter redraws its bar with carriage returns and colours everything
+          # with ANSI escapes, so what `tee` captured has very few newlines in it:
+          # measured on the 2026-09-13 nightly, 20 "lines" of it came to 1.9MB.
+          #
+          # That is what broke this step. `head -20` caps LINES, so it happily let
+          # ~95KB per line through, and GitHub aborts the WHOLE job summary above
+          # 1024k — "upload aborted ... got 1895k". The run's own documentation
+          # says the number in the job summary is the thing to read, and there was
+          # never a summary to read it in.
+          #
+          # So flatten the transcript first: carriage returns become newlines, the
+          # escape sequences go, and the result is the line-oriented text the
+          # greps below have always assumed they were reading.
+          tr '\r' '\n' < stryker.log | sed -E 's/\x1b\[[0-9;]*[a-zA-Z]//g' > stryker.txt
+
+          score=$(grep -E '^[[:space:]]*All files' stryker.txt | head -1 | awk -F'|' '{gsub(/ /,"",$2); print $2}')
           {
             echo "## Mutation score — ${{ matrix.app }}"
             echo
             echo "**${score:-unknown}%**"
             echo
             echo '```'
-            grep -E '^[[:space:]]*(File|All files|-)' stryker.log | head -20 || true
+            # The whole clear-text table, from its header to the end of the log.
+            #
+            # The old filter matched `File`, `All files` and separator rows only,
+            # so the per-file rows — the ones that say WHERE the gaps are — never
+            # appeared and the block was three lines of totals. #245 is a hunt for
+            # blind spots; the table is the map.
+            #
+            # Capped twice on purpose. The line cap is the intent; the byte cap is
+            # what guarantees the summary still uploads if the log ever surprises
+            # us again, because GitHub discards the ENTIRE summary over 1024k
+            # rather than truncating it. Losing the tail of a table beats losing
+            # the score with it.
+            awk '/^[[:space:]]*File[[:space:]]*\|/{f=1} f{ if ($0 ~ /\|/) print; else exit }' stryker.txt | head -200 | head -c 20000 || true
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
