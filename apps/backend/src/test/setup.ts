@@ -21,7 +21,7 @@ export const testDb = drizzle(client, { schema })
 // Every table the suite writes to. Order no longer matters for truncation (see
 // TRUNCATE_ALL below), but it is kept dependency-ordered because it reads as the
 // schema's shape and new tables get added in the right place by habit.
-const TABLES = [
+export const TABLES = [
   schema.auditLog,
   // Narrowing rows outlive nothing: they cascade from both sides, but a test
   // that leaves one behind narrows a parameter for the NEXT test, which then
@@ -32,6 +32,7 @@ const TABLES = [
   schema.userRecoveryCodes,
   schema.userTotp,
   schema.webauthnChallenges,
+  schema.webauthnLoginChallenges,
   schema.webauthnCredentials,
   schema.productFavorites,
   schema.orderComments,

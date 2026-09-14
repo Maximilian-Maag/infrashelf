@@ -2115,6 +2115,32 @@ removed, unlike a confirmed TOTP secret --- a lost key that stays registered kee
 prompting for something the user no longer has --- but never the last factor an
 administrator holds.
 
+\paragraph{Passwordless sign-in.} A key can also be the \emph{first} factor: the
+sign-in page offers \emph{Use security key} above the email field, and the
+ceremony names no account at all. The options carry no \code{allowCredentials},
+so the browser offers whatever discoverable credential it holds for this RP id,
+and the account is resolved from the credential that answers --- cross-checked
+against the user handle the authenticator returns, which is the database id as
+registration wrote it.
+
+That ceremony requires \emph{user verification}, and that is what makes it two
+factors rather than one: with no password in front of it, the PIN or biometric
+releasing the key is the second factor. An administrator signing in this way is
+therefore not asked for a code on top --- the mandatory-second-factor rule is
+satisfied by the ceremony itself.
+
+The challenge lives in \code{webauthn\_login\_challenges}, keyed on the challenge
+rather than on a user, because there is no user to key it on when it is issued.
+Single use comes from the same \code{DELETE ... RETURNING} claim the keyed table
+uses.
+
+Only a \emph{discoverable} credential can answer. Registration asks for
+\code{residentKey: 'preferred'} and records what the authenticator actually made
+via the \code{credProps} extension, so a passkey becomes usable for passwordless
+sign-in automatically while an older hardware key remains a perfectly good second
+factor. A credential registered before this existed was never asked, so it starts
+as unknown and earns the flag the first time it answers such a ceremony.
+
 \subsection*{Configuration}
 
 The shared secret is encrypted at rest with AES-256-GCM. The key comes from
@@ -2773,6 +2799,7 @@ The table below shows the current effective schema.
     \code{user\_totp}               & Per-user second-factor secret, kept out of \code{users} so nothing selects it by accident \\
     \code{user\_recovery\_codes}    & Single-use second-factor recovery codes, stored as SHA-256 hashes; shared by both factor kinds \\
     \code{webauthn\_credentials}    & Registered security keys and passkeys. Public keys only — a dump of this table authenticates nobody \\
+    \code{webauthn\_login\_challenges} & In-flight passwordless challenges, keyed on the challenge because no user is known yet. Single-use and short-lived \\
     \code{webauthn\_challenges}     & The in-flight ceremony challenge, one row per user, deleted when it is spent \\
     \code{audit\_log}               & Append-only log of significant user actions \\
     \code{exchange\_rates}          & Cached currency conversion rates \\

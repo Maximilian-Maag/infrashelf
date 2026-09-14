@@ -737,6 +737,29 @@ The one thing you cannot remove is the last factor on the account: the server
 refuses, because an administrator with none can sign in and then do nothing.
 Register the replacement first.
 
+**Signing in with the key alone**
+
+Where the key supports it, the sign-in page shows **Use security key** above the
+email field. Press it, touch the key, and you are in — no email, no password.
+
+This is not a weaker sign-in than the password one; it is a stronger one. The
+ceremony demands *user verification*, so the key releases its signature only
+after a PIN or a fingerprint. That is two factors on its own — something you
+have, and something you know or are — which is why an administrator signing in
+this way is not asked for a code on top. There is also no password involved for
+a lookalike site to collect, and the signature names the real address, so the
+phishing route that a code cannot close is closed here.
+
+**Not every key can do it.** The key has to store a *discoverable* credential —
+it has to remember which account it belongs to, rather than being reminded by the
+email you typed. Passkeys (Touch ID, Windows Hello, a phone) do; many older
+hardware keys do not, and they stay exactly as useful as a second factor. The
+portal cannot tell in advance for a key registered before this existed, so it
+finds out the first time one answers.
+
+The button is hidden entirely on a browser that cannot run the ceremony, rather
+than shown and failing.
+
 **Setting it up**
 
 1. Go to **Settings → Profile** and find the **Two-factor authentication** card

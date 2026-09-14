@@ -9,7 +9,7 @@ import {
   type AuthenticatorTransportFuture,
 } from '@simplewebauthn/server'
 import { db } from '@/lib/db/client'
-import { webauthnChallenges, webauthnCredentials } from '@/lib/db/schema'
+import { webauthnChallenges, webauthnCredentials, webauthnLoginChallenges } from '@/lib/db/schema'
 import { logAudit } from '@/lib/audit'
 import { ok, err, type Result } from '@/lib/services/result'
 import { resolveRp } from '@/lib/auth/webauthnConfig'
@@ -69,6 +69,21 @@ export interface CredentialSummary {
   /** A synced passkey rather than one bound to a single device. */
   backedUp: boolean
 }
+
+/**
+ * Did the authenticator store a discoverable credential (#241)?
+ *
+ * `credProps.rk` is the authenticator's own answer to the `credProps` extension
+ * requested at registration. It is optional in every direction: an authenticator
+ * may not implement the extension, and a browser may not surface it.
+ *
+ * Absent is read as NOT discoverable, deliberately. The cost of being wrong in
+ * that direction is that a key which could have done passwordless is only
+ * offered as a second factor; the cost the other way is a sign-in button that
+ * fails at the authenticator with nothing to say why.
+ */
+const isDiscoverable = (response: RegistrationResponseJSON): boolean =>
+  response.clientExtensionResults?.credProps?.rk === true
 
 const asTransports = (value: unknown): AuthenticatorTransportFuture[] =>
   Array.isArray(value) ? (value.filter((t) => typeof t === 'string') as AuthenticatorTransportFuture[]) : []
@@ -173,12 +188,27 @@ export const startRegistration = async (
       transports: asTransports(c.transports),
     })),
     authenticatorSelection: {
-      // Not required: demanding a resident key rules out a lot of older hardware
-      // keys, and this is a SECOND factor — the account is already identified by
-      // the password step, so discoverability buys nothing here.
+      // Still not REQUIRED, even though #241 wants discoverable credentials:
+      // demanding a resident key rules out a lot of older hardware keys, and
+      // those are perfectly good second factors. The authenticator decides, and
+      // `credProps` below reports what it decided — so a modern passkey becomes
+      // usable for passwordless sign-in automatically, and an older key keeps
+      // working as the second factor it always was.
       residentKey: 'preferred',
       userVerification: 'preferred',
     },
+    /*
+     * Ask the authenticator to say whether it made the credential DISCOVERABLE
+     * (#241). It is the only way to find out: the answer cannot be derived from
+     * the credential afterwards, and `residentKey: 'preferred'` means it genuinely
+     * varies by authenticator.
+     *
+     * Recorded on the row by `finishRegistration`, because a passwordless
+     * ceremony offers no `allowCredentials` and a non-discoverable credential
+     * simply will not appear in it — so the UI has to know which is which rather
+     * than offering a button the key silently fails to answer.
+     */
+    extensions: { credProps: true },
     timeout: WEBAUTHN_CHALLENGE_TTL_MS,
   })
 
@@ -253,6 +283,7 @@ export const finishRegistration = async (
       label,
       backedUp: credentialBackedUp,
       deviceType: credentialDeviceType,
+      discoverable: isDiscoverable(input.response),
     })
     if (isFirstFactor) recoveryCodes = await replaceRecoveryCodes(userId, tx)
   })
@@ -382,6 +413,210 @@ export const verifyAuthentication = async (
 
   await logAudit(userId, 'auth.webauthn.login', userId, `Signed in with security key "${stored.label}"`)
   return ok({ recoveryCodesRemaining: await countUnusedRecoveryCodes(userId) })
+}
+
+// ---------------------------------------------------------------------------
+// passwordless (#241)
+// ---------------------------------------------------------------------------
+
+/**
+ * Options for a sign-in that names nobody.
+ *
+ * The difference from `startAuthentication` is the whole feature: no
+ * `allowCredentials`, so the browser offers whatever discoverable credential it
+ * holds for this RP ID and the authenticator decides which account answers.
+ *
+ * `userVerification: 'required'`, and this is what makes the ceremony two
+ * factors rather than one. There is no password in front of it, so the PIN or
+ * biometric the authenticator collects IS the second factor — something you
+ * have, plus something you know or are. `verifyPasswordlessAuthentication`
+ * enforces the same thing on the way back in, because an option is a request
+ * and only the verify is a check.
+ *
+ * Takes no user and so needs no account to exist. It deliberately does not say
+ * whether any discoverable credential is registered: answering that for an
+ * unauthenticated caller would turn this into an oracle for which accounts have
+ * keys.
+ */
+export const startPasswordlessAuthentication = async (
+  shopName: string,
+): Promise<Result<PublicKeyCredentialRequestOptionsJSON>> => {
+  const rp = resolveRp(shopName)
+  const options = await generateAuthenticationOptions({
+    rpID: rp.rpId,
+    // No allowCredentials at all — not an empty array, which some authenticators
+    // treat as "nothing is acceptable" rather than "anything is".
+    userVerification: 'required',
+    timeout: WEBAUTHN_CHALLENGE_TTL_MS,
+  })
+
+  await db.insert(webauthnLoginChallenges).values({
+    challenge: options.challenge,
+    expiresAt: new Date(Date.now() + WEBAUTHN_CHALLENGE_TTL_MS),
+  })
+
+  return ok(options)
+}
+
+/**
+ * Claim a passwordless challenge and destroy it, in one statement.
+ *
+ * The same claim `consumeChallenge` makes for the keyed table, for the same
+ * reason: the DELETE returns the row only to whoever won it, so two requests
+ * replaying one assertion cannot both proceed.
+ */
+const consumeLoginChallenge = async (challenge: string): Promise<boolean> => {
+  const [row] = await db
+    .delete(webauthnLoginChallenges)
+    .where(eq(webauthnLoginChallenges.challenge, challenge))
+    .returning({ expiresAt: webauthnLoginChallenges.expiresAt })
+  if (!row) return false
+  return row.expiresAt.getTime() > Date.now()
+}
+
+/**
+ * The challenge the browser actually signed over, read out of the client data.
+ *
+ * Needed because the challenge is the key to the store, and unlike every other
+ * ceremony here there is no user id to look it up by. Parsed rather than trusted:
+ * nothing is decided on this value except WHICH row to claim, and
+ * `verifyAuthenticationResponse` re-checks that the claimed challenge is the one
+ * signed over. A forged value simply matches no row.
+ */
+const challengeFromClientData = (clientDataJSON: string): string | null => {
+  try {
+    const parsed: unknown = JSON.parse(Buffer.from(clientDataJSON, 'base64url').toString('utf8'))
+    const challenge = (parsed as { challenge?: unknown }).challenge
+    return typeof challenge === 'string' && challenge.length > 0 ? challenge : null
+  } catch {
+    return null
+  }
+}
+
+/** The account an assertion resolved to. The caller opens the session. */
+export interface PasswordlessAssertion {
+  userId: number
+  label: string
+}
+
+/**
+ * Check an assertion that named no account, and say whose it was.
+ *
+ * The account comes from the credential, which is unique across the table, and
+ * is then cross-checked against the user handle the authenticator returned. Both
+ * have to agree. The handle is the user id as `startRegistration` wrote it —
+ * the database id and not the email, precisely so a resident credential cannot
+ * come to name an account that no longer exists under it.
+ *
+ * Every refusal below answers the same way, and says nothing about whether the
+ * credential, the account or the state was the problem. An unauthenticated
+ * caller learning "that key is registered but the account is deactivated" is an
+ * account oracle, and this endpoint takes no password to rate-limit against.
+ */
+export const verifyPasswordlessAuthentication = async (
+  response: AuthenticationResponseJSON,
+  shopName: string,
+): Promise<Result<PasswordlessAssertion>> => {
+  const refused = () => err(401, 'That security key could not be used to sign in.')
+
+  const presented = challengeFromClientData(response.response.clientDataJSON)
+  if (!presented) return refused()
+  if (!(await consumeLoginChallenge(presented))) return refused()
+
+  const [stored] = await db
+    .select()
+    .from(webauthnCredentials)
+    .where(eq(webauthnCredentials.credentialId, response.id))
+    .limit(1)
+  if (!stored) return refused()
+
+  /*
+   * The user handle has to agree with the credential.
+   *
+   * The credential id already identifies the account — it is unique across the
+   * table — so this is belt and braces. It is cheap, and it is the check that
+   * would catch a credential row whose user_id had been changed underneath a
+   * handle the authenticator still holds.
+   *
+   * Absent is allowed: `userHandle` is optional on an assertion, and a
+   * credential registered before this feature may not carry one.
+   */
+  const handle = response.response.userHandle
+  if (handle !== undefined && handle !== null && handle !== '') {
+    const decoded = Buffer.from(handle, 'base64url').toString('utf8')
+    if (decoded !== String(stored.userId)) {
+      await logAudit(
+        stored.userId,
+        'auth.webauthn.login_failed',
+        stored.userId,
+        'Passwordless assertion whose user handle did not match its credential',
+      )
+      return refused()
+    }
+  }
+
+  const rp = resolveRp(shopName)
+  let verification
+  try {
+    verification = await verifyAuthenticationResponse({
+      response,
+      expectedChallenge: presented,
+      expectedOrigin: rp.origins,
+      expectedRPID: rp.rpId,
+      credential: {
+        id: stored.credentialId,
+        publicKey: new Uint8Array(Buffer.from(stored.publicKey, 'base64url')),
+        counter: stored.counter,
+        transports: asTransports(stored.transports),
+      },
+      /*
+       * REQUIRED here, unlike the second-factor path, and this is the decision
+       * that makes passwordless defensible: with no password in front of it the
+       * authenticator's PIN or biometric is the only other factor there is. The
+       * second-factor path can afford `false` because a password was already
+       * checked.
+       */
+      requireUserVerification: true,
+    })
+  } catch (e) {
+    console.error('[webauthn] Passwordless verification failed:', e)
+    await logAudit(stored.userId, 'auth.webauthn.login_failed', stored.userId, 'Passwordless assertion rejected')
+    return refused()
+  }
+
+  if (!verification.verified) {
+    await logAudit(stored.userId, 'auth.webauthn.login_failed', stored.userId, 'Passwordless assertion not verified')
+    return refused()
+  }
+
+  // Same clone check as the second-factor path, and for the same reason: enforce
+  // the counter where there is one, say nothing where the authenticator reports
+  // a constant 0, which every passkey does.
+  const { newCounter } = verification.authenticationInfo
+  if (stored.counter > 0 && newCounter <= stored.counter) {
+    await logAudit(
+      stored.userId,
+      'auth.webauthn.login_failed',
+      stored.userId,
+      `Signature counter did not advance (stored ${stored.counter}, presented ${newCounter}) — possible cloned authenticator`,
+    )
+    return refused()
+  }
+
+  await db
+    .update(webauthnCredentials)
+    .set({
+      counter: newCounter,
+      lastUsedAt: new Date(),
+      // Proof, not inference: it just answered a ceremony with no
+      // `allowCredentials`, so it is discoverable whatever `credProps` said (or
+      // failed to say) when it was registered. This is how a key registered
+      // before #241 earns its flag.
+      discoverable: true,
+    })
+    .where(eq(webauthnCredentials.id, stored.id))
+
+  return ok({ userId: stored.userId, label: stored.label })
 }
 
 // ---------------------------------------------------------------------------

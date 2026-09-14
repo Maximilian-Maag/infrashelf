@@ -16,6 +16,7 @@ import {
 } from '@/lib/services/twoFactor'
 import {
   verifyAuthentication as verifyWebauthnAssertion,
+  verifyPasswordlessAuthentication,
   type AuthenticationResponseJSON,
 } from '@/lib/services/webauthn'
 import { getBranding } from '@/lib/services/admin/branding'
@@ -223,6 +224,92 @@ export const loginWithCredentials = async (
   // is the moment the answer decides where the user is sent. `requireAuth` is
   // what actually holds the line, and it re-asks per request precisely so that
   // this flag being stale can never mean the gate is open.
+  const mustEnroll = await secondFactorOutstanding(sessionUser.id)
+  if (mustEnroll) {
+    await logAudit(
+      sessionUser.id,
+      'auth.2fa.enrollment_required',
+      sessionUser.id,
+      'Signed in without a second factor; enrollment required before the account can be used',
+    )
+  }
+
+  return ok({
+    mfaRequired: false,
+    token: token.data,
+    user: sessionUser,
+    ...(mustEnroll ? { mustEnrollSecondFactor: true } : {}),
+  })
+}
+
+/**
+ * Sign in with a security key alone — no email, no password (#241).
+ *
+ * The assertion is checked by `verifyPasswordlessAuthentication`, which resolves
+ * the account from the credential and enforces user verification. This function
+ * decides whether that account may have a session, and opens one.
+ *
+ * ── Why this does not consult `requiresSecondFactor` ────────────────────────
+ *
+ * Because the ceremony it just passed IS two factors. A discoverable credential
+ * asserted with `userVerification: 'required'` is something you have plus the
+ * PIN or biometric that released it, and the owner's decision on #241 is that
+ * this satisfies the mandatory-second-factor rule for administrators. Asking
+ * `requiresSecondFactor` here would demand a TOTP code on top of a ceremony that
+ * is already stronger than password-plus-code, and refuse the flow to exactly
+ * the accounts it is most worth having.
+ *
+ * `secondFactorOutstanding` is a different question — "does this account owe us
+ * an enrolment" — and is still asked below, exactly as the password path asks
+ * it. It answers false here in practice, because an account that just signed in
+ * with a key demonstrably holds one; it is asked rather than assumed so the two
+ * paths cannot drift.
+ *
+ * ── What it still refuses ──────────────────────────────────────────────────
+ *
+ * A deactivated account, the same as the password path. Not an SSO account:
+ * an SSO user cannot register a key in the first place (`loadTwoFactorAccount`
+ * refuses an account with no local password), so an SSO account holding one is
+ * a demotion artefact and the key is still theirs — the same reasoning
+ * `requiresSecondFactor` applies to a demoted root.
+ */
+export const loginWithPasswordlessWebauthn = async (
+  response: AuthenticationResponseJSON,
+  shopName: string,
+  context: LoginContext = {},
+): Promise<Result<LoginOutcome>> => {
+  const assertion = await verifyPasswordlessAuthentication(response, shopName)
+  if (!assertion.ok) return assertion
+
+  const [user] = await db.select().from(users).where(eq(users.id, assertion.data.userId)).limit(1)
+  /*
+   * A credential whose account has been deleted. The row cascades on delete, so
+   * this is close to unreachable — and it answers 401 rather than 500 because
+   * the caller is unauthenticated and the honest description of the situation
+   * is that the key cannot sign anybody in.
+   */
+  if (!user) return err(401, 'That security key could not be used to sign in.')
+
+  if (!user.active) {
+    // Said plainly, as the password path says it. Whoever produced this assertion
+    // physically holds the key for this account; telling them why it will not
+    // work discloses nothing they could not already establish, and the
+    // alternative is the afternoon #196 cost.
+    await logAudit(user.id, 'auth.webauthn.login_failed', user.id, 'Passwordless sign-in to a deactivated account')
+    return err(403, 'This account is deactivated. An administrator has to reactivate it.')
+  }
+
+  const sessionUser = sessionUserOf(user)
+  const token = await issueSession(sessionUser, context)
+  if (!token.ok) return token
+
+  await logAudit(
+    user.id,
+    'auth.webauthn.login',
+    user.id,
+    `Signed in without a password using security key "${assertion.data.label}"`,
+  )
+
   const mustEnroll = await secondFactorOutstanding(sessionUser.id)
   if (mustEnroll) {
     await logAudit(

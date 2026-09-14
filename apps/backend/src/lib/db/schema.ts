@@ -184,6 +184,23 @@ export const webauthnCredentials = pgTable('webauthn_credentials', {
   /** Synced to a provider (a passkey) rather than bound to one device. */
   backedUp: boolean('backed_up').notNull().default(false),
   deviceType: text('device_type').notNull().default('singleDevice'),
+  /**
+   * Whether the authenticator stored this as a DISCOVERABLE credential, and so
+   * whether it can answer a passwordless ceremony (#241).
+   *
+   * Registration asks for `residentKey: 'preferred'` and the authenticator
+   * decides: a passkey makes one, an older hardware key does not. Both are
+   * perfectly good second factors; only a discoverable one can be offered with
+   * no `allowCredentials`, because only it can produce the user handle without
+   * being told who is signing in.
+   *
+   * Reported by the `credProps` extension at registration and recorded here,
+   * because it cannot be derived from the credential afterwards. Credentials
+   * registered before #241 default to false — they were never asked, so what
+   * they are is unknown, and claiming otherwise would offer a button their key
+   * silently fails to answer.
+   */
+  discoverable: boolean().notNull().default(false),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
 }, (t) => [
@@ -220,6 +237,28 @@ export const webauthnChallenges = pgTable('webauthn_challenges', {
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
+
+/**
+ * A WebAuthn challenge issued to NOBODY (#241).
+ *
+ * `webauthn_challenges` above is keyed by `user_id`, because every ceremony
+ * before passwordless ran either inside a session or after a password had named
+ * the account. A passwordless ceremony has no user at the moment the challenge
+ * is issued — the authenticator is what decides which account answers — so the
+ * challenge itself is the key.
+ *
+ * Single-use comes from that primary key and the same DELETE ... RETURNING claim
+ * the keyed table uses: the row is returned only to whoever won it, so two
+ * requests racing on one challenge cannot both proceed.
+ */
+export const webauthnLoginChallenges = pgTable('webauthn_login_challenges', {
+  challenge: text().primaryKey(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  // For sweeping what was never claimed; the DELETE is what makes it single-use.
+  index('webauthn_login_challenges_expires_idx').on(t.expiresAt),
+])
 
 export const categories = pgTable('categories', {
   id: bigserial({ mode: 'number' }).primaryKey(),

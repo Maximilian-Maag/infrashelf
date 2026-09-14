@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, type FormEvent } from 'react'
+import { useState, useEffect, type FormEvent } from 'react'
 import { signIn } from 'next-auth/react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useLang } from '@/lib/useLang'
@@ -8,7 +8,7 @@ import { t } from '@/lib/i18n'
 import { Alert } from '@/components/ui/Alert'
 import { readableInk, readableAccent, AA_LARGE, AA_NON_TEXT } from '@/lib/contrast'
 import { MFA_LOCKED_OUT } from '@/lib/loginErrors'
-import { startAuthentication } from '@simplewebauthn/browser'
+import { startAuthentication, browserSupportsWebAuthnAutofill } from '@simplewebauthn/browser'
 import type { SecondFactorMethod } from '@infrashelf/types'
 
 /** The options object `startAuthentication` takes, named from its own signature. */
@@ -66,6 +66,70 @@ export function LoginForm({ shopName, shopSubtitle, logoDataUrl, primaryColor, s
   const [webauthnOptions, setWebauthnOptions] = useState<AuthOptions | null>(null)
   /** Whether the account also holds an authenticator app, so the code field is worth showing. */
   const [hasTotp, setHasTotp] = useState(true)
+
+  /**
+   * Whether this browser can do a passwordless ceremony at all (#241).
+   *
+   * `false` until the effect below answers, so the button never flashes in and
+   * out on a browser that cannot use it. The check is asynchronous and
+   * client-only — it asks the platform authenticator, which does not exist
+   * during server rendering.
+   */
+  const [passwordlessAvailable, setPasswordlessAvailable] = useState(false)
+
+  useEffect(() => {
+    let stale = false
+    /*
+     * Conditional mediation is the honest question to ask.
+     *
+     * `browserSupportsWebAuthn()` alone is not enough: a browser can support
+     * WebAuthn as a second factor and still have no discoverable credential to
+     * offer, and the button would then open a prompt with nothing in it. This
+     * asks whether the platform can answer a ceremony that names no account.
+     */
+    browserSupportsWebAuthnAutofill()
+      .then((supported) => { if (!stale) setPasswordlessAvailable(supported) })
+      .catch(() => { if (!stale) setPasswordlessAvailable(false) })
+    return () => { stale = true }
+  }, [])
+
+  /**
+   * Sign in with a key alone — no email, no password (#241).
+   *
+   * Two round trips and no account named in either: the first asks for a
+   * challenge with no `allowCredentials`, the second redeems whatever the
+   * authenticator produced. The account comes out of the credential.
+   */
+  async function handlePasswordlessSubmit() {
+    setError(null)
+    setLoading(true)
+    try {
+      const res = await fetch('/api/proxy/api/auth/webauthn/options', { method: 'POST' })
+      if (!res.ok) {
+        setError(t('unexpectedError', lang))
+        return
+      }
+      const optionsJSON = (await res.json()) as AuthOptions
+      const assertion = await startAuthentication({ optionsJSON })
+      const result = await signIn('credentials', {
+        webauthn: JSON.stringify(assertion),
+        rememberMe: String(rememberMe),
+        redirect: false,
+      })
+      // Not `invalidCredentials`: "Invalid email or password" names two fields
+      // this sign-in never touched.
+      if (!(await finishSignIn(result))) setError(t('securityKeySignInFailed', lang))
+    } catch (err) {
+      // Closing the prompt, or having no credential to offer, is not a failed
+      // sign-in — the user is still on the form with the password field ready.
+      if (err instanceof Error && (err.name === 'NotAllowedError' || err.name === 'AbortError')) {
+        return
+      }
+      setError(t('unexpectedError', lang))
+    } finally {
+      setLoading(false)
+    }
+  }
 
   const finishSignIn = async (result: { error?: string | null; code?: string } | undefined) => {
     if (result?.error) return false
@@ -395,6 +459,35 @@ export function LoginForm({ shopName, shopSubtitle, logoDataUrl, primaryColor, s
             </form>
           ) : (
           <form onSubmit={handleSubmit} className="space-y-4">
+            {/*
+              * Before the email field, because it replaces both fields rather
+              * than adding to them (#241). A user who signs in this way never
+              * touches either.
+              *
+              * Only where the browser can actually answer such a ceremony — the
+              * check is asynchronous, so this is absent on first paint and on
+              * anything that cannot do it, rather than present and failing.
+              *
+              * `type="button"`, or it would submit the form it sits inside.
+              */}
+            {passwordlessAvailable && (
+              <div className="space-y-4">
+                <button
+                  type="button"
+                  onClick={handlePasswordlessSubmit}
+                  disabled={loading}
+                  className="w-full min-h-11 rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 focus:outline-none focus-visible:ring-2 disabled:opacity-60"
+                  style={{ '--tw-ring-color': 'var(--ring-accent)' } as React.CSSProperties}
+                >
+                  {t('useSecurityKey', lang)}
+                </button>
+                {/* Punctuation between two controls that already name
+                  * themselves, so `aria-hidden` and no text: a translated "or"
+                  * would be a twenty-sixth string in twenty-five tables for a
+                  * word the layout already says. */}
+                <div className="h-px bg-slate-200" aria-hidden="true" />
+              </div>
+            )}
             <div>
               <label htmlFor="email" className="block text-sm font-medium text-slate-700 mb-1">
                 {t('emailAddress', lang)}
