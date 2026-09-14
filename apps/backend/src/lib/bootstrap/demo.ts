@@ -265,7 +265,7 @@ export const seedDemoData = async (): Promise<{ created: boolean }> => {
     throw new Error(
       `Cannot seed demo data: ${secretEncryptionUnavailableReason()} ` +
         'The demo CI source carries an access token, and SECRET_ENCRYPTION_KEY ' +
-        '(32 bytes, hex or base64) is where it gets encrypted.',
+        'is where it gets encrypted: 64 hex characters (openssl rand -hex 32).',
     )
   }
 

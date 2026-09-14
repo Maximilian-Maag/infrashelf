@@ -2,7 +2,7 @@ import path from 'node:path'
 import { readMigrationFiles } from 'drizzle-orm/migrator'
 import { db, client } from '@/lib/db/client'
 import { users, branding, ciSources } from '@/lib/db/schema'
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import {
   encryptSecret,
   isEncryptedEnvelope,
@@ -72,6 +72,27 @@ async function runMigrations() {
  *
  * Values are never logged — only how many moved.
  */
+/**
+ * Encrypt ONE legacy token, only if it has not changed since it was read.
+ *
+ * Exported so the compare-and-swap can be tested for what it actually does. The
+ * race it guards lives between a SELECT and an UPDATE in the loop below, and a
+ * test that seeds the end state never enters that window — it just watches the
+ * row get skipped, and passes whether or not the guard is there. Given the
+ * previous value directly, the guard is the only thing deciding the outcome.
+ *
+ * Returns the number of rows actually written: 0 means somebody else got there
+ * first, which is not an error.
+ */
+export const swapLegacyToken = async (id: number, previous: string): Promise<number> => {
+  const updated = await db
+    .update(ciSources)
+    .set({ accessToken: encryptSecret(previous) })
+    .where(and(eq(ciSources.id, id), eq(ciSources.accessToken, previous)))
+    .returning({ id: ciSources.id })
+  return updated.length
+}
+
 export const encryptLegacyCiTokens = async (): Promise<void> => {
   if (!isSecretEncryptionConfigured()) return
 
@@ -82,16 +103,30 @@ export const encryptLegacyCiTokens = async (): Promise<void> => {
   const legacy = rows.filter((row) => !isEncryptedEnvelope(row.accessToken))
   if (legacy.length === 0) return
 
+  /*
+   * Compare-and-swap on the value we read, not a bare update by id.
+   *
+   * Between the SELECT above and this UPDATE an administrator can rotate the
+   * token — `updateCiSource` writes a fresh envelope — and during a rolling
+   * deploy a second backend instance is running this same backfill. A bare
+   * `WHERE id = ...` would write the stale PLAINTEXT back over the new
+   * credential, and the rotation would be silently lost.
+   *
+   * Guarding on the original value makes the write a no-op in exactly that case:
+   * whoever got there first wins, and their value is already encrypted.
+   */
+  let converted = 0
   for (const row of legacy) {
-    await db
-      .update(ciSources)
-      .set({ accessToken: encryptSecret(row.accessToken) })
-      .where(eq(ciSources.id, row.id))
+    converted += await swapLegacyToken(row.id, row.accessToken)
   }
 
-  console.warn(
-    `[bootstrap] encrypted ${legacy.length} CI source access token(s) that were stored in plain text (#111)`,
-  )
+  // The count of rows actually written, not of rows considered — otherwise a
+  // boot that changed nothing still claims to have converted something.
+  if (converted > 0) {
+    console.warn(
+      `[bootstrap] encrypted ${converted} CI source access token(s) that were stored in plain text (#111)`,
+    )
+  }
 }
 
 let bootstrapped = false
@@ -139,11 +174,28 @@ export const runBootstrap = async (): Promise<void> => {
   reportConfigProblems()
 
   try {
-    await runMigrations()
+    await bootstrapOnce()
   } catch (err) {
+    // The latch means "bootstrap SUCCEEDED", not "bootstrap was attempted", so a
+    // failed one is retryable. See `bootstrapOnce`.
     bootstrapped = false
     throw err
   }
+}
+
+/**
+ * Everything a first boot has to do, as one unit that either finishes or throws.
+ *
+ * Split out so `runBootstrap` above can release its latch on ANY failure. It
+ * used to reset only around `runMigrations`, which was correct while that was
+ * the only thing here that could throw — it is not any more. A transient
+ * database error in the token backfill would otherwise leave the latch set with
+ * the work half done, and every later call, including every health check, would
+ * return immediately and report a ready server whose legacy tokens were never
+ * converted and whose branding row may not exist.
+ */
+const bootstrapOnce = async (): Promise<void> => {
+  await runMigrations()
 
   // Before anything reads a token, and after the migrations so the column is
   // certainly there. A failure here is a real one — a key that decrypts nothing

@@ -1,4 +1,9 @@
-import { decryptSecret, isEncryptedEnvelope } from '@/lib/crypto/secrets'
+import {
+  decryptSecret,
+  isEncryptedEnvelope,
+  SecretEncryptionUnavailableError,
+} from '@/lib/crypto/secrets'
+import { ok, err, type Result } from '@/lib/services/result'
 
 /**
  * The access token of a CI source, whatever state it is stored in (#111).
@@ -25,3 +30,37 @@ import { decryptSecret, isEncryptedEnvelope } from '@/lib/crypto/secrets'
  */
 export const readAccessToken = (stored: string): string =>
   isEncryptedEnvelope(stored) ? decryptSecret(stored) : stored
+
+/**
+ * `readAccessToken` as a `Result`, for routes that must not 500 over it.
+ *
+ * Decryption can fail two ways, and neither is the caller's fault nor a CI
+ * problem:
+ *
+ *   - `SecretEncryptionUnavailableError` — no key, or a malformed one. The
+ *     token is fine; the server cannot read it.
+ *   - anything else out of `decryptSecret` — the envelope does not authenticate
+ *     under this key, which in practice means the key was replaced. It is not
+ *     rotatable in place, so this is a configuration fact too.
+ *
+ * Both are **503**, and deliberately not the 422 the CI routes answer when a
+ * template cannot be fetched: "the CI system did not give us the file" and "this
+ * server cannot read its own credential" send an operator to different places.
+ * Before this existed one route returned 422 for it and the other let it escape
+ * as an unhandled 500 — two wrong answers to one question.
+ */
+export const readAccessTokenResult = (stored: string): Result<string> => {
+  try {
+    return ok(readAccessToken(stored))
+  } catch (e) {
+    if (e instanceof SecretEncryptionUnavailableError) {
+      return err(503, `Cannot read the CI source's access token: ${e.message}`)
+    }
+    return err(
+      503,
+      "The CI source's access token could not be decrypted. It was encrypted with a " +
+        'different SECRET_ENCRYPTION_KEY; the key is not rotatable in place, so the token ' +
+        'has to be entered again under the current one.',
+    )
+  }
+}

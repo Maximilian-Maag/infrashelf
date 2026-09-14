@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { ciSources, auditLog } from '@/lib/db/schema'
@@ -8,11 +8,11 @@ import {
   listCiSources,
   getCiSourceById,
 } from './ciSources'
-import { readAccessToken } from '@/lib/ci/token'
+import { readAccessToken, readAccessTokenResult } from '@/lib/ci/token'
 import { findCiSourceForEnv } from '@/lib/db/queries'
 import { isEncryptedEnvelope, encryptSecret } from '@/lib/crypto/secrets'
 import { createCiSource as seedCiSource, createEnvironment } from '@/test/helpers'
-import { encryptLegacyCiTokens } from '@/lib/bootstrap'
+import { encryptLegacyCiTokens, swapLegacyToken } from '@/lib/bootstrap'
 
 /**
  * CI source access tokens are encrypted at rest (#111).
@@ -186,5 +186,106 @@ describe('the boot backfill converts what is already stored', () => {
 
     expect(second.accessToken).toBe(first.accessToken)
     expect(readAccessToken(second.accessToken)).toBe('test-token')
+  })
+})
+
+describe('a token this server cannot read is a configuration answer, not a CI one', () => {
+  it('answers 503 when the key is gone', async () => {
+    // The token is fine; the server cannot read it. Reported as 422 ("could not
+    // fetch the template") this sends an operator to look at GitLab for a
+    // problem that is here — and one route used to let it escape as a 500.
+    const envelope = encryptSecret('glpat-something')
+    vi.stubEnv('SECRET_ENCRYPTION_KEY', '')
+
+    const result = readAccessTokenResult(envelope)
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.status).toBe(503)
+      expect(result.message).toMatch(/SECRET_ENCRYPTION_KEY/)
+    }
+    vi.unstubAllEnvs()
+  })
+
+  it('answers 503 when the envelope was written under a different key', () => {
+    // Not rotatable in place, so this is a configuration fact too — and it must
+    // not be mistaken for a CI failure.
+    const envelope = encryptSecret('glpat-something')
+    vi.stubEnv('SECRET_ENCRYPTION_KEY', 'f'.repeat(64))
+
+    const result = readAccessTokenResult(envelope)
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.status).toBe(503)
+      expect(result.message).toMatch(/different SECRET_ENCRYPTION_KEY/)
+    }
+    vi.unstubAllEnvs()
+  })
+
+  it('passes a readable token straight through', () => {
+    const result = readAccessTokenResult(encryptSecret('glpat-readable'))
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.data).toBe('glpat-readable')
+  })
+
+  it('tells an operator to use hex, which is the only format accepted', async () => {
+    // `isValidSecretKey` takes 64 hex characters and nothing else — the crypto
+    // module says so in as many words. A message naming base64 sends the
+    // operator round the loop again.
+    vi.stubEnv('SECRET_ENCRYPTION_KEY', '')
+    const refused = await createCiSource({
+      name: 'GitLab', url: 'https://gitlab.example.com', accessToken: TOKEN, provider: 'gitlab',
+    })
+    expect(refused.ok).toBe(false)
+    if (!refused.ok) {
+      expect(refused.status).toBe(503)
+      expect(refused.message).toMatch(/hex/i)
+      expect(refused.message).not.toMatch(/base64/i)
+    }
+    vi.unstubAllEnvs()
+  })
+})
+
+describe('the backfill does not overwrite a concurrent rotation', () => {
+  it('refuses to write when the token changed after it was read', async () => {
+    /*
+     * The rolling-deploy case: a second instance runs this same backfill, or an
+     * administrator rotates the token, between the SELECT and the UPDATE. A bare
+     * `WHERE id = ...` writes the stale PLAINTEXT back over the new credential
+     * and loses the rotation silently.
+     *
+     * Driven through `swapLegacyToken` with the value the backfill *read*,
+     * because that is the only way into the window. Calling
+     * `encryptLegacyCiTokens` against an already-rotated row proves nothing —
+     * the row is no longer legacy, so it is filtered out before the guard is
+     * ever consulted, and the test passes with the guard removed.
+     */
+    const legacy = await seedCiSource({ name: 'Racing' })
+    const staleValue = 'test-token'
+
+    // The concurrent writer wins the row while the backfill still holds the
+    // plaintext it read a moment ago.
+    const rotated = encryptSecret('glpat-rotated-by-someone-else')
+    await db.update(ciSources).set({ accessToken: rotated }).where(eq(ciSources.id, legacy.id))
+
+    const written = await swapLegacyToken(legacy.id, staleValue)
+
+    expect(written).toBe(0)
+    const [after] = await db.select().from(ciSources).where(eq(ciSources.id, legacy.id))
+    expect(after.accessToken).toBe(rotated)
+    expect(readAccessToken(after.accessToken)).toBe('glpat-rotated-by-someone-else')
+  })
+
+  it('writes when the token is still the one it read', async () => {
+    // The other half: the guard must not refuse the ordinary case.
+    const legacy = await seedCiSource({ name: 'Quiet' })
+
+    const written = await swapLegacyToken(legacy.id, 'test-token')
+
+    expect(written).toBe(1)
+    const [after] = await db.select().from(ciSources).where(eq(ciSources.id, legacy.id))
+    expect(isEncryptedEnvelope(after.accessToken)).toBe(true)
+    expect(readAccessToken(after.accessToken)).toBe('test-token')
   })
 })

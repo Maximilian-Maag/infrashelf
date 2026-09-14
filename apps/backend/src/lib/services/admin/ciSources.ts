@@ -54,7 +54,7 @@ const refuseUnlessEncryptable = (): Result<never> | null =>
     : err(
         503,
         `Cannot store a CI source access token: ${secretEncryptionUnavailableReason()} ` +
-          'Set SECRET_ENCRYPTION_KEY (32 bytes, hex or base64) and restart the backend.',
+          'Set SECRET_ENCRYPTION_KEY to 64 hex characters (openssl rand -hex 32) and restart the backend.',
       )
 
 const safeColumns = {

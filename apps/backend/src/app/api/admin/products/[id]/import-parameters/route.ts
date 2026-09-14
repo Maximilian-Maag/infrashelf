@@ -7,7 +7,7 @@ import { ciSources, products } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
 import { ok, err } from '@/lib/services/result'
 import { scanTemplate, importScannedParameters } from '@/lib/services/admin/templateImport'
-import { readAccessToken } from '@/lib/ci/token'
+import { readAccessTokenResult } from '@/lib/ci/token'
 import type { CiProvider } from '@infrashelf/types'
 
 const ImportSchema = z.object({
@@ -79,7 +79,12 @@ export async function POST(
     .limit(1)
   if (!src) return toResponse(err(404, 'CI source not found'))
 
-  const source = { url: src.url, accessToken: readAccessToken(src.accessToken), provider: src.provider as CiProvider }
+  // 503 and not the 422 below: a credential this server cannot read is a
+  // configuration problem, not the CI system refusing us a file.
+  const token = readAccessTokenResult(src.accessToken)
+  if (!token.ok) return toResponse(token)
+
+  const source = { url: src.url, accessToken: token.data, provider: src.provider as CiProvider }
 
   try {
     const scan = await scanTemplate(source, parsed.data.projectId, parsed.data.ref, parsed.data.path)
