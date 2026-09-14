@@ -135,7 +135,7 @@ Three places, and they are not asking the same question.
 | Where | When | What a red run means |
 |---|---|---|
 | `.github/workflows/ci.yml` | never | — a per-PR mutation run is far too slow to gate a merge on, and #245 settled that it is not what the number is for |
-| `.github/workflows/mutation.yml` | nightly on `dev`, plus `workflow_dispatch` | "still climbing" — it blocks nothing. `thresholds.break` is the ratchet, and it is deliberately above the current score |
+| `.github/workflows/mutation.yml` | nightly on `dev`, plus `workflow_dispatch` | "did it get worse?" — it blocks nothing. `thresholds.break` is a ratchet set just below the last measured score, so a red run means a REGRESSION rather than "not finished yet" |
 | `.github/workflows/mutation-release-gate.yml` | pull requests whose **base** is `main` | the release does not meet 90% — from `ENFORCE_FROM` onwards. Until that date the job reports the number and passes |
 
 The release gate is the one the owner's 90% belongs to: the branch model is `dev`
@@ -161,14 +161,14 @@ the merge it was meant to guard.
 
 ### Why it starts as a report
 
-It cannot pass today. The frontend's last completed run scored **26.80**
-(2026-08-24) and the backend has never produced a number at all — its nightly
-still dies in the unmutated dry run. This repository's own rule, from
-`README.md`, is that a gate which cannot pass yet ships naming the issue that
-will promote it, because one that starts red teaches people to click past it.
+It cannot pass today. Both legs now produce a number — the 2026-09-13 nightly
+scored **72.89** on the backend and **37.48** on the frontend — and both are
+below the 90 a release needs. This repository's own rule, from `README.md`, is
+that a gate which cannot pass yet ships naming the issue that will promote it,
+because one that starts red teaches people to click past it.
 
 `ENFORCE_FROM` in the workflow is the date that stops being an excuse. Nothing
-believes 26.80 → 90 happens by then; what happens is that the gate starts
+believes 37.48 → 90 happens by then; what happens is that the gate starts
 blocking `main` and somebody decides in the open — raise the score, or move the
 date with the reason written next to it. Run the workflow by hand with
 `enforce: true` to see what that day will look like.

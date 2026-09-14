@@ -146,9 +146,17 @@ jobs:
           # config is the ratchet, and the release number is enforced by the next
           # step. Capturing it still tells that step whether a missing score means
           # "below the line" or "the run never got going".
+          #
+          # No colours and no progress bar: this log is PARSED, and the parser
+          # below decides whether a release ships. `--allowConsoleColors` wraps
+          # the "All files" cell in ANSI escapes, which defeats the anchored grep
+          # that reads the score — and an unreadable score is treated here as "no
+          # score", which FAILS the gate once it starts enforcing. A release must
+          # not be blocked because a log was coloured.
           set -o pipefail
           status=0
-          pnpm exec stryker run --reporters clear-text,html,progress \
+          pnpm exec stryker run --reporters clear-text,html \
+            --allowConsoleColors false \
             | tee stryker.log || status=$?
           echo "status=$status" >> "$GITHUB_OUTPUT"
 
@@ -164,9 +172,15 @@ jobs:
           # The score lives in the clear-text table's "All files" row. Parsed
           # rather than read from a machine-readable file because Stryker's JSON
           # report carries the per-mutant verdicts, not the computed score.
+          #
+          # Flatten the transcript before reading it. Even with colours off, the
+          # captured stream is a terminal transcript: carriage returns glue lines
+          # together and any stray escape defeats an anchored match. Belt and
+          # braces, because the cost of a parse failure here is a blocked release.
           score=''
           if [ -f stryker.log ]; then
-            score=$(grep -E '^[[:space:]]*All files' stryker.log \
+            tr '\r' '\n' < stryker.log | sed -E 's/\x1b\[[0-9;]*[a-zA-Z]//g' > stryker.txt
+            score=$(grep -E '^[[:space:]]*All files' stryker.txt \
               | head -1 | awk -F'|' '{gsub(/ /,"",$2); print $2}')
           fi
 
@@ -202,7 +216,10 @@ jobs:
             fi
             echo
             echo '```'
-            grep -E '^[[:space:]]*(File|All files|-)' stryker.log 2>/dev/null | head -20 || true
+            # The whole table, capped by lines AND by bytes: GitHub discards the
+            # entire summary above 1024k rather than truncating it, so an
+            # oversized block would take the verdict above down with it.
+            awk '/^[[:space:]]*File[[:space:]]*\|/{f=1} f{ if ($0 ~ /\|/) print; else exit }' stryker.txt 2>/dev/null | head -200 | head -c 20000 || true
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
