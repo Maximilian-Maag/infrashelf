@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   REDACTED_PARAMETER_VALUE,
@@ -79,9 +79,30 @@ export function OrderForm({
   // so the rendered controls are exactly the definitions `createOrder`
   // validates against. Falls back to the unresolved list until the fetch lands.
   const [resolvedParameters, setResolvedParameters] = useState(product.parameters)
+  /*
+   * The same list, and the request still in flight for it, as refs.
+   *
+   * Changing the project starts a refetch, and until it lands `resolvedParameters`
+   * still holds the PREVIOUS project's definitions. Submitting in that window
+   * would send the old project's defaults for the new project — this defect
+   * again, inside a narrower window.
+   *
+   * `handleSubmit` waits for that request and reads the result from a ref:
+   * awaiting cannot observe a state update, because the closure it resumes into
+   * captured the old value. The submission is not refused and the button is not
+   * disabled — this form answers refusals with an `Alert` on purpose (WCAG
+   * 3.3.1, #186), and there is nothing here to refuse. The click just waits.
+   */
+  const latestParameters = useRef(product.parameters)
+  const pendingParameters = useRef<Promise<unknown> | null>(null)
 
   useEffect(() => {
-    if (!envId) { setResolvedParameters(product.parameters); return }
+    if (!envId) {
+      setResolvedParameters(product.parameters)
+      latestParameters.current = product.parameters
+      pendingParameters.current = null
+      return
+    }
     let stale = false
     /*
      * The project goes with the environment, and for the same reason (#406).
@@ -98,12 +119,19 @@ export function OrderForm({
      */
     const query = new URLSearchParams({ lang, environmentId: envId })
     if (projectId) query.set('projectId', projectId)
-    get<ProductDetail>(`/api/catalog/${product.id}?${query}`)
+    const request = get<ProductDetail>(`/api/catalog/${product.id}?${query}`)
       // Guard on `parameters`, not just on `detail`: a truthy-but-shapeless
       // response (an error envelope, an empty array) would otherwise store
       // undefined and crash the next render on `.filter`.
-      .then((detail) => { if (!stale && detail?.parameters) setResolvedParameters(detail.parameters) })
+      .then((detail) => {
+        if (!stale && detail?.parameters) {
+          setResolvedParameters(detail.parameters)
+          latestParameters.current = detail.parameters
+        }
+      })
       .catch(() => { /* keep the unresolved list — submit still validates server-side */ })
+      .finally(() => { if (pendingParameters.current === request) pendingParameters.current = null })
+    pendingParameters.current = request
     return () => { stale = true }
   }, [envId, projectId, product.id, product.parameters, lang])
 
@@ -228,8 +256,17 @@ export function OrderForm({
       // Input placeholder already displays the default, so users expect it to
       // be submitted. ParameterFields is now fully controlled, so paramValues
       // only contains keys the user has actually edited.
+      // Wait for a project change still in flight, then read the definitions from
+      // the ref rather than from `envParameters` — the render that produced the
+      // latter is the one being waited on. Never rejects: the effect catches its
+      // own failure and leaves the last good list in place.
+      if (pendingParameters.current) await pendingParameters.current
+      const effectiveParameters = latestParameters.current.filter(
+        (p) => p.environmentId === null || String(p.environmentId) === envId,
+      )
+
       const parametersWithDefaults: Record<string, string> = {}
-      for (const p of envParameters) {
+      for (const p of effectiveParameters) {
         parametersWithDefaults[p.name] = paramValues[p.name] ?? p.defaultValue ?? ''
       }
       const body: CreateOrderRequest = {
