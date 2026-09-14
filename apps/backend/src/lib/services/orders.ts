@@ -14,8 +14,14 @@ import {
   type Parameter,
 } from '@/lib/db/schema'
 import { eq, and, sql, inArray } from 'drizzle-orm'
-import { logAudit } from '@/lib/audit'
-import { attachBudgets, checkBudgetForOrder, type BudgetState } from '@/lib/services/budgets'
+import { logAudit, logAuditWith } from '@/lib/audit'
+import {
+  attachBudgets,
+  checkBudget,
+  lockCostCentreBudget,
+  resolveBudgetCostCentre,
+  type BudgetState,
+} from '@/lib/services/budgets'
 import { sendOrderCreated, sendApprovalRequest } from '@/lib/notification'
 import { triggerProductWebhooksTracked, triggerPipelineStacksTracked } from '@/lib/ci/webhooks'
 import {
@@ -1150,81 +1156,132 @@ export const createPreparedOrder = async (
   } = prepared
 
   /*
-   * The budget gate, at the single point both paths go through (#325).
+   * The budget gate, at the single point both paths go through (#325), and the
+   * check and the insert are ONE transaction, serialised per cost centre (#403).
    *
    * Here rather than in the route, because the approval path reaches this
    * function too: a check in the checkout handler alone would let an order
-   * approved next week spend a budget that is already gone.
+   * approved next week spend a budget that is already gone. `warn` deliberately
+   * does not stop anything — it is the setting that says "tell me, do not
+   * refuse me" — so only `block` returns early.
    *
-   * `warn` deliberately does not stop anything — it is the setting that says
-   * "tell me, do not refuse me" — so only `block` returns early.
+   * They used to be two statements against the pool, and the gap between them
+   * was the bug: two orders placed close together both read the same
+   * `committed`, both found room, and both committed. If the first exhausted
+   * the budget the second had already passed its `block` check.
+   *
+   * The advisory lock is taken before the read and released by Postgres at
+   * commit or rollback. Everything inside runs through `tx` — the budget reads
+   * take an executor for exactly this reason. Reaching for the module-level
+   * `db` in here would check out a SECOND connection while this one is held,
+   * and under load that is a pool deadlock: a worse failure than the bounded
+   * overspend it is preventing.
+   *
+   * What is deliberately NOT in here: provisioning and email.
+   * `provisionOrderElements` fires CI pipelines, and holding a lock — or a
+   * connection — across a network call to someone else's GitLab is how one slow
+   * runner becomes an outage on checkout. They run after the commit, below.
+   *
+   * The budget audit entries ARE in here, written through `tx`: they record why
+   * an over-budget order was allowed, and that has to commit with the order it
+   * describes rather than separately.
    */
-  /*
-   * The order being placed is part of the question, not just the ones before it.
-   *
-   * Its line total comes from the snapshot captured for THIS order, which is
-   * the same figure `loadBudgetState` reads back for it once it exists — so the
-   * gate and the report cannot disagree about what it cost.
-   */
-  const budget = await checkBudgetForOrder(projectId, resolvedCostCenterId, new Date(), {
-    price: productSnapshot?.price ?? null,
-    currency: productSnapshot?.currency ?? null,
-    quantity,
-  })
-  if (budget.outcome === 'block') {
-    if (session.role !== 'root' || !overrideBudget) {
-      return err(409, budget.message ?? 'This cost centre is over budget.')
-    }
-    await logAudit(
-      session.id,
-      'order.budget_overridden',
-      undefined,
-      `${session.email} placed an order against ${budget.state?.costCenterLabel} with the budget already spent`,
-    )
-  }
-  /*
-   * A warning has to reach somebody, or it is not a warning (#325).
-   *
-   * `warn` is the setting that says "tell me, do not refuse me", and an
-   * over-budget order that passes silently is indistinguishable from one that
-   * was inside its budget. So it is recorded here, and `budget.message` is
-   * returned on the created order below, so the person who placed it is told at
-   * the moment they placed it. The approver is told separately, on the queue
-   * row, because by the time this runs for an approval the decision has already
-   * been taken.
-   *
-   * The notice on the way out is keyed on the MESSAGE, not on this branch: an
-   * order only reaches the returns below with a message when it went through
-   * over budget, which is `warn` or a root override. Both of those want saying.
-   * A `block` that was not overridden returned above.
-   */
-  if (budget.outcome === 'warn') {
-    await logAudit(
-      session.id,
-      'order.budget_warning',
-      undefined,
-      `${session.email} placed an order against ${budget.state?.costCenterLabel} with the budget already spent`,
-    )
-  }
+  const placement = await db.transaction(async (tx) => {
+    const budgetCostCentreId = await resolveBudgetCostCentre(projectId, resolvedCostCenterId, tx)
+    if (budgetCostCentreId !== null) await lockCostCentreBudget(tx, budgetCostCentreId)
 
-  if (isAdmin) {
-    const [order] = await db
+    /*
+     * The order being placed is part of the question, not just the ones before it.
+     *
+     * Its line total comes from the snapshot captured for THIS order, which is
+     * the same figure `loadBudgetState` reads back for it once it exists — so the
+     * gate and the report cannot disagree about what it cost.
+     */
+    const budget = await checkBudget(
+      budgetCostCentreId,
+      new Date(),
+      {
+        price: productSnapshot?.price ?? null,
+        currency: productSnapshot?.currency ?? null,
+        quantity,
+      },
+      tx,
+    )
+
+    if (budget.outcome === 'block' && (session.role !== 'root' || !overrideBudget)) {
+      // Nothing has been written, so there is nothing to roll back — returning
+      // rather than throwing keeps the 409 an ordinary result instead of an
+      // exception the caller has to unpick.
+      return { kind: 'blocked' as const, message: budget.message ?? 'This cost centre is over budget.' }
+    }
+
+    const [order] = await tx
       .insert(orders)
       .values({
         projectId,
         productId,
         environmentId,
         userId: session.id,
-        status: 'provisioning',
+        // The admin path provisions immediately; everyone else waits for an
+        // approval. The only difference between the two inserts, which is why
+        // they are one insert now.
+        status: isAdmin ? 'provisioning' : 'pending',
         parameters,
         costCenterId: resolvedCostCenterId,
+        // Carried to approval time, which is where the trial is actually
+        // provisioned and where its clock starts.
         isTrial,
         productSnapshot,
+        // Same for the size and the quantity: one approval covers the whole
+        // order, so the approver's single decision has to carry all N elements.
         sizeCode,
         quantity,
       })
       .returning()
 
+    /*
+     * The order and the record of WHY it was allowed commit together.
+     *
+     * `warn` means "tell me, do not refuse me", and an over-budget order that
+     * passes silently is indistinguishable from one that was inside its budget.
+     * A root override is a control being deliberately stepped around. Either
+     * written outside this transaction could be lost while the order survived,
+     * leaving spend over budget with nothing saying it was allowed — the same
+     * reason `setCostCentreBudget` writes its own audit entry through `tx`.
+     *
+     * Through `logAuditWith(tx, …)` and not `logAudit`, which would take a
+     * second connection while this one is held.
+     */
+    if (budget.outcome === 'block' || budget.outcome === 'warn') {
+      await logAuditWith(
+        tx,
+        session.id,
+        budget.outcome === 'block' ? 'order.budget_overridden' : 'order.budget_warning',
+        order.id,
+        `${session.email} placed an order against ${budget.state?.costCenterLabel} with the budget already spent`,
+      )
+    }
+
+    return { kind: 'placed' as const, order, budget }
+  })
+
+  if (placement.kind === 'blocked') return err(409, placement.message)
+  const { order, budget } = placement
+
+  /*
+   * `budget.message` is returned on the created order below, so the person who
+   * placed it is told at the moment they placed it. The approver is told
+   * separately, on the queue row, because by the time this runs for an approval
+   * the decision has already been taken.
+   *
+   * The notice on the way out is keyed on the MESSAGE, not on the outcome: an
+   * order only reaches the returns below with a message when it went through
+   * over budget, which is `warn` or a root override. A `block` that was not
+   * overridden returned above. The audit entries for both were written inside
+   * the transaction, with the order they describe.
+   */
+
+  if (isAdmin) {
     // One order, N elements: the fan-out lives in provisionOrderElements so the
     // approval path cannot derive the state keys differently.
     let provisioned: Awaited<ReturnType<typeof provisionOrderElements>>
@@ -1278,27 +1335,6 @@ export const createPreparedOrder = async (
       ...(budget.message ? { budgetWarning: budget.message } : {}),
     })
   } else {
-    const [order] = await db
-      .insert(orders)
-      .values({
-        projectId,
-        productId,
-        environmentId,
-        userId: session.id,
-        status: 'pending',
-        parameters,
-        costCenterId: resolvedCostCenterId,
-        // Carried to approval time, which is where the trial is actually
-        // provisioned and where its clock starts.
-        isTrial,
-        productSnapshot,
-        // Same for the size and the quantity: one approval covers the whole
-        // order, so the approver's single decision has to carry all N elements.
-        sizeCode,
-        quantity,
-      })
-      .returning()
-
     await logAudit(session.id, 'order.created', order.id, `Order created for product ${productId}`)
 
     const email = await findUserEmail(session.id)

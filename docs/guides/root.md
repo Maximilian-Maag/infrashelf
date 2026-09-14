@@ -485,12 +485,17 @@ than left for you to discover:
   rate there is no way to show it fits. Adding the rate under
   **Administration → Exchange Rates** is the remedy, and the message says so.
 
-**Under concurrent load the block is best-effort.** The check and the order are
-two steps, so two orders placed against the same cost centre within the same
-instant can both pass a check that only one of them should have. The overspend
-is bounded by one order's value. Making it strict means serialising every order
-against a cost centre, which costs throughput on checkout — see issue #403 for
-the trade-off.
+**A `block` budget holds under concurrent load.** The check and the order insert
+are one transaction, and it takes a lock on the cost centre before it reads the
+committed figure — so two orders placed against the same cost centre in the same
+instant cannot both pass a check only one of them should have. The second waits
+for the first to commit and is then measured against it.
+
+What that costs, said plainly: ordering against a *single* cost centre is
+serialised at checkout. Two orders billed to two different cost centres do not
+wait for each other, and nothing outside the check and the insert is inside the
+lock — provisioning, email and audit entries all happen after it is released, so
+a slow CI runner cannot hold up anybody else's order.
 
 Removing a budget clears all four fields together and the cost centre stops
 refusing anything. Nothing already ordered changes.
