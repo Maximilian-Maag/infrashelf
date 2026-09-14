@@ -34,6 +34,17 @@ import type { ProductImageMeta } from '@infrashelf/types'
  */
 export type ApplicableParameter = Parameter & { projectScoped?: boolean }
 
+/**
+ * Whether the rows being resolved were filtered to a known project (#406).
+ *
+ * `projectScoped` is a precedence rule (#275), and it is only meaningful when
+ * the loader was given a project: then a narrowed row is narrowed to THIS
+ * project and is the more specific statement. Given no project, the loader
+ * returns rows narrowed to every project alike, and preferring one of them
+ * shows one project's definition to all of them.
+ */
+export type ResolveOptions = { projectKnown?: boolean }
+
 export const loadApplicableParameters = async (
   productId: number,
   categoryId: number,
@@ -112,7 +123,10 @@ export const loadApplicableParameters = async (
  * environment-specific row over an all-environments (NULL) row. This is the
  * effective definition a submitted value is validated against.
  */
-export const resolveParameterDefs = (rows: ApplicableParameter[]): ApplicableParameter[] => {
+export const resolveParameterDefs = (
+  rows: ApplicableParameter[],
+  { projectKnown = true }: ResolveOptions = {},
+): ApplicableParameter[] => {
   const scopeRank: Record<string, number> = { global: 0, category: 1, product: 2 }
   const byName = new Map<string, ApplicableParameter>()
 
@@ -148,8 +162,30 @@ export const resolveParameterDefs = (rows: ApplicableParameter[]): ApplicablePar
     const sameScopeAndEnvButProjectScoped =
       sameScope &&
       row.environmentId === current.environmentId &&
+      projectKnown &&
       row.projectScoped === true &&
       current.projectScoped !== true
+
+    /*
+     * The same rule upside down, for the case where NO project is known (#406).
+     *
+     * `projectScoped` only means "narrowed to the project we filtered for" when
+     * the loader was given a project to filter for. Without one it means merely
+     * "narrowed to SOME project" — and preferring that row handed a definition
+     * belonging to one project to everybody, which is how the catalogue page
+     * came to render another project's `type`, `required` and `sensitive`.
+     *
+     * There is no correct answer before a project is chosen, only a less wrong
+     * one. The unnarrowed row is the definition that applies to every project,
+     * so it is the one to show while we do not yet know which project is asking.
+     * Picking a project refetches and the rule above takes over.
+     */
+    const sameScopeAndEnvButUnnarrowed =
+      sameScope &&
+      row.environmentId === current.environmentId &&
+      !projectKnown &&
+      row.projectScoped !== true &&
+      current.projectScoped === true
 
     /*
      * The last tie-break, and it exists because without one the winner was
@@ -182,6 +218,7 @@ export const resolveParameterDefs = (rows: ApplicableParameter[]): ApplicablePar
       moreSpecificScope ||
       sameScopeButEnvSpecific ||
       sameScopeAndEnvButProjectScoped ||
+      sameScopeAndEnvButUnnarrowed ||
       sameEverythingButNewer
     ) {
       byName.set(row.name, row)
@@ -204,14 +241,17 @@ export const resolveParameterDefs = (rows: ApplicableParameter[]): ApplicablePar
  * client narrows to the selected environment by refetching with `environmentId`
  * so what it renders is exactly what the order service resolves.
  */
-export const resolveParameterDefsPerEnvironment = (rows: Parameter[]): Parameter[] => {
+export const resolveParameterDefsPerEnvironment = (
+  rows: Parameter[],
+  opts: ResolveOptions = {},
+): Parameter[] => {
   const byEnvironment = new Map<number | null, Parameter[]>()
   for (const row of rows) {
     const group = byEnvironment.get(row.environmentId)
     if (group) group.push(row)
     else byEnvironment.set(row.environmentId, [row])
   }
-  return [...byEnvironment.values()].flatMap((group) => resolveParameterDefs(group))
+  return [...byEnvironment.values()].flatMap((group) => resolveParameterDefs(group, opts))
 }
 
 /**
@@ -428,6 +468,17 @@ export const getProduct = async (
   productId: number,
   lang: string,
   environmentId?: number,
+  /*
+   * The project the order form is currently pointed at, when it has one (#406).
+   *
+   * Optional because the catalogue page loads this endpoint before any project
+   * is chosen. Supplying it is what makes the controls the form renders the
+   * same definitions `createPreparedOrder` will validate the submission
+   * against — it loads with the project, and the two disagreeing is how a
+   * default belonging to another project got submitted as though an
+   * administrator had set it for this one.
+   */
+  projectId?: number,
 ): Promise<Result<ProductDetail>> => {
   const productRows = await db
     .select({
@@ -501,7 +552,12 @@ export const getProduct = async (
   // `price`, which is what every offering that predates sizing has.
   const sizesByEnvironment = await listActiveSizesForProduct(productId)
 
-  const paramRows = await loadApplicableParameters(productId, product.categoryId, environmentId)
+  const paramRows = await loadApplicableParameters(
+    productId,
+    product.categoryId,
+    environmentId,
+    projectId,
+  )
 
   // Collapse to one effective definition per name (scope + env precedence) so
   // the order form renders exactly the controls the order service will
@@ -512,10 +568,11 @@ export const getProduct = async (
   // catalog page loads this endpoint with no environment (the user picks it in
   // the order form afterwards), and collapsing then would drop definitions that
   // still apply to the environment they end up choosing.
+  const resolveOptions = { projectKnown: projectId !== undefined }
   const resolved =
     environmentId !== undefined
-      ? resolveParameterDefs(paramRows)
-      : resolveParameterDefsPerEnvironment(paramRows)
+      ? resolveParameterDefs(paramRows, resolveOptions)
+      : resolveParameterDefsPerEnvironment(paramRows, resolveOptions)
 
   // Redacted HERE and not in `loadApplicableParameters`: the order service shares
   // that loader to validate a submission and needs the real default to apply it

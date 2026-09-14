@@ -458,3 +458,103 @@ describe('OrderForm quantity', () => {
     expect((mockedPost.mock.calls[0][1] as Record<string, unknown>).quantity).toBe(3)
   })
 })
+
+
+/*
+ * #406. The form resolved parameters before a project was chosen and never
+ * again after, so a definition narrowed to one project (#275) reached every
+ * project — and the defaults filled in on submit came from it.
+ */
+describe('OrderForm resolves parameters for the selected project (#406)', () => {
+  const projects = [
+    { id: 5, name: 'Webshop' },
+    { id: 6, name: 'Billing' },
+  ] as never
+
+  const regionFor = (label: string, defaultValue: string) => [
+    param({ id: 1, name: 'REGION', environmentId: null, label, defaultValue }),
+  ]
+
+  it('sends the project with the catalog refetch', async () => {
+    const user = userEvent.setup()
+    mockedGet.mockImplementation((async (path: string) =>
+      path.startsWith('/api/catalog/')
+        ? { ...product, parameters: regionFor('Region', 'westeurope') }
+        : []) as never)
+
+    render(<OrderForm product={product} projects={projects} costCenters={[]} />)
+    await user.selectOptions(screen.getByLabelText(/environment/i), '1')
+    await user.selectOptions(screen.getByLabelText(/project/i), '5')
+
+    await waitFor(() => {
+      expect(mockedGet).toHaveBeenCalledWith('/api/catalog/7?lang=en&environmentId=1&projectId=5')
+    })
+  })
+
+  it('re-resolves when the project changes, not only when the environment does', async () => {
+    const user = userEvent.setup()
+    mockedGet.mockImplementation((async (path: string) => {
+      if (!path.startsWith('/api/catalog/')) return []
+      return {
+        ...product,
+        parameters: path.includes('projectId=6')
+          ? regionFor('Region (Billing)', 'northeurope')
+          : regionFor('Region (Webshop)', 'westeurope'),
+      }
+    }) as never)
+
+    render(<OrderForm product={product} projects={projects} costCenters={[]} />)
+    await user.selectOptions(screen.getByLabelText(/environment/i), '1')
+    await user.selectOptions(screen.getByLabelText(/project/i), '5')
+    expect(await screen.findByLabelText('Region (Webshop)')).toBeInTheDocument()
+
+    // The picker moving is the whole point: before the fix `projectId` was in
+    // neither the query nor the dependency array, so this second selection
+    // changed nothing and the form kept Webshop's definition.
+    await user.selectOptions(screen.getByLabelText(/project/i), '6')
+    expect(await screen.findByLabelText('Region (Billing)')).toBeInTheDocument()
+  })
+
+  /*
+   * The narrower window inside the same defect. The refetch is asynchronous, so
+   * between choosing a project and its definitions arriving the form is still
+   * holding the previous project's. Submitting there sent the old project's
+   * defaults for the new project.
+   */
+  it('waits for an in-flight project change before filling in defaults', async () => {
+    const user = userEvent.setup()
+    let releaseBilling: (() => void) | undefined
+    const billingArrived = new Promise<void>((resolve) => { releaseBilling = resolve })
+
+    mockedGet.mockImplementation((async (path: string) => {
+      if (!path.startsWith('/api/catalog/')) return []
+      if (path.includes('projectId=6')) {
+        // Held open, so the submit below happens while this is still in flight.
+        await billingArrived
+        return { ...product, parameters: regionFor('Region (Billing)', 'northeurope') }
+      }
+      return { ...product, parameters: regionFor('Region (Webshop)', 'westeurope') }
+    }) as never)
+
+    render(<OrderForm product={product} projects={projects} costCenters={[]} />)
+    await user.selectOptions(screen.getByLabelText(/environment/i), '1')
+    await user.selectOptions(screen.getByLabelText(/project/i), '5')
+    expect(await screen.findByLabelText('Region (Webshop)')).toBeInTheDocument()
+
+    await user.selectOptions(screen.getByLabelText(/project/i), '6')
+    // Still showing Webshop's control: Billing's response has not been released.
+    expect(screen.getByLabelText('Region (Webshop)')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /place order/i }))
+    expect(mockedPost).not.toHaveBeenCalled()
+
+    releaseBilling?.()
+
+    await waitFor(() => expect(mockedPost).toHaveBeenCalled())
+    const body = mockedPost.mock.calls[0][1] as { projectId: number; parameters: Record<string, string> }
+    expect(body.projectId).toBe(6)
+    // The value that matters: Billing's default, not the one the form was still
+    // rendering when the button was clicked.
+    expect(body.parameters.REGION).toBe('northeurope')
+  })
+})

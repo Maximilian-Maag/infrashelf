@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { loadApplicableParameters, resolveParameterDefs } from './catalog'
+import { loadApplicableParameters, resolveParameterDefs, getProduct } from './catalog'
 import { createParameter, updateParameter } from './admin/parameters'
 import { db } from '@/lib/db/client'
 import { parameters, parameterProjects } from '@/lib/db/schema'
@@ -345,5 +345,119 @@ describe('the applicable rows come back in a defined order', () => {
     const rows = await loadApplicableParameters(s.product.id, s.cat.id)
     const ours = rows.filter((r) => ['ZETA', 'ALPHA', 'MID'].includes(r.name))
     expect(ours.map((r) => r.name)).toEqual(['ZETA', 'ALPHA', 'MID'])
+  })
+})
+
+
+/*
+ * #406. Resolving parameters before a project is chosen, and never again after.
+ *
+ * `projectScoped` is a precedence rule (#275), and it only means "narrowed to
+ * the project we are ordering for" when the loader was GIVEN a project. Given
+ * none, it means "narrowed to some project" — and preferring that row handed
+ * one project's definition to every project, including the `sensitive` flag
+ * that decides whether the value is redacted downstream (#131).
+ */
+describe('resolving parameters for the project that is actually asking (#406)', () => {
+  const params = (result: Awaited<ReturnType<typeof getProduct>>) => {
+    if (!result.ok) throw new Error('getProduct failed')
+    return result.data.parameters as { name: string; defaultValue: string; sensitive: boolean }[]
+  }
+  const region = (result: Awaited<ReturnType<typeof getProduct>>) =>
+    params(result).find((p) => p.name === 'region')
+
+  it('gives each project the definition narrowed to it, not the other one', async () => {
+    const { product, env, mine, other } = await setup()
+    const forMine = await addParameter({ name: 'region', defaultValue: 'westeurope' })
+    await narrowTo(forMine.id, [mine.id])
+    const forOther = await addParameter({ name: 'region', defaultValue: 'northeurope' })
+    await narrowTo(forOther.id, [other.id])
+
+    // Both rows are `projectScoped`, so before the fix nothing separated them
+    // and #402's tie-break — highest id — handed `northeurope` to both projects.
+    expect(region(await getProduct(product.id, 'en', env.id, mine.id))?.defaultValue).toBe('westeurope')
+    expect(region(await getProduct(product.id, 'en', env.id, other.id))?.defaultValue).toBe('northeurope')
+  })
+
+  /*
+   * The sharp edge, and the reason this is more than a rendering ticket. A
+   * definition that is `sensitive` for the chosen project, resolved from a row
+   * where it is not, is an input the form does not mask.
+   */
+  it('does not let another project decide whether a value is secret', async () => {
+    const { product, env, mine, other } = await setup()
+    const secretForMine = await addParameter({ name: 'region', sensitive: true })
+    await narrowTo(secretForMine.id, [mine.id])
+    const plainForOther = await addParameter({ name: 'region', sensitive: false })
+    await narrowTo(plainForOther.id, [other.id])
+
+    expect(region(await getProduct(product.id, 'en', env.id, mine.id))?.sensitive).toBe(true)
+    expect(region(await getProduct(product.id, 'en', env.id, other.id))?.sensitive).toBe(false)
+  })
+
+  /*
+   * The pre-selection state. There is no correct answer before a project is
+   * chosen, only a less wrong one: the unnarrowed row is the definition that
+   * applies to every project, so it is the one to show while we do not know
+   * which project is asking. Picking one refetches and narrowing takes over.
+   */
+  it('shows the definition that applies to everybody while no project is chosen', async () => {
+    const { product, env, mine } = await setup()
+    /*
+     * The NARROWED row is created first, so it has the lower id and
+     * `loadApplicableParameters` (ordered by id, #402) hands it to the resolver
+     * as the incumbent. Created the other way round the unnarrowed row wins by
+     * arriving first and this asserts nothing — which is the order-dependence
+     * #402 was about, so the guard has to be the awkward order.
+     */
+    const narrow = await addParameter({ name: 'region', defaultValue: 'for-one-project' })
+    await narrowTo(narrow.id, [mine.id])
+    await addParameter({ name: 'region', defaultValue: 'everywhere' })
+
+    expect(region(await getProduct(product.id, 'en', env.id))?.defaultValue).toBe('everywhere')
+    // ...and choosing that project still gets its own definition.
+    expect(region(await getProduct(product.id, 'en', env.id, mine.id))?.defaultValue).toBe('for-one-project')
+  })
+
+  it('still hides a parameter narrowed away from the project that is asking', async () => {
+    const { product, env, mine, other } = await setup()
+    const param = await addParameter({ name: 'region' })
+    await narrowTo(param.id, [mine.id])
+
+    expect(region(await getProduct(product.id, 'en', env.id, other.id))).toBeUndefined()
+  })
+
+  it('resolves per project before an environment is chosen too', async () => {
+    // The catalogue page loads with no environment and resolves per environment
+    // instead; that path has to carry the project as well.
+    const { product, mine, other } = await setup()
+    const forMine = await addParameter({ name: 'region', defaultValue: 'westeurope' })
+    await narrowTo(forMine.id, [mine.id])
+    const forOther = await addParameter({ name: 'region', defaultValue: 'northeurope' })
+    await narrowTo(forOther.id, [other.id])
+
+    expect(region(await getProduct(product.id, 'en', undefined, mine.id))?.defaultValue).toBe('westeurope')
+    expect(region(await getProduct(product.id, 'en', undefined, other.id))?.defaultValue).toBe('northeurope')
+  })
+
+  it('prefers the unnarrowed row whichever order the rows arrive in', async () => {
+    // The pure-function half: order independence is the property that made the
+    // old behaviour a query-plan question rather than a decision (#402).
+    const narrowed = { id: 1, projectScoped: true, defaultValue: 'narrowed' }
+    const broad = { id: 99, projectScoped: false, defaultValue: 'broad' }
+    const row = (over: object) =>
+      ({
+        scope: 'global', scopeId: 0, environmentId: null, name: 'region', label: '',
+        type: 'string', description: '', required: false, sensitive: false, sizeValues: {},
+        ...over,
+      }) as unknown as Parameters<typeof resolveParameterDefs>[0][number]
+
+    const opts = { projectKnown: false }
+    expect(resolveParameterDefs([row(narrowed), row(broad)], opts)[0].defaultValue).toBe('broad')
+    expect(resolveParameterDefs([row(broad), row(narrowed)], opts)[0].defaultValue).toBe('broad')
+
+    // And with a project known, #275's rule is untouched.
+    expect(resolveParameterDefs([row(narrowed), row(broad)])[0].defaultValue).toBe('narrowed')
+    expect(resolveParameterDefs([row(broad), row(narrowed)])[0].defaultValue).toBe('narrowed')
   })
 })
