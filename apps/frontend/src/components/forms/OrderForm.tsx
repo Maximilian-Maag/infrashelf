@@ -83,14 +83,29 @@ export function OrderForm({
   useEffect(() => {
     if (!envId) { setResolvedParameters(product.parameters); return }
     let stale = false
-    get<ProductDetail>(`/api/catalog/${product.id}?lang=${lang}&environmentId=${envId}`)
+    /*
+     * The project goes with the environment, and for the same reason (#406).
+     *
+     * A parameter can be narrowed to specific projects (#275), and that
+     * narrowing is a precedence rule — so resolving without the project handed
+     * one project's definition to every project. `sensitive` is the sharp edge:
+     * it decides whether the input below is masked at all.
+     *
+     * It is in the dependency array as well as the query. Leaving it out was
+     * the actual defect: the picker moved, the parameters did not, and the
+     * defaults filled in on submit came from whichever definition the page had
+     * been holding since before a project was chosen.
+     */
+    const query = new URLSearchParams({ lang, environmentId: envId })
+    if (projectId) query.set('projectId', projectId)
+    get<ProductDetail>(`/api/catalog/${product.id}?${query}`)
       // Guard on `parameters`, not just on `detail`: a truthy-but-shapeless
       // response (an error envelope, an empty array) would otherwise store
       // undefined and crash the next render on `.filter`.
       .then((detail) => { if (!stale && detail?.parameters) setResolvedParameters(detail.parameters) })
       .catch(() => { /* keep the unresolved list — submit still validates server-side */ })
     return () => { stale = true }
-  }, [envId, product.id, product.parameters, lang])
+  }, [envId, projectId, product.id, product.parameters, lang])
 
   const selectedEnv = product.environments.find((e) => String(e.environmentId) === envId)
   // `overhead` used to be lumped in with `select` and rendered a picker, which
