@@ -370,9 +370,8 @@ describe('signing out', () => {
     vi.mocked(signOut).mockReset()
     vi.mocked(clearServiceWorkerCaches).mockReset()
     vi.mocked(clearServiceWorkerCaches).mockResolvedValue(undefined)
-    vi.mocked(get).mockReset().mockResolvedValue([
-      { id: 7, current: true }, { id: 8, current: false },
-    ] as never)
+    // No `get` here any more: the sign-out no longer asks which session is
+    // current, because the backend already knows (#425).
     vi.mocked(del).mockReset().mockResolvedValue(undefined as never)
   })
 
@@ -460,10 +459,14 @@ describe('signing out', () => {
     await user.click(screen.getByRole('button', { name: /sign out/i }))
 
     // The second argument is the deadline signal; this cares about the path.
-    await waitFor(() => expect(del).toHaveBeenCalledWith('/api/sessions/7', expect.anything()))
+    // `/current`, in ONE call: the id comes off the verified token now, and the
+    // round trip that used to fetch it shared this deadline (#425).
+    await waitFor(() => expect(del).toHaveBeenCalledWith('/api/sessions/current', expect.anything()))
     // The OTHER session is someone else's problem — "sign out everywhere" is a
     // different affordance, and taking it here would be a surprise.
     expect(del).toHaveBeenCalledTimes(1)
+    // And nothing is read first: that call is what the deadline was spent on.
+    expect(get).not.toHaveBeenCalled()
   })
 
   it('revokes before ending the session, so the token is dead when the cookie goes', async () => {
@@ -490,7 +493,7 @@ describe('signing out', () => {
     // Never settles on its own; only the deadline's abort ends it — which is
     // the whole point, and what a `catch` cannot do. Real timers, because the
     // budget is 3s and this asserts that it actually elapses and releases.
-    vi.mocked(get).mockImplementation((async (_path: string, signal?: AbortSignal) =>
+    vi.mocked(del).mockImplementation((async (_path: string, signal?: AbortSignal) =>
       new Promise((_resolve, reject) => {
         signal?.addEventListener('abort', () => reject(new Error('aborted')))
       })) as never)
@@ -510,13 +513,35 @@ describe('signing out', () => {
    * was, and no worse.
    */
   it('still ends the session when the revoke fails', async () => {
-    vi.mocked(get).mockRejectedValue(new Error('backend unreachable'))
+    vi.mocked(del).mockRejectedValue(new Error('backend unreachable'))
     const user = userEvent.setup()
     render(<Header userName="Root Admin" lang="en" />)
     await user.click(screen.getByText(/my account/i))
     await user.click(screen.getByRole('button', { name: /sign out/i }))
 
     await waitFor(() => expect(signOut).toHaveBeenCalledWith({ redirect: false }))
+  })
+
+  it('says so when the revoke fails, instead of failing silently', async () => {
+    // Non-fatal is not the same as invisible. The empty catch here is what made
+    // a `signout.spec` flake cost an investigation: the session quietly stayed
+    // live on the server and nothing said so anywhere (#425, and #415 one layer
+    // up).
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const boom = new Error('backend unreachable')
+    vi.mocked(del).mockRejectedValue(boom)
+    const user = userEvent.setup()
+    render(<Header userName="Root Admin" lang="en" />)
+    await user.click(screen.getByText(/my account/i))
+    await user.click(screen.getByRole('button', { name: /sign out/i }))
+
+    await waitFor(() =>
+      expect(warn).toHaveBeenCalledWith(
+        '[signout] the session could not be revoked on the server',
+        boom,
+      ),
+    )
+    warn.mockRestore()
   })
 
   // The regression itself: whatever cache-clearing does, the session ends.
