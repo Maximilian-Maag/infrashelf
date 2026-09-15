@@ -239,3 +239,46 @@ test_each_offending_import_is_reported if {
 		{"file": "b.tsx", "line": 9, "module": "@/lib/auth"},
 	])) == 2
 }
+
+# --- a catch around a server fetch must rethrow the navigation --------------
+
+swallowed(entries) := {"swallowedRedirects": entries}
+
+hit(file, kind) := {
+	"file": file,
+	"line": 32,
+	"kind": kind,
+	"call": "get",
+}
+
+test_no_swallowed_redirects_passes if {
+	denied := policy.deny with input as swallowed([])
+	count(denied) == 0
+}
+
+# The #434 shape: `try { await get(...) } catch { notFound() }`.
+test_a_try_catch_without_a_rethrow_is_denied if {
+	facts := swallowed([hit("apps/frontend/src/app/(dashboard)/projects/[id]/page.tsx", "try/catch")])
+	denied := policy.deny with input as facts
+	some v in denied
+	v.rule == "catch_rethrows_navigation"
+	v.line == 32
+}
+
+# The same hazard wearing a promise method.
+test_a_promise_catch_without_a_rethrow_is_denied if {
+	facts := swallowed([hit("apps/frontend/src/app/(dashboard)/catalog/[id]/page.tsx", ".catch(...)")])
+	denied := policy.deny with input as facts
+	some v in denied
+	v.rule == "catch_rethrows_navigation"
+}
+
+# Both are reported, so fixing one does not hide the other.
+test_every_swallow_is_reported if {
+	facts := swallowed([
+		hit("apps/frontend/src/app/a/page.tsx", "try/catch"),
+		hit("apps/frontend/src/app/b/page.tsx", ".catch(...)"),
+	])
+	denied := policy.deny with input as facts
+	count([v | some v in denied; v.rule == "catch_rethrows_navigation"]) == 2
+}

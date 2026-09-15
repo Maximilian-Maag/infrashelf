@@ -216,3 +216,54 @@ deny contains v if {
 		]),
 	}
 }
+
+# ---------------------------------------------------------------------------
+# a catch around a server fetch must not swallow the login redirect
+# ---------------------------------------------------------------------------
+
+# `lib/serverApi` signals an ended session by THROWING a `redirect()` (#427) —
+# which is how Next signals `redirect()` and `notFound()` in general. So a
+# `catch` written to tolerate a failed fetch also eats the navigation.
+#
+# That is not hypothetical either. #434 was twelve server components doing it at
+# once: a signed-out user pressing Back got "project not found" for a project
+# that exists, and eleven other pages quietly rendered default branding, an empty
+# config form or no sessions list instead of the login screen.
+#
+# It is the THIRD appearance of one hazard — a combinator or a catch that
+# tolerates a failure also eats the control flow travelling as one:
+#
+#   #399  Promise.race   — `() => null` ate the reason a 60s wait rejected in 1s
+#   #415  allSettled     — the rejected branch became `[]`, so an outage read as
+#                          "there are none"; `lib/section.ts` rethrows for that
+#   #434  try / .catch   — this
+#
+# The first two were each fixed once and then re-learned. `unstable_rethrow(e)`
+# as the first line of the catch is the whole remedy, and this rule is what makes
+# it structural instead of remembered.
+#
+# Only server files are collected: a client component's `get` comes from
+# `@/lib/api`, which ends the session in the browser and throws nothing.
+#
+# Counted against dev: 0. A boundary that currently holds, written down so it
+# keeps holding.
+deny contains v if {
+	some hit in input.swallowedRedirects
+
+	v := {
+		"rule": "catch_rethrows_navigation",
+		"file": hit.file,
+		"line": hit.line,
+		"detail": sprintf(
+			"a %s around `%s` from @/lib/serverApi does not call unstable_rethrow",
+			[hit.kind, hit.call],
+		),
+		"why": concat("", [
+			"`serverApi` turns a 401 into `redirect('/login?expired=1')`, and Next signals that by ",
+			"THROWING — so this catch receives the navigation as well as the failures it was written ",
+			"for. Swallowing it turns an ended session into a 404, or into a page rendered with ",
+			"defaults, where the login screen belongs. Add `unstable_rethrow(e)` as the first line of ",
+			"the catch; it rethrows Next's control flow and leaves every other error to you.",
+		]),
+	}
+}
