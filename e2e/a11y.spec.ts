@@ -294,13 +294,31 @@ const focusProbe = () => {
   const shadowColours = (shadow: string): { colour: [number, number, number, number]; inset: boolean }[] => {
     if (!shadow || shadow === 'none') return []
     return shadow
-      .split(/(?=rgba?\(|oklch\(|color\()/)
+      /*
+       * Every CSS colour FUNCTION, not a list of the three we happened to have
+       * seen.
+       *
+       * Tailwind authors `oklch()`, but what reaches `getComputedStyle` is
+       * whatever the build's CSS optimiser emitted. Next 16's turns all 58 of
+       * them into `lab()`, which this split did not know — so the ring layer was
+       * swallowed into its neighbour, every remaining layer was transparent, and
+       * the probe reported "paints no focus indicator at all" for rings that
+       * were plainly there. This file learned the same lesson once already, when
+       * the regex only knew `rgb()` and Tailwind v4 arrived with `oklch()`.
+       *
+       * Longest names first, and a lookbehind, so `oklab(` is not split as
+       * `lab(`.
+       */
+      .split(/(?=(?<![a-z-])(?:oklch|oklab|lch|lab|rgba?|hsla?|hwb|color)\()/i)
       .map((s) => s.trim())
       .filter(Boolean)
       .map((layer) => {
         // The layer is "<colour> <offsets> [inset]"; hand the colour to the
         // canvas and keep the keyword, which decides which side it is painted on.
-        const colour = /(rgba?\([^)]*\)|oklch\([^)]*\)|color\([^)]*\)|#[0-9a-f]{3,8})/i.exec(layer)
+        const colour =
+          /((?<![a-z-])(?:oklch|oklab|lch|lab|rgba?|hsla?|hwb|color)\([^)]*\)|#[0-9a-f]{3,8})/i.exec(
+            layer,
+          )
         const parsed = colour ? rgb(colour[1]) : null
         return parsed ? { colour: parsed, inset: /\binset\b/.test(layer) } : null
       })
