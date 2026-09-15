@@ -198,3 +198,60 @@ describe('the table is the data, not a second rendering of it', () => {
     expect(table(container).getByText(/July 2026/)).toBeInTheDocument()
   })
 })
+
+describe('gaps the mutation run pointed at', () => {
+  it('draws the gridlines only when there is a scale to draw them against', () => {
+    // `max > 0`, not `>= 0`: with every month at zero there is no scale, and two
+    // hairlines across an empty plot suggest one.
+    const { container } = renderTrend([month({ period: '2026-08', totalEur: 0 })])
+    // `svg > line`, not `svg line`: the hatch pattern inside <defs> is a <line>
+    // too, and counting it made this assertion off by one.
+    const grid = [...container.querySelectorAll('svg > line')]
+    // The baseline axis is always drawn; the two gridlines above it are not.
+    expect(grid).toHaveLength(1)
+  })
+
+  it('draws both gridlines once there is spend', () => {
+    const { container } = renderTrend([month({ period: '2026-08', totalEur: 10 })])
+    expect(container.querySelectorAll('svg > line')).toHaveLength(3)
+  })
+
+  it('counts the axis labels back from the last month, not forward from the first', () => {
+    /*
+     * `(last - i) % step`, not `(last + i) % step`. Both name the same NUMBER of
+     * months, so a count assertion passes either way — what separates them is
+     * WHICH months, and the most recent one has to be among them.
+     */
+    const series = Array.from({ length: 8 }, (_, i) =>
+      month({ period: `2026-0${i + 1}`, totalEur: 10 }),
+    )
+    const { container } = renderTrend(series)
+    const cells = axisCells(container)
+
+    // step = ceil(8/6) = 2, counted back from index 7: 7, 5, 3, 1.
+    expect(cells[7]).toBeTruthy()
+    expect(cells[5]).toBeTruthy()
+    expect(cells[6]).toBe('')
+    expect(cells[0]).toBe('')
+  })
+
+  it('rounds the top corners rather than squaring or inverting them', () => {
+    // `top + r`, not `top - r`: a negative radius turns the cap inside out, and
+    // the column reads as a notch.
+    const { container } = renderTrend([month({ period: '2026-08', totalEur: 100 })])
+    const d = columns(container)[0].getAttribute('d') ?? ''
+    // The straight segment stops BELOW the apex, so its y is greater than 0.
+    const straightY = Number(/L \S+ (\S+)/.exec(d)?.[1])
+    expect(straightY).toBeGreaterThan(0)
+    expect(d).toMatch(/Q \d+ 0 /)
+  })
+
+  it('names each column of the table', () => {
+    // Three headers, each its own string: an empty one leaves a column of
+    // numbers with nothing saying what they are.
+    const { container } = renderTrend([month({ period: '2026-08', totalEur: 10 })])
+    const headers = [...(container.querySelectorAll('thead th') ?? [])].map((h) => h.textContent)
+    expect(headers).toHaveLength(3)
+    for (const header of headers) expect(header).toBeTruthy()
+  })
+})

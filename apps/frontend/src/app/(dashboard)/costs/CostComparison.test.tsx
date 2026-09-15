@@ -79,10 +79,19 @@ describe('the direction of the change', () => {
   })
 
   it('marks no change with a dash and no sign at all', () => {
-    renderCard(comparison({ currentEur: 100, previousEur: 100, changeEur: 0, changePct: 0 }))
+    const { container } = renderCard(
+      comparison({ currentEur: 100, previousEur: 100, changeEur: 0, changePct: 0 }),
+    )
     expect(screen.getByText('–')).toBeInTheDocument()
     expect(screen.queryByText('▲')).not.toBeInTheDocument()
     expect(screen.queryByText('▼')).not.toBeInTheDocument()
+    /*
+     * "and no sign at all" was in the title of this test and asserted by nothing,
+     * which three surviving mutants walked straight through: every one of them
+     * made a zero change render "−". A flat month is not a fall.
+     */
+    expect(headline(container)).not.toContain('−')
+    expect(headline(container)).not.toContain('+')
   })
 
   it('always prints the money as a magnitude, with the sign carried separately', () => {

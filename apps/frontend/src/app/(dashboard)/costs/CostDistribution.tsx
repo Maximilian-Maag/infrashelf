@@ -174,12 +174,20 @@ export function CostDistribution({
         </thead>
         <tbody>
           {segments.map(({ bucket, fill }) => (
-            <tr key={`${bucket.id ?? 'none'}-${bucket.label}`} className="border-t border-slate-100">
+            <tr
+              // Stryker disable next-line all: a React key is an identity hint to
+              // the reconciler, not output — nothing a reader can observe changes
+              // when it does. See stryker.config.mjs.
+              key={`${bucket.id ?? 'none'}-${bucket.label}`}
+              className="border-t border-slate-100"
+            >
               <td className="py-1 text-slate-900">
                 <span className="flex items-center gap-2">
                   <span
                     aria-hidden="true"
                     className="inline-block h-3 w-3 shrink-0 rounded-sm"
+                    // Stryker disable next-line all: swatch tint — the legend row
+                    // restates it as text, see stryker.config.mjs
                     style={{ backgroundColor: fill }}
                   />
                   {bucket.label}
