@@ -130,6 +130,19 @@ export const encryptLegacyCiTokens = async (): Promise<void> => {
 }
 
 let bootstrapped = false
+/**
+ * The bootstrap that is currently running, if one is (#416).
+ *
+ * The boolean above says "it finished". This says "it started", and the two are
+ * different facts that the latch alone could not tell apart: it was set BEFORE
+ * the work, so a second concurrent caller returned immediately and was told a
+ * half-bootstrapped server was ready — migrations still running, no branding
+ * row, legacy CI tokens unconverted.
+ *
+ * Holding the promise means every concurrent caller awaits the SAME work and
+ * sees the same outcome, success or failure.
+ */
+let bootstrapping: Promise<void> | null = null
 
 /**
  * CI sources this deployment can no longer talk to, named at boot.
@@ -166,20 +179,34 @@ export const reportInsecureCiSources = async (): Promise<void> => {
 
 export const runBootstrap = async (): Promise<void> => {
   if (bootstrapped) return
-  bootstrapped = true
 
-  // Before anything else, and never fatal: a server that refuses logins is
-  // easier to diagnose than one that will not start, but the reason has to be
-  // on stderr at boot rather than surfacing later as a failed sign-in.
-  reportConfigProblems()
+  /*
+   * Join the run already in flight rather than starting a second one, and
+   * rather than returning as though it had finished (#416).
+   *
+   * `??=` is the whole guard: the first caller creates the promise, every
+   * caller after it awaits that same one. The latch is set only when the work
+   * has actually finished, so it still means "bootstrap SUCCEEDED" and a failed
+   * bootstrap is still retryable — `bootstrapping` is cleared either way.
+   *
+   * `reportConfigProblems` moved inside, so it is said once per attempt rather
+   * than once per caller.
+   */
+  bootstrapping ??= (async () => {
+    // Before anything else, and never fatal: a server that refuses logins is
+    // easier to diagnose than one that will not start, but the reason has to be
+    // on stderr at boot rather than surfacing later as a failed sign-in.
+    reportConfigProblems()
+    await bootstrapOnce()
+  })()
 
   try {
-    await bootstrapOnce()
-  } catch (err) {
-    // The latch means "bootstrap SUCCEEDED", not "bootstrap was attempted", so a
-    // failed one is retryable. See `bootstrapOnce`.
-    bootstrapped = false
-    throw err
+    await bootstrapping
+    bootstrapped = true
+  } finally {
+    // Cleared on both paths: after success the latch takes over, and after a
+    // failure the next caller has to be able to try again.
+    bootstrapping = null
   }
 }
 
