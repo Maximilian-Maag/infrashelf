@@ -1,59 +1,82 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+// @vitest-environment node
+//
+// Node, not jsdom: `serverApi` refuses to run where a `window` exists — that
+// guard is the backstop on the #146 boundary, and a jsdom test would trip it
+// before reaching anything this file is about.
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { ApiError } from '@/lib/api'
+import type * as Api from '@/lib/api'
 
-const authMock = vi.fn()
-vi.mock('@/lib/auth', () => ({ auth: () => authMock() }))
+const apiRequest = vi.fn()
+vi.mock('@/lib/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof Api>()
+  return { ...actual, apiRequest: (...args: unknown[]) => apiRequest(...args) }
+})
+vi.mock('@/lib/auth', () => ({ auth: async () => ({ apiToken: 'token-abc' }) }))
 
-const apiRequestMock = vi.fn()
-vi.mock('@/lib/api', () => ({ apiRequest: (...args: unknown[]) => apiRequestMock(...args) }))
+const redirect = vi.fn((url: string) => { throw new Error(`NEXT_REDIRECT:${url}`) })
+vi.mock('next/navigation', () => ({ redirect: (url: string) => redirect(url) }))
 
-const { get, post, put, del } = await import('./serverApi')
+import { get, post, put, del } from './serverApi'
 
 beforeEach(() => {
-  authMock.mockReset()
-  apiRequestMock.mockReset()
-  authMock.mockResolvedValue({ apiToken: 'the-backend-jwt' })
-  apiRequestMock.mockResolvedValue({ ok: true })
-  vi.stubGlobal('window', undefined)
-})
-
-afterEach(() => {
-  vi.unstubAllGlobals()
+  apiRequest.mockReset()
+  redirect.mockClear()
 })
 
 /**
- * Issue #146. One of the two modules in the frontend that read
- * `session.apiToken` — this one for server components, the `/api/proxy` route
- * for the browser — and deliberately not the one client components import. See
- * the file for why the split is load-bearing rather than tidy.
+ * A 401 on the SERVER means the session is over (#427).
+ *
+ * `lib/api.ts` only ends the session in the browser, on the grounds that the
+ * middleware and the dashboard layout have already decided on the server. For a
+ * revoked session they have not: the cookie is valid and the token's `exp` has
+ * not passed, so both wave it through and the page fetches a 401 it then throws
+ * at the error boundary — HTTP 500 instead of the login screen.
  */
 describe('serverApi', () => {
-  it.each([
-    ['get', () => get('/api/orders'), { token: 'the-backend-jwt' }],
-    ['post', () => post('/api/orders', { a: 1 }), { method: 'POST', body: { a: 1 }, token: 'the-backend-jwt' }],
-    ['put', () => put('/api/orders/1', { a: 1 }), { method: 'PUT', body: { a: 1 }, token: 'the-backend-jwt' }],
-    ['del', () => del('/api/orders/1'), { method: 'DELETE', token: 'the-backend-jwt' }],
-  ])('%s attaches the session token', async (_name, call, expected) => {
-    await call()
-    expect(apiRequestMock.mock.calls[0][1]).toEqual(expected)
+  it('sends the caller’s token and returns the body', async () => {
+    apiRequest.mockResolvedValue([{ id: 1 }])
+    await expect(get('/api/orders')).resolves.toEqual([{ id: 1 }])
+    expect(apiRequest).toHaveBeenCalledWith('/api/orders', { token: 'token-abc' })
+    expect(redirect).not.toHaveBeenCalled()
   })
 
-  it('sends no token when nobody is signed in', async () => {
-    // The public branding read on /impressum goes through here with no session,
-    // and must still be made rather than refused.
-    authMock.mockResolvedValue(null)
+  it('ends the session when the backend says 401', async () => {
+    apiRequest.mockRejectedValue(new ApiError(401, 'Unauthorized'))
 
-    await get('/api/public/branding')
-
-    expect(apiRequestMock.mock.calls[0][1]).toEqual({ token: undefined })
+    await expect(get('/api/orders')).rejects.toThrow('NEXT_REDIRECT')
+    // Same URL the dashboard layout uses for an expired token, callback and all.
+    expect(redirect).toHaveBeenCalledWith('/login?expired=1&callbackUrl=%2F')
   })
 
-  it('refuses to run in a browser', async () => {
-    // Importing this from a client component would drag `@/lib/auth`, and with
-    // it the whole NextAuth server configuration, into the client bundle — the
-    // thing the split exists to prevent. Failing loudly beats shipping it.
-    vi.stubGlobal('window', {})
+  it('does the same for every verb, not only reads', async () => {
+    // A revoked session hits a POST just as readily, and a 500 on a submit is
+    // worse than one on a page: the user believes their change was lost.
+    for (const call of [
+      () => post('/api/cart', {}),
+      () => put('/api/projects/1', {}),
+      () => del('/api/cart/1'),
+    ]) {
+      apiRequest.mockRejectedValue(new ApiError(401, 'Unauthorized'))
+      await expect(call()).rejects.toThrow('NEXT_REDIRECT')
+    }
+    expect(redirect).toHaveBeenCalledTimes(3)
+  })
 
-    await expect(get('/api/orders')).rejects.toThrow(/server-only/)
-    expect(apiRequestMock).not.toHaveBeenCalled()
+  it('leaves every other failure alone', async () => {
+    // 403 is "not for you", not "you are not signed in" — redirecting on it would
+    // sign people out of pages they are merely not allowed to see, and a 500 is
+    // the backend's problem, not the session's.
+    for (const status of [400, 403, 404, 500, 502]) {
+      apiRequest.mockRejectedValue(new ApiError(status, 'nope'))
+      await expect(get('/api/orders')).rejects.toThrow('nope')
+    }
+    expect(redirect).not.toHaveBeenCalled()
+  })
+
+  it('leaves a non-ApiError alone', async () => {
+    apiRequest.mockRejectedValue(new TypeError('fetch failed'))
+    await expect(get('/api/orders')).rejects.toThrow('fetch failed')
+    expect(redirect).not.toHaveBeenCalled()
   })
 })

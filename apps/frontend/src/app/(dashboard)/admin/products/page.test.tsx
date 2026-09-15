@@ -1,10 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { ApiError } from '@/lib/api'
+import type * as Navigation from 'next/navigation'
 
 vi.mock('@/lib/auth', () => ({ auth: async () => ({ user: { role: 'root' } }) }))
 vi.mock('@/lib/getLang', () => ({ getLang: async () => 'en' }))
-vi.mock('next/navigation', () => ({
+// Spread, not replaced: `section` calls `unstable_rethrow` so a redirect is not
+// swallowed as a failed panel (#427), and a mock that omitted it would fail the
+// page for a reason that has nothing to do with this test.
+vi.mock('next/navigation', async (importOriginal) => ({
+  ...(await importOriginal<typeof Navigation>()),
   redirect: vi.fn(),
   // The row actions are a client component that reaches for the router.
   useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }),

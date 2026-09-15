@@ -21,8 +21,14 @@
  *    layout refuse to render past it. That is per-session and exact, which the
  *    shared constant never was.
  *  - Anything that ends a session early — a revoked session (#37), a rotated
- *    signing secret, clock skew — shows up as a 401, and `lib/api.ts` turns a 401
- *    into a sign-out and a trip to `/login?expired=1`.
+ *    signing secret, clock skew — shows up as a 401, and a 401 turns into a
+ *    sign-out and a trip to `/login?expired=1`. In the browser that is
+ *    `lib/api.ts`; on the server it is `lib/serverApi.ts`, which had to be
+ *    taught it (#427). This comment used to name only the first and imply the
+ *    second was covered by the middleware and the dashboard layout — and for a
+ *    REVOKED session neither of them can be: the cookie is valid and the token's
+ *    `exp` has not passed, so both wave it through and only the backend knows.
+ *    The result was a 500 where the login screen belonged.
  *
  * So the failure mode #103 fixed cannot return: the cookie outliving a short
  * session is exactly the case `isApiTokenExpired` is checked for on every

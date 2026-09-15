@@ -1,3 +1,4 @@
+import { unstable_rethrow } from 'next/navigation'
 import { ApiError } from '@/lib/api'
 
 /**
@@ -50,6 +51,18 @@ export const section = <T>(
   if (result.status === 'fulfilled') {
     return { data: result.value ?? fallback, error: null }
   }
+  /*
+   * A `redirect()` is not a failed section (#427).
+   *
+   * Next signals `redirect()` and `notFound()` by THROWING, so an ended session
+   * arrives here looking exactly like a 500 — and turning it into a red banner
+   * would swallow the navigation and leave a signed-out user on the page that
+   * refused them. This is the hazard `lib/api.ts` names: "redirect() from inside
+   * a fetch helper would be swallowed by the very Promise.allSettled that hid
+   * the problem in the first place". It is only not swallowed because of this
+   * line.
+   */
+  unstable_rethrow(result.reason)
   const error = describe(result.reason)
   console.error(`[page] could not load ${what}: ${error}`)
   return { data: fallback, error }

@@ -1,12 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { section } from './section'
 import { ApiError } from './api'
+import { redirect } from 'next/navigation'
 
 const settled = <T>(value: T): PromiseSettledResult<T> => ({ status: 'fulfilled', value })
 const rejected = (reason: unknown): PromiseSettledResult<never> => ({ status: 'rejected', reason })
 
 beforeEach(() => {
-  vi.spyOn(console, 'error').mockImplementation(() => {})
+  // Re-spied AND cleared: the spy survives between tests, so the call counts
+  // asserted below would otherwise be cumulative.
+  vi.spyOn(console, 'error').mockImplementation(() => {}).mockClear()
 })
 
 /**
@@ -46,6 +49,23 @@ describe('section', () => {
     // log — the third thing #415 asks for.
     section(rejected(new ApiError(500, 'boom')), [] as number[], 'admin products')
     expect(console.error).toHaveBeenCalledWith('[page] could not load admin products: HTTP 500: boom')
+  })
+
+  it('does not swallow a redirect', () => {
+    // `redirect()` is signalled by THROWING, so an ended session arrives in the
+    // rejected branch looking exactly like a 500 (#427). Turning it into a red
+    // banner would swallow the navigation and leave a signed-out user sitting on
+    // the page that refused them — the hazard `lib/api.ts` warns about by name.
+    let thrown: unknown
+    try {
+      redirect('/login?expired=1')
+    } catch (e) {
+      thrown = e
+    }
+
+    expect(() => section(rejected(thrown), [] as number[], 'orders')).toThrow()
+    // And it is not reported as a failed section on the way past.
+    expect(console.error).not.toHaveBeenCalled()
   })
 
   it('does not treat a falsy fulfilled value as missing', () => {
