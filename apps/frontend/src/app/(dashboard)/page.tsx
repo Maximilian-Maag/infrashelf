@@ -5,6 +5,8 @@ import Link from 'next/link'
 import type { CatalogPage, DashboardSummary, Role } from '@infrashelf/types'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { CountUp } from '@/components/ui/CountUp'
+import { SectionError } from '@/components/ui/SectionError'
+import { section } from '@/lib/section'
 import { getLang } from '@/lib/getLang'
 import { t } from '@/lib/i18n'
 
@@ -44,9 +46,14 @@ export default async function DashboardHome() {
   ])
 
   // A failed summary must not read as an empty installation, so the counters
-  // show nothing rather than zero — see the `??` on each StatCard below.
-  const counts = summary.status === 'fulfilled' ? summary.value : null
-  const productList = products.status === 'fulfilled' ? (products.value?.items ?? []) : []
+  // show nothing rather than zero — see the `??` on each StatCard below. And it
+  // says WHY now rather than only showing dashes, which on the page every user
+  // lands on after login was indistinguishable from a brand-new installation
+  // (#415).
+  const summarySection = section<DashboardSummary | null>(summary, null, 'dashboard summary')
+  const counts = summarySection.data
+  const productsSection = section<CatalogPage | null>(products, null, 'featured products')
+  const productList = productsSection.data?.items ?? []
 
   const recentOrders = counts?.recentOrders ?? []
   const activeInfra = counts?.infrastructure.active ?? 0
@@ -90,6 +97,14 @@ export default async function DashboardHome() {
           </div>
         </div>
       </div>
+
+      {/* Above the counters rather than replacing them: the hero and the
+          navigation are still useful, and zeros under a banner saying the
+          summary could not be fetched is a very different page from zeros on
+          their own (#415). The featured products are a separate panel and get
+          their own line. */}
+      <SectionError error={summarySection.error} lang={lang} />
+      <SectionError error={productsSection.error} lang={lang} />
 
       {/* Stats strip */}
       <div className={`grid gap-4 ${isAdminOrRoot ? 'grid-cols-2 lg:grid-cols-4' : 'grid-cols-2 lg:grid-cols-3'}`}>

@@ -7,6 +7,8 @@ import { PageHeader } from '@/components/layout/PageHeader'
 import { RefreshButton } from '@/components/ui/RefreshButton'
 import { AutoRefresh } from '@/components/ui/AutoRefresh'
 import { hasUnsettled } from '@/lib/unsettled'
+import { SectionError } from '@/components/ui/SectionError'
+import { section } from '@/lib/section'
 import { Card } from '@/components/ui/Card'
 import { Pager } from '@/components/ui/Pager'
 import { StatusBadge } from '@/components/ui/StatusBadge'
@@ -88,19 +90,24 @@ export default async function InfrastructurePage({ searchParams }: Props) {
   // back 400 — exactly what parseInfraFilters rejects rather than silently ignores —
   // and a backend outage rejects too; showing "nothing matches" for either claims
   // the infrastructure is gone.
-  const listFailed = listRes.status === 'rejected'
+  // Carries the reason now, not just the fact (#415): a bookmarked filter the
+  // backend rejects comes back 400 and an outage comes back 502, and this page
+  // said "an unexpected error occurred" for both while discarding the one line
+  // that would have told the operator which. It is logged server-side too, so a
+  // failure the user reloads past still leaves a trace.
+  const list = section<InfrastructurePage | null>(listRes, null, 'infrastructure list')
+  const listFailed = list.error !== null
   // One window, not every element ever provisioned (#158). An installation
   // accumulates these forever — decommissioned rows stay for the history — so
   // this is the list that grows without anybody placing an order.
-  const page = listRes.status === 'fulfilled'
-    ? (listRes.value ?? { items: [], total: 0, limit: 0, offset: 0 })
-    : { items: [], total: 0, limit: 0, offset: 0 }
+  const page = list.data ?? { items: [], total: 0, limit: 0, offset: 0 }
   const elements = page.items
   // Empty facets degrade to unpopulated dropdowns rather than a broken page —
   // the free-text search and date filters still work.
-  const facets = facetsRes.status === 'fulfilled'
-    ? (facetsRes.value ?? { environments: [], projects: [], products: [] })
-    : { environments: [], projects: [], products: [] }
+  // Unpopulated dropdowns are a degradation the page already tolerates — the
+  // free-text search and date filters still work — so this one is logged rather
+  // than shown.
+  const facets = section(facetsRes, { environments: [], projects: [], products: [] } as InfraFacets, 'infrastructure facets').data
 
   // Group by project — but only for the default date ordering. Bucketing by
   // project silently overrides an explicit name or status sort, since the group
@@ -139,9 +146,7 @@ export default async function InfrastructurePage({ searchParams }: Props) {
       <InfraFilters facets={facets} lang={lang} resultCount={elements.length} />
 
       {listFailed ? (
-        <div className="text-center py-12 text-red-600" role="alert">
-          {t('unexpectedError', lang)}
-        </div>
+        <SectionError error={list.error} lang={lang} />
       ) : elements.length === 0 ? (
         <div className="text-center py-12 text-slate-600">
           {/* Distinguish "nothing deployed" from "nothing matches" — the first is
