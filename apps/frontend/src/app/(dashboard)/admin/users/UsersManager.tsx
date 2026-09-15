@@ -50,14 +50,25 @@ export function UsersManager() {
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
+  /*
+   * Whether the LAST load failed, kept apart from `deleteError` (#415).
+   *
+   * Without it an outage rendered the error and "there are none" together: two
+   * claims on one screen, one of which is false and is the one a person acts on.
+   * `deleteError` cannot answer this on its own — it also carries a failed
+   * delete, where the list really is what it says.
+   */
+  const [loadFailed, setLoadFailed] = useState(false)
   const [flashId, setFlashId] = useState<number | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
+      setLoadFailed(false)
       setUsers((await get<User[]>('/api/admin/users')) ?? [])
       setDeleteError(null)
     } catch (e) {
+      setLoadFailed(true)
       setDeleteError(e instanceof Error ? e.message : t('failedToLoadUsers', lang))
     } finally {
       setLoading(false)
@@ -150,7 +161,7 @@ export function UsersManager() {
               {Array.from({ length: 4 }).map((_, i) => <SkeletonListItem key={i} />)}
             </div>
           </LoadingRegion>
-        ) : users.length === 0 ? (
+        ) : users.length === 0 && !loadFailed ? (
           <p className="text-center py-6 text-slate-600">{t('noUsersYet', lang)}</p>
         ) : (
           <div className="space-y-2">
