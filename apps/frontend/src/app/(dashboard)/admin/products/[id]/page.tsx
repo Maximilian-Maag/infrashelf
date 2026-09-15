@@ -9,6 +9,8 @@ import type {
   CostCenter,
 } from '@infrashelf/types'
 import { get } from '@/lib/serverApi'
+import { SectionError } from '@/components/ui/SectionError'
+import { section } from '@/lib/section'
 import { getLang } from '@/lib/getLang'
 import { t } from '@/lib/i18n'
 import { PageHeader } from '@/components/layout/PageHeader'
@@ -49,10 +51,17 @@ export default async function AdminProductDetailPage({ params, searchParams }: P
   if (productRes.status === 'rejected') notFound()
 
   const product = productRes.value
-  const categories = categoriesRes.status === 'fulfilled' ? (categoriesRes.value ?? []) : []
-  const environments = environmentsRes.status === 'fulfilled' ? (environmentsRes.value ?? []) : []
-  const translations = translationsRes.status === 'fulfilled' ? (translationsRes.value ?? []) : []
-  const costCenters = costCentersRes.status === 'fulfilled' ? (costCentersRes.value ?? []) : []
+  // The product is already a 404 when it fails. These four seed the form, and on
+  // an EDIT screen an empty one is worse than on a read-only page: a translations
+  // list that silently came back empty makes the form offer "add translation" for
+  // a language that already has one, and an empty environments list looks like an
+  // installation with none configured. Each still degrades independently — one
+  // outage must not take the whole form away — but the reason is now on the page
+  // (#415).
+  const categories = section(categoriesRes, [] as Category[], `categories for product ${id}`)
+  const environments = section(environmentsRes, [] as DeploymentEnvironment[], `environments for product ${id}`)
+  const translations = section(translationsRes, [] as ProductTranslation[], `translations for product ${id}`)
+  const costCenters = section(costCentersRes, [] as CostCenter[], `cost centers for product ${id}`)
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
@@ -88,12 +97,19 @@ export default async function AdminProductDetailPage({ params, searchParams }: P
         <ProductImageUpload productId={product.id} />
       </Card>
 
+      {/* One line for all four: they seed different parts of the same form, and
+          four stacked banners would push the form itself off the screen. */}
+      <SectionError
+        error={categories.error ?? environments.error ?? translations.error ?? costCenters.error}
+        lang={lang}
+      />
+
       <ProductEditForm
         product={product}
-        categories={categories}
-        environments={environments}
-        translations={translations}
-        costCenters={costCenters}
+        categories={categories.data}
+        environments={environments.data}
+        translations={translations.data}
+        costCenters={costCenters.data}
         lang={lang}
       />
     </div>

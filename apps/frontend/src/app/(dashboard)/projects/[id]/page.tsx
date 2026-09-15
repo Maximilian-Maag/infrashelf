@@ -10,6 +10,8 @@ import { Table } from '@/components/ui/Table'
 import { ProjectEditForm } from './ProjectEditForm'
 import Link from 'next/link'
 import { ButtonLink } from '@/components/ui/Button'
+import { SectionError } from '@/components/ui/SectionError'
+import { section } from '@/lib/section'
 import { getLang } from '@/lib/getLang'
 import { t } from '@/lib/i18n'
 
@@ -41,8 +43,11 @@ export default async function ProjectDetailPage({ params }: Props) {
     get<CostCenter[]>('/api/admin/cost-centers'),
   ])
 
-  const orders = ordersRes.status === 'fulfilled' ? (ordersRes.value?.items ?? []) : []
-  const costCenters = costCentersRes.status === 'fulfilled' ? (costCentersRes.value ?? []) : []
+  // Two independent panels, each now carrying why it is empty (#415). "This
+  // project has no orders" and "the order list could not be fetched" are
+  // different facts, and the card said the first for both.
+  const orders = section<OrderPage | null>(ordersRes, null, `orders for project ${id}`)
+  const costCenters = section(costCentersRes, [] as CostCenter[], 'cost centers')
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
@@ -62,44 +67,55 @@ export default async function ProjectDetailPage({ params }: Props) {
         }
       />
 
-      <ProjectEditForm project={project} costCenters={costCenters} />
+      {/* The cost centers are the dropdown inside the form, so their failure is
+          said above it rather than replacing a form the user can still use for
+          everything else. */}
+      <SectionError error={costCenters.error} lang={lang} />
+      <ProjectEditForm project={project} costCenters={costCenters.data} />
 
       {/* Rendered unconditionally. The card used to be hidden when the project
           had no orders, which made the empty message below unreachable — and
           left a project page that says nothing at all about orders, so a reader
           cannot tell "none yet" from "this page does not show them" (#186). */}
       <Card title={t('ordersInProject', lang)}>
-        <Table<Order>
-          emptyMessage={t('noOrders', lang)}
-          columns={[
-            {
-              header: t('id', lang),
-              render: (row) => (
-                <Link href={`/orders/${row.id}`} className="font-mono text-blue-600 hover:underline text-xs">
-                  #{row.id}
-                </Link>
-              ),
-            },
-            {
-              header: t('product', lang),
-              render: (row) => row.productName ?? `#${row.productId}`,
-            },
-            { header: t('environment', lang), accessor: 'environmentName' },
-            {
-              header: t('status', lang),
-              render: (row) => <StatusBadge status={row.status} lang={lang} />,
-            },
-            {
-              header: t('date', lang),
-              render: (row) => (
-                <span className="text-xs text-slate-500">
-                  {new Date(row.createdAt).toLocaleDateString(lang)}
-                </span>
-              ),
-            },
-          ]}
-          data={orders}
-        />
+        {/* The error goes IN PLACE of the table: an empty row reading "no
+            orders" is exactly the claim that would be false (#415). The card
+            itself stays, so the page still says what it is about. */}
+        {orders.error ? (
+          <SectionError error={orders.error} lang={lang} />
+        ) : (
+          <Table<Order>
+            emptyMessage={t('noOrders', lang)}
+            columns={[
+              {
+                header: t('id', lang),
+                render: (row) => (
+                  <Link href={`/orders/${row.id}`} className="font-mono text-blue-600 hover:underline text-xs">
+                    #{row.id}
+                  </Link>
+                ),
+              },
+              {
+                header: t('product', lang),
+                render: (row) => row.productName ?? `#${row.productId}`,
+              },
+              { header: t('environment', lang), accessor: 'environmentName' },
+              {
+                header: t('status', lang),
+                render: (row) => <StatusBadge status={row.status} lang={lang} />,
+              },
+              {
+                header: t('date', lang),
+                render: (row) => (
+                  <span className="text-xs text-slate-500">
+                    {new Date(row.createdAt).toLocaleDateString(lang)}
+                  </span>
+                ),
+              },
+            ]}
+            data={orders.data?.items ?? []}
+          />
+        )}
       </Card>
     </div>
   )

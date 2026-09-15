@@ -7,6 +7,8 @@ import { PageHeader } from '@/components/layout/PageHeader'
 import { Table } from '@/components/ui/Table'
 import { ButtonLink } from '@/components/ui/Button'
 import { ProductRowActions } from './ProductRowActions'
+import { SectionError } from '@/components/ui/SectionError'
+import { section } from '@/lib/section'
 import { getLang } from '@/lib/getLang'
 import { t } from '@/lib/i18n'
 
@@ -22,10 +24,14 @@ export default async function AdminProductsPage() {
     get<Category[]>('/api/admin/categories'),
   ])
 
-  const products = productsRes.status === 'fulfilled' ? (productsRes.value ?? []) : []
-  const categories = categoriesRes.status === 'fulfilled' ? (categoriesRes.value ?? []) : []
+  // A rejected fetch is not an empty catalogue (#415). Both sections still
+  // degrade independently — a categories outage must not blank the products —
+  // but each now carries WHY, instead of rendering as though the answer were
+  // "there are none".
+  const products = section(productsRes, [] as Product[], 'admin products')
+  const categories = section(categoriesRes, [] as Category[], 'admin categories')
 
-  const catMap = Object.fromEntries(categories.map((c) => [c.id, c.name]))
+  const catMap = Object.fromEntries(categories.data.map((c) => [c.id, c.name]))
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
@@ -37,26 +43,36 @@ export default async function AdminProductsPage() {
         }
       />
 
-      <Table<Product>
-        columns={[
-          {
-            header: t('name', lang),
-            render: (row) => (
-              <span className="flex items-center gap-2">
-                <Link href={`/admin/products/${row.id}`} className="font-medium text-blue-600 hover:underline">
-                  {row.name}
-                </Link>
-                {/* Withdrawn products are LISTED here, marked — this is the only
-                    screen they can be brought back from, and hiding them is what
-                    made retirement a one-way trapdoor (#251). The catalogue still
-                    filters them out, which is the filter that was always meant.
+      {/* The categories only supply the column that names them, so their failure
+          goes ABOVE the table and leaves the products standing. */}
+      <SectionError error={categories.error} lang={lang} />
 
-                    A badge and not a colour: the state has to survive being read
-                    aloud, and greying the row would say it to nobody else. */}
-                {row.retiredAt && (
-                  <span className="rounded-full bg-slate-200 px-2 py-0.5 text-xs font-medium text-slate-700">
-                    {t('disabledBadge', lang)}
-                  </span>
+      {/* The products ARE this table, so their failure goes IN PLACE of it. An
+          empty table here would claim the catalogue is empty, which is the whole
+          of #415. */}
+      {products.error ? (
+        <SectionError error={products.error} lang={lang} />
+      ) : (
+        <Table<Product>
+          columns={[
+            {
+              header: t('name', lang),
+              render: (row) => (
+                <span className="flex items-center gap-2">
+                  <Link href={`/admin/products/${row.id}`} className="font-medium text-blue-600 hover:underline">
+                    {row.name}
+                  </Link>
+                  {/* Withdrawn products are LISTED here, marked — this is the only
+                      screen they can be brought back from, and hiding them is what
+                      made retirement a one-way trapdoor (#251). The catalogue still
+                      filters them out, which is the filter that was always meant.
+
+                      A badge and not a colour: the state has to survive being read
+                      aloud, and greying the row would say it to nobody else. */}
+                  {row.retiredAt && (
+                    <span className="rounded-full bg-slate-200 px-2 py-0.5 text-xs font-medium text-slate-700">
+                      {t('disabledBadge', lang)}
+                    </span>
                 )}
               </span>
             ),
@@ -78,9 +94,10 @@ export default async function AdminProductsPage() {
             render: (row) => <ProductRowActions product={row} />,
           },
         ]}
-        data={products}
+        data={products.data}
         emptyMessage={t('noProductsYet', lang)}
       />
+      )}
     </div>
   )
 }

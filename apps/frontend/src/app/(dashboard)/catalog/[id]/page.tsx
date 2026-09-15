@@ -18,6 +18,8 @@ import { ProductGallery } from '@/components/ui/ProductGallery'
 import { ProductSpecs } from '@/components/ui/ProductSpecs'
 import { ProductImage } from '@/components/ui/ProductImage'
 import { Breadcrumbs } from '@/components/layout/Breadcrumbs'
+import { SectionError } from '@/components/ui/SectionError'
+import { section } from '@/lib/section'
 import { getLang } from '@/lib/getLang'
 import { t } from '@/lib/i18n'
 import { localeToCurrency, convertPrice, sortByValue } from '@/lib/locale'
@@ -69,15 +71,24 @@ export default async function ProductDetailPage({ params, searchParams }: Props)
     `/api/catalog?lang=${lang}&categoryId=${product.categoryId}&limit=5`,
   ).catch(() => null)
   const related = (relatedRes?.items ?? []).filter((item) => item.id !== product.id).slice(0, 4)
-  const projects = projectsRes.status === 'fulfilled' ? (projectsRes.value ?? []) : []
-  const costCenters = costCentersRes.status === 'fulfilled' ? (costCentersRes.value ?? []) : []
-  const categories = categoriesRes.status === 'fulfilled' ? (categoriesRes.value ?? []) : []
-  const categoryName = categories.find((c) => c.id === product.categoryId)?.name
+  // The product itself is the page and a rejection there is already a 404. These
+  // three fill the order form beside it, and an empty project dropdown stops the
+  // user ordering just as surely as a broken page — so it says why rather than
+  // looking like an account with no projects (#415).
+  const projects = section(projectsRes, [] as Project[], `projects for product ${id}`)
+  const costCenters = section(costCentersRes, [] as CostCenter[], `cost centers for product ${id}`)
+  // The category only names a breadcrumb, so its failure is logged and left at
+  // that — an unnamed breadcrumb is not worth a banner over the product.
+  const categories = section(categoriesRes, [] as Category[], 'categories')
+  const categoryName = categories.data.find((c) => c.id === product.categoryId)?.name
 
-  const ratesMap: Record<string, number> =
-    ratesRes.status === 'fulfilled'
-      ? Object.fromEntries((ratesRes.value ?? []).map((r) => [r.currencyCode, parseFloat(r.rate)]))
-      : {}
+  // Same as the cart: without rates the price is shown in the currency it is
+  // stored in, labelled as such, so the figure stays true and only the log needs
+  // to know.
+  const rates = section(ratesRes, [] as ExchangeRate[], 'exchange rates')
+  const ratesMap: Record<string, number> = Object.fromEntries(
+    rates.data.map((r) => [r.currencyCode, parseFloat(r.rate)]),
+  )
 
   /** One amount in the viewer's currency, with the original alongside. */
   const priceOf = (amount: { price: string; currency: string }) => {
@@ -309,10 +320,18 @@ export default async function ProductDetailPage({ params, searchParams }: Props)
       {/* The form proper, linked from the buy box above. */}
       <div id="order" className="mt-8 max-w-3xl scroll-mt-28">
         <Card title={t('placeOrder', lang)}>
+          {/* Above the form, not instead of it: the fields that did load are
+              still worth showing, and a user who sees an empty project list with
+              no explanation reports it as "I cannot order this". */}
+          <SectionError
+            error={projects.error ?? costCenters.error}
+            lang={lang}
+            className="mb-4"
+          />
           <OrderForm
             product={product}
-            projects={projects}
-            costCenters={costCenters}
+            projects={projects.data}
+            costCenters={costCenters.data}
             lang={lang}
             exchangeRates={ratesMap}
             localeCurrency={localeCurrency}

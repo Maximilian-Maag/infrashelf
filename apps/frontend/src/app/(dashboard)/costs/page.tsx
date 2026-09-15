@@ -10,6 +10,8 @@ import { CostTrend } from './CostTrend'
 import { CostDistribution } from './CostDistribution'
 import { CostComparison } from './CostComparison'
 import { CostCaveats } from './CostCaveats'
+import { SectionError } from '@/components/ui/SectionError'
+import { section } from '@/lib/section'
 import { getLang } from '@/lib/getLang'
 import { t } from '@/lib/i18n'
 import { localeToCurrency, convertPrice } from '@/lib/locale'
@@ -52,9 +54,13 @@ export default async function CostsPage({ searchParams }: Props) {
 
   // A rejected report is the one failure that leaves nothing to show — an invalid
   // custom range is the likely cause, so say so rather than rendering zeros that
-  // would read as "nothing was spent".
-  const report = reportRes.status === 'fulfilled' ? reportRes.value : null
-  const projects = projectsRes.status === 'fulfilled' ? (projectsRes.value ?? []) : []
+  // would read as "nothing was spent". It carries the status now, because "your
+  // date range is invalid" (400) and "the backend is down" (502) are different
+  // problems and the page said the same thing for both (#415).
+  const reportSection = section<CostReport | null>(reportRes, null, 'cost report')
+  const report = reportSection.data
+  // The project list only fills the filter dropdown, so it degrades on its own.
+  const projects = section(projectsRes, [] as Project[], 'projects for the cost filter')
   // No rates degrades to EUR figures rather than a broken page: convertPrice
   // returns the original amount when it cannot convert.
   const rates: Record<string, number> =
@@ -76,12 +82,10 @@ export default async function CostsPage({ searchParams }: Props) {
         actions={<CostExport lang={lang} />}
       />
 
-      <CostFilters projects={projects} lang={lang} />
+      <CostFilters projects={projects.data} lang={lang} />
 
       {report === null ? (
-        <div className="text-center py-12 text-red-600" role="alert">
-          {t('unexpectedError', lang)}
-        </div>
+        <SectionError error={reportSection.error ?? t('unexpectedError', lang)} lang={lang} />
       ) : (
         <>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
