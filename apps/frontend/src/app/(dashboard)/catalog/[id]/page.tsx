@@ -1,6 +1,6 @@
 import { auth } from '@/lib/auth'
 import { get } from '@/lib/serverApi'
-import { redirect, notFound } from 'next/navigation'
+import { redirect, notFound, unstable_rethrow } from 'next/navigation'
 import Link from 'next/link'
 import type {
   ProductDetail,
@@ -69,7 +69,13 @@ export default async function ProductDetailPage({ params, searchParams }: Props)
   // where this product is in the page it returns.
   const relatedRes = await get<CatalogPage>(
     `/api/catalog?lang=${lang}&categoryId=${product.categoryId}&limit=5`,
-  ).catch(() => null)
+  ).catch((e: unknown) => {
+    // A 401 redirect is not a failed fetch (#434): `catch` here would turn an
+    // ended session into a page with no related products instead of the login
+    // screen.
+    unstable_rethrow(e)
+    return null
+  })
   const related = (relatedRes?.items ?? []).filter((item) => item.id !== product.id).slice(0, 4)
   // The product itself is the page and a rejection there is already a 404. These
   // three fill the order form beside it, and an empty project dropdown stops the

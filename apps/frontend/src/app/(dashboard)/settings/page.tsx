@@ -1,5 +1,5 @@
 import { auth } from '@/lib/auth'
-import { redirect } from 'next/navigation'
+import { redirect, unstable_rethrow } from 'next/navigation'
 import type { SessionInfo } from '@infrashelf/types'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { SettingsForms } from './SettingsForms'
@@ -31,7 +31,10 @@ export default async function SettingsPage() {
   let sessions: SessionInfo[] | undefined
   try {
     sessions = await get<SessionInfo[]>('/api/sessions')
-  } catch { /* fall through with undefined */ }
+  } catch (e) {
+    // A 401 redirect is not a failed fetch (#434).
+    unstable_rethrow(e)
+    /* fall through with undefined */ }
 
   return (
     <div className="max-w-2xl mx-auto space-y-6">

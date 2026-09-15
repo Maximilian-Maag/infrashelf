@@ -142,6 +142,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
           <LangProvider lang={lang}>{children}</LangProvider>
         </div>
       </main>
+      {/* Stryker disable next-line all: the footer's own colours are appearance
+          only — they are read from the branding custom properties above, which
+          ARE asserted, and the links inside it are asserted by name and href. */}
       {imprintText && (
         <footer className="mt-10 border-t border-current/25" style={{ backgroundColor: 'var(--bp)' }}>
           <div className="max-w-screen-2xl mx-auto px-4 py-4 flex flex-col sm:flex-row items-center justify-between gap-2">

@@ -1,5 +1,5 @@
 import { auth } from '@/lib/auth'
-import { redirect } from 'next/navigation'
+import { redirect, unstable_rethrow } from 'next/navigation'
 import type { Role, CiSource } from '@infrashelf/types'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { EnvironmentsManager } from './EnvironmentsManager'
@@ -16,7 +16,10 @@ export default async function EnvironmentsPage() {
   let ciSources: CiSource[] = []
   try {
     ciSources = (await get<CiSource[]>('/api/admin/ci-sources')) ?? []
-  } catch { /* empty */ }
+  } catch (e) {
+    // A 401 redirect is not a failed fetch (#434).
+    unstable_rethrow(e)
+    /* empty */ }
 
   const lang = await getLang()
 

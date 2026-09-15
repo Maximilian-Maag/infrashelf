@@ -1,5 +1,5 @@
 import { auth } from '@/lib/auth'
-import { redirect } from 'next/navigation'
+import { redirect, unstable_rethrow } from 'next/navigation'
 import type { Role, AiConfig } from '@infrashelf/types'
 import { get } from '@/lib/serverApi'
 import { PageHeader } from '@/components/layout/PageHeader'
@@ -16,7 +16,10 @@ export default async function AiConfigPage() {
   let config: AiConfig | null = null
   try {
     config = await get<AiConfig>('/api/admin/config/ai')
-  } catch { /* use null */ }
+  } catch (e) {
+    // A 401 redirect is not a failed fetch (#434).
+    unstable_rethrow(e)
+    /* use null */ }
 
   const lang = await getLang()
 
