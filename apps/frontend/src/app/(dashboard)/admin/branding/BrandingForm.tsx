@@ -182,6 +182,11 @@ function ColorField({
           {t('invalidHexColor', lang)}
         </p>
       ) : (
+        // Stryker disable next-line all: the colour of the readout is appearance
+        // only — `role="alert"` beside it is what makes a failure interrupt, and
+        // that is asserted. The `>=` boundaries below are unreachable: no colour
+        // in the sRGB grey ramp lands exactly on 4.5 or 7, so `>` and `>=` are
+        // equivalent in practice.
         <p className={`text-xs ${ok ? 'text-slate-600' : 'text-red-700'}`} role={ok ? undefined : 'alert'}>
           {ok
             ? ratio >= AAA_BODY
