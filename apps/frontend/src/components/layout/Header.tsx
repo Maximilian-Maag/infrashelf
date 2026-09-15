@@ -248,6 +248,7 @@ export function Header({
                    * every bit of client state that belonged to the session.
                    */
                   await signOut({ redirect: false })
+                  // eslint-disable-next-line @next/next/no-location-assign-relative-destination -- deliberate, see above: a router push KEEPS the client state this is here to throw away.
                   window.location.assign('/login')
                 }}
                 className="w-full text-left flex min-h-11 items-center px-4 py-2 text-sm text-slate-700 hover:text-red-600 transition-colors"

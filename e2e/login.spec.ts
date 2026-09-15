@@ -44,7 +44,7 @@ test.describe('Login page', () => {
    * The case that broke CI on #36 and blocked the whole suite.
    *
    * The two-step sign-in put a `POST /api/login-challenge` in front of every
-   * login, and the middleware matcher still protected it — so the form's own
+   * login, and the proxy matcher still protected it — so the form's own
    * fetch was 307'd to /login, came back as HTML instead of JSON, and the sign-in
    * died as "Invalid email or password". `auth.setup.ts` failed on it, and with it
    * all 243 authenticated tests.
@@ -53,13 +53,13 @@ test.describe('Login page', () => {
    * was true when a second factor was optional and root had none; root now has one
    * by the time this runs, so that premise is gone. What the test is actually for
    * survives it: the hop must answer as ITSELF — a JSON 200 from
-   * /api/login-challenge — rather than being swallowed by the middleware and
+   * /api/login-challenge — rather than being swallowed by the proxy and
    * coming back as an HTML redirect. That is the regression, and it is invisible
    * from the destination alone.
    */
   test('the challenge hop answers as itself rather than being swallowed', async ({ page, context }) => {
     // A genuinely signed-out browser — this project carries the shared root
-    // storageState, and the middleware only redirects the unauthenticated.
+    // storageState, and the proxy only redirects the unauthenticated.
     await context.clearCookies()
     await page.goto('/login')
 
@@ -72,7 +72,7 @@ test.describe('Login page', () => {
     await page.getByRole('button', { name: /sign in|log in/i }).click()
 
     const res = await challenge
-    // A 307 here is the regression: the middleware swallowing the hop. So is any
+    // A 307 here is the regression: the proxy swallowing the hop. So is any
     // response that is not JSON — the form reads this with `fetch` and an HTML
     // login page parses as nothing.
     expect(res.status()).toBe(200)

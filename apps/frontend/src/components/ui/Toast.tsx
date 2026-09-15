@@ -101,7 +101,14 @@ function ToastBubble({ item, onDismiss }: { item: ToastItem; onDismiss: () => vo
   // never leave; as a ref the effect depends only on what should actually
   // restart it.
   const dismiss = useRef(onDismiss)
-  dismiss.current = onDismiss
+  // Assigned in an effect, not during render. Writing a ref while rendering is
+  // what `react-hooks/refs` refuses: under concurrent rendering a render can be
+  // thrown away, and a ref written by the discarded attempt still stands. The
+  // effect runs after the render that is actually kept, which is the only point
+  // where "the latest onDismiss" is a fact rather than a guess.
+  useEffect(() => {
+    dismiss.current = onDismiss
+  }, [onDismiss])
 
   useEffect(() => {
     // An error is not a confirmation: it is the only record of what went wrong,

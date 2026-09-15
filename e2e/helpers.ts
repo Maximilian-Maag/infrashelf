@@ -500,7 +500,7 @@ export async function createAccount(page: Page, role: TestRole): Promise<TestAcc
  * Call it on a session that has just been bounced to `/settings?enroll2fa=1`.
  * Returns the base32 secret, which the caller needs to sign this account in again
  * — including the sign-in this function itself performs at the end, since the
- * cookie the middleware reads is rewritten asynchronously and reading it too
+ * cookie the proxy reads is rewritten asynchronously and reading it too
  * early is what made the first version of root's enrolment hang on /settings.
  */
 export async function enrolSecondFactorFor(page: Page, account: TestAccount): Promise<string> {
@@ -587,7 +587,7 @@ export async function signInAsAccount(
 
     // Sign in again from scratch rather than waiting for the open session's token
     // to catch up: `confirm` clears the flag on the backend at once, but the
-    // cookie the middleware reads is rewritten asynchronously. A fresh sign-in
+    // cookie the proxy reads is rewritten asynchronously. A fresh sign-in
     // mints a token that is simply correct, and it is also the two-step path a
     // real administrator takes.
     await waitForTotpStepAfter(lastSpentStep.get(secret) ?? -1)

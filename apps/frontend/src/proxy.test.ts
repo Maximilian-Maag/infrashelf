@@ -5,7 +5,7 @@ import path from 'node:path'
 /**
  * The PWA's own files cannot sit behind the session (#374).
  *
- * Every one of them was, until the middleware matcher named them. It went
+ * Every one of them was, until the proxy matcher named them. It went
  * unnoticed for as long as it did because none of the three failures looks like
  * an auth problem from the outside: an install prompt that never offers, a
  * service worker that is simply absent, and an offline page that turns out to be
@@ -57,9 +57,9 @@ function manifestIconUrls(): string[] {
  */
 const MANIFEST_URL = '/manifest.webmanifest'
 
-describe('middleware matcher', () => {
+describe('proxy matcher', () => {
   const matches = async (pathname: string): Promise<boolean> => {
-    const { config } = await import('./middleware')
+    const { config } = await import('./proxy')
     return config.matcher.some((pattern: string) => new RegExp(`^${pattern}$`).test(pathname))
   }
 
@@ -89,7 +89,7 @@ describe('middleware matcher', () => {
    * The other half of the assertion, and the half that makes the rest mean
    * something: a matcher broken open — `[]`, or a lookahead that swallowed
    * everything — would pass every test above. These are the paths that MUST
-   * still reach the middleware.
+   * still reach the proxy.
    */
   it.each(['/', '/orders', '/settings', '/admin', '/catalog', '/orders/42'])(
     'still protects %s',
