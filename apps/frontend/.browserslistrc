@@ -1,0 +1,30 @@
+# The browsers this app is built for — and the reason it has to say so (#429).
+#
+# Tailwind v4 ships its palette as `oklch()`. Next 16's CSS optimiser rewrites
+# that to `lab()` for browsers that support `lab` but not `oklch`, and because
+# the `lab()` declaration comes last, EVERY browser gets the degraded colour —
+# including the ones that support `oklch` perfectly well.
+#
+# The conversion is not exact, and the app could not afford the difference.
+# `text-slate-500` is the muted-text idiom here, 130 call sites across 48 files:
+#
+#                       renders as   on the #f8fafc ground   on white
+#   Tailwind's fallback  #62748e            4.55 ✅            4.76 ✅
+#   the lab() Next emits #677992            4.24 ❌            4.44 ❌
+#
+# So after the Next 16 upgrade every secondary line in the app was below WCAG
+# AA, and the accessibility gate caught it on /admin (13 nodes) and /catalog.
+# Before the upgrade the built stylesheet had 58 `oklch()` and no `lab()`.
+#
+# Pinning the targets stops the rewrite: the build emits `oklch()` and the
+# palette renders as it was designed and measured.
+#
+# This is NOT a new browser-support decision. These are Tailwind CSS v4's own
+# documented minimums, and the app already cannot run below them — Tailwind v4
+# needs `@property`, cascade layers and `color-mix()`. The `lab()` fallback was
+# charged to every modern browser and bought nothing: anything old enough to
+# need it is already broken by Tailwind itself.
+chrome >= 111
+edge >= 111
+firefox >= 128
+safari >= 16.4
