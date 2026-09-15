@@ -1671,6 +1671,91 @@ function hasUseClientDirective(sf: ts.SourceFile): boolean {
   return false
 }
 
+interface SwallowedRedirectFact extends Located {
+  /** `try/catch` or `.catch(...)` — what shape the swallow takes. */
+  kind: string
+  /** The serverApi call inside it, so the message can name what is at risk. */
+  call: string
+}
+
+/**
+ * A catch around a `@/lib/serverApi` call that does not rethrow Next's control
+ * flow.
+ *
+ * `serverApi` signals an ended session by THROWING a `redirect()` (#427), which
+ * is how Next signals `redirect()` and `notFound()` generally. So a `catch` that
+ * exists to tolerate a failed fetch also eats the navigation: a signed-out user
+ * pressing Back got "project not found" for a project that exists, and eleven
+ * other pages quietly rendered defaults instead of the login screen (#434).
+ *
+ * This is the third time the same hazard has cost something — `Promise.allSettled`
+ * in #415, `Promise.race` in #399, `try/catch` in #434 — and the first two were
+ * each fixed once and then re-learned. `unstable_rethrow(e)` as the first line of
+ * the catch is the whole remedy; this rule is here so it is structural rather
+ * than remembered.
+ *
+ * Only server files: a client component's `get` comes from `@/lib/api`, which
+ * ends the session in the browser instead and throws nothing.
+ */
+function swallowedRedirects(): SwallowedRedirectFact[] {
+  const out: SwallowedRedirectFact[] = []
+  const files = walk(`${FRONTEND}/src`, (rel) =>
+    /\.tsx?$/.test(rel) && !/\.test\.tsx?$/.test(rel))
+
+  for (const rel of files) {
+    const text = read(rel)
+    if (!text.includes('@/lib/serverApi')) continue
+    const sf = parse(rel)
+    if (hasUseClientDirective(sf)) continue
+
+    // What this file imported from serverApi — `get`, `post`, `put`, `del`, or
+    // whatever they were renamed to at the import site.
+    const serverCalls = new Set<string>()
+    for (const statement of sf.statements) {
+      if (!ts.isImportDeclaration(statement)) continue
+      if (!ts.isStringLiteral(statement.moduleSpecifier)) continue
+      if (statement.moduleSpecifier.text !== '@/lib/serverApi') continue
+      const named = statement.importClause?.namedBindings
+      if (named && ts.isNamedImports(named)) {
+        for (const el of named.elements) serverCalls.add(el.name.text)
+      }
+    }
+    if (serverCalls.size === 0) continue
+
+    /** The first serverApi call inside a node, if there is one. */
+    const callInside = (node: ts.Node): string | null => {
+      let found: string | null = null
+      visit(node, (n) => {
+        if (found) return
+        if (ts.isCallExpression(n)) {
+          const name = calleeName(n)
+          if (name && serverCalls.has(name)) found = name
+        }
+      })
+      return found
+    }
+    const rethrows = (node: ts.Node): boolean => /unstable_rethrow\s*\(/.test(node.getText(sf))
+
+    visit(sf, (node) => {
+      if (ts.isTryStatement(node) && node.catchClause) {
+        const call = callInside(node.tryBlock)
+        if (call && !rethrows(node.catchClause.block)) {
+          out.push({ file: rel, line: lineOf(sf, node.catchClause), kind: 'try/catch', call })
+        }
+        return
+      }
+      if (!ts.isCallExpression(node) || calleeName(node) !== 'catch') return
+      if (!ts.isPropertyAccessExpression(node.expression)) return
+      const call = callInside(node.expression.expression)
+      const [handler] = node.arguments
+      if (!call || !handler) return
+      if (rethrows(handler)) return
+      out.push({ file: rel, line: lineOf(sf, node), kind: '.catch(...)', call })
+    })
+  }
+  return out
+}
+
 function clientImportFacts(): ClientImportFact[] {
   const out: ClientImportFact[] = []
   const files = walk(`${FRONTEND}/src`, (rel) =>
@@ -1718,6 +1803,7 @@ export function collectFacts(): Record<string, unknown> {
     unscopedAlertQueries: unscopedAlertQueries(),
     pages: pageFacts(),
     clientImports: clientImportFacts(),
+    swallowedRedirects: swallowedRedirects(),
     a11ySpecFile: A11Y_SPEC,
     languageLists: languageListFacts(),
     eslintConfigs: eslintConfigFacts(),
