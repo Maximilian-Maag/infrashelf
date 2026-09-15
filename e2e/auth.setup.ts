@@ -81,7 +81,7 @@ async function enrolSecondFactorIfRequired(page: import('@playwright/test').Page
   //
   // This used to read `page.url()` the instant the sign-in navigation left
   // `/login`, and return early unless it already said `/settings`. The
-  // middleware's redirect to the enrolment screen lands AFTER that — so the
+  // proxy's redirect to the enrolment screen lands AFTER that — so the
   // check sampled `/`, concluded nothing was owed, skipped the enrolment, and
   // saved a storageState for an account with no second factor. Every
   // authenticated test then bounced to `/settings?enroll2fa=1` and failed on a
@@ -153,7 +153,7 @@ async function enrolSecondFactorIfRequired(page: import('@playwright/test').Page
   //
   // The card clears the "must enrol" flag through NextAuth's `update()`, and the
   // backend stops refusing the moment `confirm` returns — but the cookie the
-  // middleware reads is rewritten asynchronously, and the first version of this
+  // proxy reads is rewritten asynchronously, and the first version of this
   // raced it and sat on /settings until it timed out. A fresh sign-in mints a
   // token that is simply correct, and it costs a few seconds once per run.
   //

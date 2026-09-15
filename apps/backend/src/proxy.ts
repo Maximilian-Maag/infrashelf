@@ -16,7 +16,14 @@ function corsHeaders(origin: string | null): Record<string, string> {
   }
 }
 
-export function middleware(req: NextRequest) {
+/**
+ * CORS for the API, ahead of every route.
+ *
+ * Named `proxy` in a file named `proxy.ts`: Next 16 renamed the `middleware`
+ * convention, and the old name now only warns. The shape is unchanged — same
+ * request, same `config.matcher` below.
+ */
+export function proxy(req: NextRequest) {
   const origin = req.headers.get('origin')
   const headers = corsHeaders(origin)
 

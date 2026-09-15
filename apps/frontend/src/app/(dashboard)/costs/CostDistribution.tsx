@@ -67,15 +67,25 @@ export function CostDistribution({
     )
   }
 
-  // Widths are laid out cumulatively so rounding cannot leave a gap at the right
-  // edge that would read as unaccounted spend.
-  let cursor = 0
-  const segments = shown.map((bucket, i) => {
+  /*
+   * Widths are laid out cumulatively so rounding cannot leave a gap at the right
+   * edge that would read as unaccounted spend.
+   *
+   * Accumulated inside the fold rather than in a `let` above it: a variable
+   * declared in the render body and reassigned from a callback is what
+   * `react-hooks/immutability` refuses, because the callback can outlive the
+   * render that created it and then write to a stale binding. The running total
+   * is the previous segment's `x + width`, which is the same arithmetic without
+   * anything to leak.
+   */
+  const segments = shown.reduce<
+    { bucket: (typeof shown)[number]; x: number; width: number; fill: string }[]
+  >((acc, bucket, i) => {
+    const previous = acc[acc.length - 1]
     const width = total > 0 ? (bucket.totalEur / total) * VIEW_W : 0
-    const x = cursor
-    cursor += width
-    return { bucket, x, width, fill: CHART_FILL[i % CHART_FILL.length] }
-  })
+    const x = previous ? previous.x + previous.width : 0
+    return [...acc, { bucket, x, width, fill: CHART_FILL[i % CHART_FILL.length] }]
+  }, [])
 
   return (
     <Card title={title}>

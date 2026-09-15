@@ -442,7 +442,7 @@ for (const role of ALL_ROLES) {
      * A page above this role must not hand over its data.
      *
      * Asserted as an absence of the privileged content, not as a redirect: there
-     * is no server-side role check on these routes — `middleware.ts` gates on
+     * is no server-side role check on these routes — `proxy.ts` gates on
      * being signed in and on second-factor enrolment, and nothing else — so the
      * shell does render and the API is what refuses. That is worth knowing and
      * worth pinning: if a guard is added later this assertion still holds, and if

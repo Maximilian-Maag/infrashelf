@@ -46,13 +46,13 @@ import {
  * is worse there (`endingSession` latches, so a throw would leave every later
  * expiry doing nothing). Four shapes were tried and each proved nothing:
  *
- *   - a document `goto` is answered by the middleware, so it redirects with the
+ *   - a document `goto` is answered by the proxy, so it redirects with the
  *     handler deleted;
  *   - an in-app move to a server-rendered page (/projects) makes no browser
  *     fetch at all — it simply sat there;
  *   - an in-app move to a client-rendered one (/catalog) has the router's own
  *     RSC request 401 first and fall back to a document load, which the
- *     middleware redirects;
+ *     proxy redirects;
  *   - a form submit with no navigation is the right SHAPE, but never sees a 401.
  *
  * The last one is worth writing down, because it is not obvious and it wasted a

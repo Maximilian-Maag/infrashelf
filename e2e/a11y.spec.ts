@@ -294,13 +294,31 @@ const focusProbe = () => {
   const shadowColours = (shadow: string): { colour: [number, number, number, number]; inset: boolean }[] => {
     if (!shadow || shadow === 'none') return []
     return shadow
-      .split(/(?=rgba?\(|oklch\(|color\()/)
+      /*
+       * Every CSS colour FUNCTION, not a list of the three we happened to have
+       * seen.
+       *
+       * Tailwind authors `oklch()`, but what reaches `getComputedStyle` is
+       * whatever the build's CSS optimiser emitted. Next 16's turns all 58 of
+       * them into `lab()`, which this split did not know — so the ring layer was
+       * swallowed into its neighbour, every remaining layer was transparent, and
+       * the probe reported "paints no focus indicator at all" for rings that
+       * were plainly there. This file learned the same lesson once already, when
+       * the regex only knew `rgb()` and Tailwind v4 arrived with `oklch()`.
+       *
+       * Longest names first, and a lookbehind, so `oklab(` is not split as
+       * `lab(`.
+       */
+      .split(/(?=(?<![a-z-])(?:oklch|oklab|lch|lab|rgba?|hsla?|hwb|color)\()/i)
       .map((s) => s.trim())
       .filter(Boolean)
       .map((layer) => {
         // The layer is "<colour> <offsets> [inset]"; hand the colour to the
         // canvas and keep the keyword, which decides which side it is painted on.
-        const colour = /(rgba?\([^)]*\)|oklch\([^)]*\)|color\([^)]*\)|#[0-9a-f]{3,8})/i.exec(layer)
+        const colour =
+          /((?<![a-z-])(?:oklch|oklab|lch|lab|rgba?|hsla?|hwb|color)\([^)]*\)|#[0-9a-f]{3,8})/i.exec(
+            layer,
+          )
         const parsed = colour ? rgb(colour[1]) : null
         return parsed ? { colour: parsed, inset: /\binset\b/.test(layer) } : null
       })
@@ -916,7 +934,21 @@ test.describe('Accessibility — things axe cannot check', () => {
     ]
 
     for (const [label, selector] of controls) {
-      const el = page.locator(selector).first()
+      /*
+       * `.filter({ visible: true })`, not a bare `.first()`.
+       *
+       * A production build streams the page, and `next start` leaves a SECOND
+       * copy of it in a hidden container while it does. A document-level
+       * `.first()` can therefore land on that hidden copy, focus something the
+       * user cannot see, and report "paints no focus indicator at all".
+       *
+       * That is exactly how this failed on the Next 16 upgrade: on the four
+       * STREAMED pages and on none of the static ones, with the server log full
+       * of "The destination stream closed early". The test means "the control
+       * the user can see", so it should say so rather than trusting document
+       * order.
+       */
+      const el = page.locator(selector).filter({ visible: true }).first()
       await el.focus()
       // Some of these carry `transition-all`, so let the ring finish fading in
       // before reading the computed style.
@@ -1013,7 +1045,9 @@ test.describe('Accessibility — things axe cannot check', () => {
 
   test('every focus stop inside a dialog shows a focus indicator', async ({ page }) => {
     await page.goto('/admin/categories')
-    await page.getByRole('button', { name: /add category/i }).first().click()
+    // Visible, for the same reason as the chrome probe above: the hidden streamed
+    // copy carries an identical button that cannot be clicked.
+    await page.getByRole('button', { name: /add category/i }).filter({ visible: true }).first().click()
     await expect(page.locator('dialog[open]')).toBeVisible()
 
     // Tab with the real keyboard rather than calling .focus(): Chromium only

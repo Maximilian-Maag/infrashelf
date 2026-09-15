@@ -35,25 +35,31 @@ const HATCH_ID = 'isf-cost-comparison-hatch'
  * short. And a month that is three days old is not comparable to a finished one, so
  * a running month is hatched and labelled as still growing.
  */
-export function CostComparison({ comparison, money, lang, estimatedOrders, unconverted }: Props) {
-  const title = t('monthOverMonth', lang)
-
-  if (!comparison) {
-    return (
-      <Card title={title}>
-        <p className="text-sm text-slate-600">{t('needTwoMonths', lang)}</p>
-      </Card>
-    )
-  }
-
-  const { current, previous, changeEur, changePct } = comparison
-  const max = Math.max(current.totalEur, previous.totalEur)
-  // A real minus sign, not a hyphen: this is a number, and the hyphen renders as a
-  // dash too short to read as negative at this size.
-  const sign = changeEur > 0 ? '+' : changeEur < 0 ? '−' : ''
-  const arrow = changeEur > 0 ? '▲' : changeEur < 0 ? '▼' : '–'
-
-  const Row = ({ period, emphasis }: { period: CostPeriod; emphasis: boolean }) => (
+/**
+ * One month's figure and its bar.
+ *
+ * Declared at module scope, not inside `CostComparison`. A component created
+ * during render is a NEW component type on every render, so React unmounts and
+ * remounts it each time and any state it held is thrown away — which is what
+ * `react-hooks/static-components` is for. It held none today, so this was a
+ * latent fault rather than a visible one; it stops being latent the moment
+ * somebody adds a `useState` to it.
+ *
+ * `lang`, `max` and `money` used to come from the closure and are now props.
+ */
+const Row = ({
+  period,
+  emphasis,
+  lang,
+  max,
+  money,
+}: {
+  period: CostPeriod
+  emphasis: boolean
+  lang: string
+  max: number
+  money: (n: number) => string
+}) => (
     <div>
       <div className="flex items-baseline justify-between gap-3 text-sm">
         <span className={emphasis ? 'font-medium text-slate-900' : 'text-slate-600'}>
@@ -85,6 +91,24 @@ export function CostComparison({ comparison, money, lang, estimatedOrders, uncon
       </svg>
     </div>
   )
+
+export function CostComparison({ comparison, money, lang, estimatedOrders, unconverted }: Props) {
+  const title = t('monthOverMonth', lang)
+
+  if (!comparison) {
+    return (
+      <Card title={title}>
+        <p className="text-sm text-slate-600">{t('needTwoMonths', lang)}</p>
+      </Card>
+    )
+  }
+
+  const { current, previous, changeEur, changePct } = comparison
+  const max = Math.max(current.totalEur, previous.totalEur)
+  // A real minus sign, not a hyphen: this is a number, and the hyphen renders as a
+  // dash too short to read as negative at this size.
+  const sign = changeEur > 0 ? '+' : changeEur < 0 ? '−' : ''
+  const arrow = changeEur > 0 ? '▲' : changeEur < 0 ? '▼' : '–'
 
   return (
     <Card title={title}>
@@ -119,8 +143,8 @@ export function CostComparison({ comparison, money, lang, estimatedOrders, uncon
       </p>
 
       <div className="mt-3 space-y-3">
-        <Row period={previous} emphasis={false} />
-        <Row period={current} emphasis />
+        <Row period={previous} emphasis={false} lang={lang} max={max} money={money} />
+        <Row period={current} emphasis lang={lang} max={max} money={money} />
       </div>
 
       <CostCaveats
