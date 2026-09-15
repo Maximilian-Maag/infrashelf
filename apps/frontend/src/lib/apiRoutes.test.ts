@@ -152,20 +152,20 @@ describe('the proxy configs know which /api routes are the frontend’s', () => 
     expect(exactBackendPaths()).not.toContain(REMOVED_BACKEND_PATH)
   })
 
-  it('the frontend’s proxy exempts exactly these paths from auth', () => {
+  it('the frontend’s middleware exempts exactly these paths from auth', () => {
     // Runs the real matcher rather than searching the source for a substring:
     // these paths appear in that file's comments too, so a `toContain` check
     // passes even if the matcher itself stops exempting them.
-    const mw = readFileSync(path.join(REPO_ROOT, 'apps/frontend/src/proxy.ts'), 'utf8')
+    const mw = readFileSync(path.join(REPO_ROOT, 'apps/frontend/src/middleware.ts'), 'utf8')
     const matcher = /matcher: \[[\s\S]*?'(\/\(\(\?![\s\S]*?)',/.exec(mw)
-    if (!matcher) throw new Error('could not find the proxy matcher in proxy.ts')
+    if (!matcher) throw new Error('could not find the middleware matcher in middleware.ts')
     // The matcher is a string literal in source, so its escapes are doubled.
     const guard = new RegExp(`^${matcher[1].replace(/\\\\/g, '\\')}$`)
 
-    // Exempt: the proxy must NOT claim these, or an unauthenticated caller
+    // Exempt: the middleware must NOT claim these, or an unauthenticated caller
     // is redirected to /login and sign-in dies before it reaches the backend.
     for (const p of served) {
-      expect(guard.test(p), `${p} is not exempt from the proxy`).toBe(false)
+      expect(guard.test(p), `${p} is not exempt from the middleware`).toBe(false)
     }
 
     // Not exempt: a path the frontend does not serve must still be protected,

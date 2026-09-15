@@ -1,18 +1,14 @@
 import { dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import nextCoreWebVitals from 'eslint-config-next/core-web-vitals'
-import nextTypescript from 'eslint-config-next/typescript'
+import { FlatCompat } from '@eslint/eslintrc'
 
 /**
  * ESLint flat config, replacing `.eslintrc.json` driven by `next lint` — which is
  * deprecated in Next.js 15 and gone in 16 (issue #93).
  *
- * `eslint-config-next` 16 ships flat config of its own, so the `FlatCompat` shim
- * this file used to carry is gone — as its own comment said it would be, once
- * that package stopped being eslintrc-shaped. Wrapping the 16 export in
- * `FlatCompat` is not merely redundant, it throws: the flat config contains
- * circular plugin references and the shim serialises it ("Converting circular
- * structure to JSON").
+ * `eslint-config-next` is still eslintrc-shaped (it has no flat export at 15.5), so
+ * `FlatCompat` is what translates `next/core-web-vitals` and `next/typescript` into
+ * flat entries. It goes when that package ships a flat config of its own.
  *
  * Both apps run `eslint . --max-warnings 0`, so every rule here is a gate on the
  * first PR that trips it. Each one below was switched on, counted against the tree,
@@ -21,6 +17,8 @@ import nextTypescript from 'eslint-config-next/typescript'
  * The rule blocks here and in the frontend/backend twin are kept identical; the
  * `ignores` list is not, because each app has its own generated trees.
  */
+const compat = new FlatCompat({ baseDirectory: dirname(fileURLToPath(import.meta.url)) })
+
 const config = [
   {
     // `next lint` only ever looked at a few source directories; `eslint .` looks at
@@ -34,31 +32,7 @@ const config = [
       'next-env.d.ts',
     ],
   },
-  ...nextCoreWebVitals,
-  ...nextTypescript,
-  {
-    /*
-     * OFF, with a date on it: `react-hooks/set-state-in-effect` (#418).
-     *
-     * eslint-config-next 16 ships React's newer hook rules, and this one flags
-     * 29 places across ~25 files — every one the same shape: fetch in an effect,
-     * then `setState` with what came back. That is not a defect list, it is the
-     * data-fetching pattern this app was written in, and the rule is right that
-     * it is no longer the recommended one.
-     *
-     * Switched off rather than fixed in the Next 16 upgrade, deliberately.
-     * Rewriting 29 data-fetching call sites inside a dependency bump makes both
-     * halves unreviewable, and a regression in either would be hard to pin on
-     * the right one. #418 carries the migration, file by file, with the tests
-     * that make each one safe.
-     *
-     * The other five findings the same upgrade surfaced WERE fixed here: a
-     * component created during render, a mutable cursor, a ref written during
-     * render, a module-scope write from a component, and an internal
-     * `location.assign`. They were one-offs; this one is an architecture.
-     */
-    rules: { 'react-hooks/set-state-in-effect': 'off' },
-  },
+  ...compat.extends('next/core-web-vitals', 'next/typescript'),
   {
     // Type-aware linting, for the four rules below and nothing else. It is what
     // makes them possible at all — without a type checker ESLint cannot tell an

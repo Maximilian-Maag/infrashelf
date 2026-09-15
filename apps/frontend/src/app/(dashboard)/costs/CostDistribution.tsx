@@ -67,25 +67,15 @@ export function CostDistribution({
     )
   }
 
-  /*
-   * Widths are laid out cumulatively so rounding cannot leave a gap at the right
-   * edge that would read as unaccounted spend.
-   *
-   * Accumulated inside the fold rather than in a `let` above it: a variable
-   * declared in the render body and reassigned from a callback is what
-   * `react-hooks/immutability` refuses, because the callback can outlive the
-   * render that created it and then write to a stale binding. The running total
-   * is the previous segment's `x + width`, which is the same arithmetic without
-   * anything to leak.
-   */
-  const segments = shown.reduce<
-    { bucket: (typeof shown)[number]; x: number; width: number; fill: string }[]
-  >((acc, bucket, i) => {
-    const previous = acc[acc.length - 1]
+  // Widths are laid out cumulatively so rounding cannot leave a gap at the right
+  // edge that would read as unaccounted spend.
+  let cursor = 0
+  const segments = shown.map((bucket, i) => {
     const width = total > 0 ? (bucket.totalEur / total) * VIEW_W : 0
-    const x = previous ? previous.x + previous.width : 0
-    return [...acc, { bucket, x, width, fill: CHART_FILL[i % CHART_FILL.length] }]
-  }, [])
+    const x = cursor
+    cursor += width
+    return { bucket, x, width, fill: CHART_FILL[i % CHART_FILL.length] }
+  })
 
   return (
     <Card title={title}>
@@ -174,20 +164,12 @@ export function CostDistribution({
         </thead>
         <tbody>
           {segments.map(({ bucket, fill }) => (
-            <tr
-              // Stryker disable next-line all: a React key is an identity hint to
-              // the reconciler, not output — nothing a reader can observe changes
-              // when it does. See stryker.config.mjs.
-              key={`${bucket.id ?? 'none'}-${bucket.label}`}
-              className="border-t border-slate-100"
-            >
+            <tr key={`${bucket.id ?? 'none'}-${bucket.label}`} className="border-t border-slate-100">
               <td className="py-1 text-slate-900">
                 <span className="flex items-center gap-2">
                   <span
                     aria-hidden="true"
                     className="inline-block h-3 w-3 shrink-0 rounded-sm"
-                    // Stryker disable next-line all: swatch tint — the legend row
-                    // restates it as text, see stryker.config.mjs
                     style={{ backgroundColor: fill }}
                   />
                   {bucket.label}
