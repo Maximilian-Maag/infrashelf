@@ -29,44 +29,6 @@ const config = {
     '!src/lib/i18n.ts',
   ],
 
-  /*
-   * ── Cosmetic mutants are excluded AT THE LINE, not by turning a mutator off ──
-   *
-   * A presentational component is mostly markup, and Stryker counts every
-   * `className` string and `style={{…}}` object as a mutant. `ProductCard` is the
-   * measured example: 14 solid behavioural tests took it to 52%, and every one of
-   * the eleven survivors was styling — three style objects and two hover handlers
-   * setting `borderColor`. Killing those means asserting inline CSS and
-   * simulating hover, which produces tests that break on every restyle and catch
-   * no defects. The score would go up; the suite would get worse.
-   *
-   * So a line that carries ONLY appearance is marked in the source:
-   *
-   *     // Stryker disable next-line all: hover decoration — see stryker.config.mjs
-   *     onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--bp)')}
-   *
-   * The same file then scores 100% over 12 mutants that all mean something.
-   *
-   * Three rules for using it, because an exclusion that is easy to reach for
-   * stops meaning anything:
-   *
-   *  1. ONLY appearance. If a reader could act differently because the line
-   *     changed — a label, an href, an aria attribute, a disabled state, a
-   *     branch — it is behaviour and it gets a test instead.
-   *  2. The disable names its reason. "brand colours", not "cosmetic".
-   *  3. Put the attribute on its own line first, so the disable covers the style
-   *     and not the `className` beside it that a test legitimately kills.
-   *
-   * NOT `mutator.excludedMutations`. Turning off `StringLiteral` globally would
-   * also stop mutating every URL, every i18n key and every status string — the
-   * mutants most worth having. The cost of doing it per line is that somebody has
-   * to look at each one, which is the point.
-   *
-   * The precedent is `i18n.ts` in `mutate` below: excluded because nothing
-   * asserts an individual translation, only that a language does not fall back
-   * wholesale. Same argument, finer grain.
-   */
-
   // Static mutants — code that runs once at import time — cannot be attributed to
   // individual tests, so Stryker reruns the whole suite for each one. Measured on
   // this app: 51% of mutants were static and accounted for an estimated 97% of the

@@ -8,21 +8,6 @@ interface Props {
   lang: string
 }
 
-/**
- * Write the language choice and tell the app about it.
- *
- * At module scope rather than inside the component, because
- * `react-hooks/immutability` refuses a component-scope write to something
- * declared outside it — and it cannot tell that `selectLang` only ever runs from
- * a click. It is right to be strict: a function declared in a component body is
- * reachable from render as far as the rule can see. Hoisting the effect says
- * plainly that it belongs to the event, not to a render.
- */
-const persistLang = (code: string) => {
-  document.cookie = `lang=${code}; path=/; max-age=31536000; SameSite=Lax`
-  window.dispatchEvent(new CustomEvent('langchange', { detail: code }))
-}
-
 export function LanguageSwitcher({ lang }: Props) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
@@ -44,7 +29,8 @@ export function LanguageSwitcher({ lang }: Props) {
   }, [open])
 
   function selectLang(code: string) {
-    persistLang(code)
+    document.cookie = `lang=${code}; path=/; max-age=31536000; SameSite=Lax`
+    window.dispatchEvent(new CustomEvent('langchange', { detail: code }))
     setOpen(false)
     toggleRef.current?.focus()
     router.refresh()

@@ -52,14 +52,11 @@ export function ProductCard({
     <div
       data-testid={`product-card-${id}`}
       className="bg-white border border-slate-200 rounded-lg overflow-hidden flex flex-col hover:shadow-md transition-all"
-      // Stryker disable next-line all: hover decoration — see stryker.config.mjs
       onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--bp)')}
-      // Stryker disable next-line all: hover decoration — see stryker.config.mjs
       onMouseLeave={(e) => (e.currentTarget.style.borderColor = '')}
     >
       <div
         className="relative h-40 border-b border-slate-100"
-        // Stryker disable next-line all: tint only — see stryker.config.mjs
         style={{ backgroundColor: 'color-mix(in srgb, var(--bp) 8%, white)' }}
       >
         {/* The picture is the obvious thing to click, so it is the link. Named for
@@ -81,11 +78,7 @@ export function ProductCard({
       </div>
       <div className="p-3 flex flex-col flex-1">
         {categoryName && (
-          <span
-            className="text-xs font-semibold uppercase tracking-wide mb-1"
-            // Stryker disable next-line all: brand ink — see stryker.config.mjs
-            style={{ color: 'var(--bp-text)' }}
-          >
+          <span className="text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: 'var(--bp-text)' }}>
             {categoryName}
           </span>
         )}
@@ -103,7 +96,6 @@ export function ProductCard({
           // the operator saved, and a hard-coded dark foreground goes unreadable
           // the moment they pick a dark one. `--bs-ink` is readableInk's answer
           // for that exact colour, which is what every other `--bs` surface uses.
-          // Stryker disable next-line all: brand colours — see stryker.config.mjs
           style={{ backgroundColor: 'var(--bs)', color: 'var(--bs-ink)' }}
         >
           {t('details', lang)}
