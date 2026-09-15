@@ -32,13 +32,24 @@ export function CiSourcesManager() {
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
+  /*
+   * Whether the LAST load failed, kept apart from `deleteError` (#415).
+   *
+   * Without it an outage rendered the error and "there are none" together: two
+   * claims on one screen, one of which is false and is the one a person acts on.
+   * `deleteError` cannot answer this on its own — it also carries a failed
+   * delete, where the list really is what it says.
+   */
+  const [loadFailed, setLoadFailed] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
+      setLoadFailed(false)
       setSources((await get<CiSource[]>('/api/admin/ci-sources')) ?? [])
       setDeleteError(null)
     } catch (e) {
+      setLoadFailed(true)
       setDeleteError(e instanceof Error ? e.message : t('failedToLoadCiSources', lang))
     } finally {
       setLoading(false)
@@ -120,6 +131,8 @@ export function CiSourcesManager() {
     }
   }
 
+  // Stryker disable next-line all: the badge palette is appearance only — the
+  // provider NAME beside it is what carries the meaning, and that is asserted.
   const providerBadge: Record<CiProvider, string> = {
     gitlab: 'bg-orange-100 text-orange-700',
     github: 'bg-slate-100 text-slate-700',
@@ -134,7 +147,7 @@ export function CiSourcesManager() {
         )}
         {loading ? (
           <div className="flex justify-center py-8"><div className="h-8 w-8 animate-spin rounded-full border-4 border-slate-200 border-t-blue-600" /></div>
-        ) : sources.length === 0 ? (
+        ) : sources.length === 0 && !loadFailed ? (
           <p className="text-center py-6 text-slate-600">{t('noCiSourcesYet', lang)}</p>
         ) : (
           <div className="space-y-2">
