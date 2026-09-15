@@ -1,0 +1,19 @@
+{
+  "//": [
+    "The tsconfig `next build` uses, which is NOT the one the repo type-checks with.",
+    "",
+    "`next build` runs the project's type-check, and from Next 16 that covers every",
+    "file the tsconfig includes rather than only what the app imports. The backend",
+    "image is built from a context that excludes `e2e/` (see .dockerignore), so",
+    "`e2eTotpParity.test.ts` — which deliberately imports the e2e suite's TOTP",
+    "helper to check it against the backend's — stopped resolving and failed the",
+    "image build on dev for every commit after the Next 16 upgrade. The tests",
+    "themselves were fine; nothing about them is shipped.",
+    "",
+    "So the production build checks what it ships, and `make type-check` still",
+    "checks everything from tsconfig.json, including the tests and the e2e import",
+    "that is the whole point of that file."
+  ],
+  "extends": "./tsconfig.json",
+  "exclude": ["node_modules", "**/*.test.ts", "**/*.test.tsx", "src/test/**"]
+}
