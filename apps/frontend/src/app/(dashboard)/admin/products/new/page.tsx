@@ -1,5 +1,5 @@
 import { auth } from '@/lib/auth'
-import { redirect } from 'next/navigation'
+import { redirect, unstable_rethrow } from 'next/navigation'
 import type { Role, Category, DeploymentEnvironment } from '@infrashelf/types'
 import { get } from '@/lib/serverApi'
 import { getLang } from '@/lib/getLang'
@@ -19,7 +19,10 @@ export default async function NewProductPage() {
   let categories: Category[] = []
   try {
     categories = (await get<Category[]>('/api/admin/categories')) ?? []
-  } catch { /* empty */ }
+  } catch (e) {
+    // A 401 redirect is not a failed fetch (#434).
+    unstable_rethrow(e)
+    /* empty */ }
 
   // For the optional template import below the form. An empty list degrades to
   // "import the parameters only" rather than to a broken page — the import still
@@ -27,7 +30,10 @@ export default async function NewProductPage() {
   let environments: DeploymentEnvironment[] = []
   try {
     environments = (await get<DeploymentEnvironment[]>('/api/admin/environments')) ?? []
-  } catch { /* empty */ }
+  } catch (e) {
+    // A 401 redirect is not a failed fetch (#434).
+    unstable_rethrow(e)
+    /* empty */ }
 
   return (
     <div className="max-w-2xl mx-auto space-y-6">

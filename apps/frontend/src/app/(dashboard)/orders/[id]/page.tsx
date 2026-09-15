@@ -1,6 +1,6 @@
 import { auth } from '@/lib/auth'
 import { get } from '@/lib/serverApi'
-import { redirect, notFound } from 'next/navigation'
+import { redirect, notFound, unstable_rethrow } from 'next/navigation'
 import type { Order, OrderComment, Role } from '@infrashelf/types'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { RefreshButton } from '@/components/ui/RefreshButton'
@@ -31,7 +31,9 @@ export default async function OrderDetailPage({ params }: Props) {
   let order: Order
   try {
     order = await get<Order>(`/api/orders/${id}?lang=${lang}`)
-  } catch {
+  } catch (e) {
+    // A 401 redirect is not a failed fetch (#434).
+    unstable_rethrow(e)
     notFound()
   }
 
@@ -46,7 +48,9 @@ export default async function OrderDetailPage({ params }: Props) {
   let comments: OrderComment[] = []
   try {
     comments = (await get<OrderComment[]>(`/api/orders/${id}/comments`)) ?? []
-  } catch {
+  } catch (e) {
+    // A 401 redirect is not a failed fetch (#434).
+    unstable_rethrow(e)
     /* empty */
   }
 

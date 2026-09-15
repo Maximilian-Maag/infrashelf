@@ -1,5 +1,5 @@
 import { auth } from '@/lib/auth'
-import { redirect } from 'next/navigation'
+import { redirect, unstable_rethrow } from 'next/navigation'
 import type { Role, Branding } from '@infrashelf/types'
 import { get } from '@/lib/serverApi'
 import { PageHeader } from '@/components/layout/PageHeader'
@@ -23,7 +23,10 @@ export default async function BrandingPage() {
 
   try {
     branding = await get<Branding>('/api/admin/branding')
-  } catch { /* use defaults */ }
+  } catch (e) {
+    // A 401 redirect is not a failed fetch (#434).
+    unstable_rethrow(e)
+    /* use defaults */ }
 
   const lang = await getLang()
 

@@ -1,7 +1,7 @@
 import { auth } from '@/lib/auth'
 import { get } from '@/lib/serverApi'
 import Link from 'next/link'
-import { redirect, notFound } from 'next/navigation'
+import { redirect, notFound, unstable_rethrow } from 'next/navigation'
 import type { InfrastructureDetail, Role } from '@infrashelf/types'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { RefreshButton } from '@/components/ui/RefreshButton'
@@ -40,7 +40,9 @@ export default async function InfrastructureDetailPage({ params }: Props) {
   let element: InfrastructureDetail
   try {
     element = await get<InfrastructureDetail>(`/api/infrastructure/${id}?lang=${lang}`)
-  } catch {
+  } catch (e) {
+    // A 401 redirect is not a failed fetch (#434).
+    unstable_rethrow(e)
     // The API answers 404 for an element outside the caller's scope as well, so
     // this covers "gone" and "not yours" without distinguishing them here either.
     notFound()

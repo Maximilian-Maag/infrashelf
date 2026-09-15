@@ -1,3 +1,4 @@
+import { unstable_rethrow } from 'next/navigation'
 import { get } from '@/lib/serverApi'
 import type { Branding } from '@infrashelf/types'
 import Link from 'next/link'
@@ -10,7 +11,9 @@ export default async function ImpressumPage() {
   let branding: Partial<Branding> = {}
   try {
     branding = (await get<Partial<Branding>>('/api/public/branding')) ?? {}
-  } catch {
+  } catch (e) {
+    // A 401 redirect is not a failed fetch (#434).
+    unstable_rethrow(e)
     /* non-fatal */
   }
 

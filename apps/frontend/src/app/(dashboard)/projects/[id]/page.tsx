@@ -1,6 +1,6 @@
 import { auth } from '@/lib/auth'
 import { get } from '@/lib/serverApi'
-import { redirect, notFound } from 'next/navigation'
+import { redirect, notFound, unstable_rethrow } from 'next/navigation'
 import type { Project, Order, CostCenter, OrderPage } from '@infrashelf/types'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Breadcrumbs } from '@/components/layout/Breadcrumbs'
@@ -29,7 +29,9 @@ export default async function ProjectDetailPage({ params }: Props) {
   let project: Project
   try {
     project = await get<Project>(`/api/projects/${id}`)
-  } catch {
+  } catch (e) {
+    // A 401 redirect is not a failed fetch (#434).
+    unstable_rethrow(e)
     notFound()
   }
 

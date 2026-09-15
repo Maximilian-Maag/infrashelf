@@ -1,6 +1,6 @@
 import { auth } from '@/lib/auth'
 import { get } from '@/lib/serverApi'
-import { redirect } from 'next/navigation'
+import { redirect, unstable_rethrow } from 'next/navigation'
 import type { Order, Role, ApprovalDelegationsResponse, OrderPage } from '@infrashelf/types'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { ApprovalRow } from './ApprovalRow'
@@ -28,7 +28,9 @@ export default async function ApprovalsPage() {
     // decision.
     const pending = await get<OrderPage>(`/api/orders?lang=${lang}&status=pending`)
     orders = pending?.items ?? []
-  } catch {
+  } catch (e) {
+    // A 401 redirect is not a failed fetch (#434).
+    unstable_rethrow(e)
     /* empty */
   }
 
@@ -41,7 +43,9 @@ export default async function ApprovalsPage() {
       delegations =
         (await get<ApprovalDelegationsResponse>('/api/approvals/delegations')) ??
         EMPTY_DELEGATIONS
-    } catch {
+    } catch (e) {
+      // A 401 redirect is not a failed fetch (#434).
+      unstable_rethrow(e)
       /* empty */
     }
   }
