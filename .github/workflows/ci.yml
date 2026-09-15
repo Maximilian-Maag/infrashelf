@@ -263,6 +263,92 @@ jobs:
           retention-days: 1
           include-hidden-files: true
 
+  # ── Image ────────────────────────────────────────────────────────────────────
+  #
+  # The gap this closes (#424): there are TWO backend builds, and they do not
+  # build the same thing.
+  #
+  #   the `build` job above   `pnpm --filter backend build`   the FULL checkout
+  #   cd-release              `docker build -f .../Dockerfile .`   the DOCKER context
+  #
+  # `.dockerignore` removes `e2e`, `docs`, `infra`, `*.md` and `**/.env*` from the
+  # second one. So a change that compiles in the full checkout and fails in the
+  # image was invisible to every PR, and was discovered on dev — after the merge,
+  # by which point the branch is already the default one.
+  #
+  # That is not hypothetical. Two consecutive dev commits published no backend
+  # image at all: from Next 16, `next build` type-checks every file the tsconfig
+  # includes, and `e2eTotpParity.test.ts` imports the e2e suite's TOTP helper,
+  # which the Docker context does not carry. Every PR-visible check was green
+  # (#423).
+  #
+  # amd64 only, and no push: the point is to compile what the release build
+  # compiles, not to publish it. arm64 stays in cd-release — it needs its own
+  # native runner, and a second architecture here would double a cost that buys
+  # nothing this job is for.
+  image:
+    # Named per leg, so it cannot collide with the aggregate below — branch
+    # protection matches check names exactly, and two checks called the same
+    # thing is how a required check silently stops meaning anything.
+    name: Image ${{ matrix.image }}
+    runs-on: ubuntu-latest
+    strategy:
+      # Both images reported, so a backend failure does not hide a frontend one.
+      fail-fast: false
+      matrix:
+        image: [backend, frontend]
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      # `context: .` and the repo's own `.dockerignore`, exactly as cd-release
+      # does it. Anything less faithful proves nothing — the context IS the thing
+      # under test here.
+      - name: Build ${{ matrix.image }} image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: apps/${{ matrix.image }}/Dockerfile
+          platforms: linux/amd64
+          push: false
+          # Shared with nothing: cd-release scopes its cache per architecture
+          # (`<image>-amd64`), and a PR writing into that scope would have release
+          # builds reading layers from unmerged branches.
+          cache-from: type=gha,scope=pr-${{ matrix.image }}-amd64
+          cache-to: type=gha,mode=max,scope=pr-${{ matrix.image }}-amd64
+
+  # One name for the pair, so this can be made a required check with a single
+  # entry — the same shape `e2e-report` uses for the shards, and for the same
+  # reason: a matrix produces one check name per leg, and branch protection
+  # matches names exactly.
+  #
+  # This job is NOT required on `dev` yet. That is a branch-protection change and
+  # belongs to whoever owns the repository settings; until it is made, this
+  # reports on every PR without blocking one. Adding "Image build" to the
+  # required list is what turns it from information into a gate.
+  image-report:
+    name: Image build
+    runs-on: ubuntu-latest
+    # `always()` for the same reason as the E2E aggregate: without it the job
+    # inherits `success()`, is skipped when a leg fails, and a skipped required
+    # check blocks a PR with no explanation. The guard below is what makes the
+    # green honest.
+    if: always()
+    needs: [image]
+    steps:
+      - name: Fail if either image did not build
+        if: needs.image.result != 'success'
+        run: |
+          echo "::error::An image failed to build. The release build uses the same"
+          echo "::error::Dockerfile and the same context, so this is what dev would publish."
+          exit 1
+
+      - run: echo "Both images build from the release context."
+
   # ── E2E ──────────────────────────────────────────────────────────────────────
   e2e:
     # ── Four runners, not four workers ────────────────────────────────────────
