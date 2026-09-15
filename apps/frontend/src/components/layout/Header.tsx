@@ -5,8 +5,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { signOut } from 'next-auth/react'
 import { clearServiceWorkerCaches } from '@/lib/serviceWorker'
-import { get, del } from '@/lib/api'
-import type { SessionInfo } from '@infrashelf/types'
+import { del } from '@/lib/api'
 import { LanguageSwitcher } from './LanguageSwitcher'
 import { CartLink } from './CartLink'
 import { useLang } from '@/lib/useLang'
@@ -220,12 +219,25 @@ export function Header({
                      * Both are far below the point where a person stops
                      * believing the button.
                      */
-                    const signal = AbortSignal.timeout(REVOKE_BUDGET_MS)
-                    const current = (await get<SessionInfo[]>('/api/sessions', signal)).find((s) => s.current)
-                    if (current) await del(`/api/sessions/${current.id}`, signal)
-                  } catch {
+                    // ONE round trip, not two (#425). This used to ask
+                    // `GET /api/sessions` which of them was `current` and then
+                    // delete it by id — two proxied round trips sharing this one
+                    // deadline, to learn an id the backend already has on the
+                    // verified token. On a loaded runner they did not fit, the
+                    // deadline blew, the revoke was skipped, and what was left
+                    // was the #391 race this code exists to close. Same bound,
+                    // half the work.
+                    await del('/api/sessions/current', AbortSignal.timeout(REVOKE_BUDGET_MS))
+                  } catch (e) {
                     // Timed out, refused, or offline. The cookie still goes, and
-                    // the token still expires on its own.
+                    // the token still expires on its own — this must not stop the
+                    // sign-out (#359).
+                    //
+                    // But not silently. An empty catch here is what made the
+                    // failure above undiagnosable: the session quietly stayed
+                    // live on the server and nothing anywhere said so, in the
+                    // console, the job log or a trace. Same lesson as #415.
+                    console.warn('[signout] the session could not be revoked on the server', e)
                   }
                   /*
                    * `redirect: false`, then navigate ourselves.

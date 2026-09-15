@@ -1,5 +1,7 @@
+import { redirect } from 'next/navigation'
 import { auth } from '@/lib/auth'
-import { apiRequest } from '@/lib/api'
+import { apiRequest, ApiError } from '@/lib/api'
+import { expiredLoginUrl } from '@/lib/session'
 
 /**
  * The API, called from the server with the signed-in caller's token.
@@ -41,13 +43,49 @@ const bearer = async (): Promise<string | undefined> => {
   return (session as { apiToken?: string } | null)?.apiToken
 }
 
-export const get = async <T>(path: string) => apiRequest<T>(path, { token: await bearer() })
+/**
+ * A 401 on the server means the session is over — so end it here too (#427).
+ *
+ * `lib/session.ts` says this already: "anything that ends a session early — a
+ * revoked session (#37), a rotated signing secret, clock skew — shows up as a
+ * 401, and lib/api.ts turns a 401 into a sign-out and a trip to
+ * /login?expired=1". That was only ever true in the BROWSER. `endExpiredSession`
+ * returns immediately when there is no `window`, on the stated grounds that "the
+ * middleware and the dashboard layout have already made this decision" — and for
+ * a revoked session they have not. The middleware checks the cookie, which is
+ * valid; the layout checks the token's `exp`, which has not passed. Neither can
+ * see that the session row was revoked.
+ *
+ * So a signed-out user pressing Back reached a dashboard page that fetched a 401
+ * and threw it at the error boundary: HTTP 500, on the way out of a shared
+ * device, instead of the login screen. `signout.spec` saw it as "the session
+ * survived the sign-out", because the URL never left /orders.
+ *
+ * `redirect()` throws, which is how Next signals it. Two consequences:
+ *   - it must not be caught. `lib/section.ts` rethrows it explicitly, and any new
+ *     `try` around a server fetch has to do the same.
+ *   - `expiredLoginUrl('/')` rather than the current path, matching the dashboard
+ *     layout's own expiry redirect: a server component cannot see the request's
+ *     URL without threading it down, and sending someone back to the page that
+ *     just refused them is not obviously right anyway.
+ */
+const endSessionOn401 = async <T>(call: Promise<T>): Promise<T> => {
+  try {
+    return await call
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 401) redirect(expiredLoginUrl('/'))
+    throw e
+  }
+}
+
+export const get = async <T>(path: string) =>
+  endSessionOn401(apiRequest<T>(path, { token: await bearer() }))
 
 export const post = async <T>(path: string, body: unknown) =>
-  apiRequest<T>(path, { method: 'POST', body, token: await bearer() })
+  endSessionOn401(apiRequest<T>(path, { method: 'POST', body, token: await bearer() }))
 
 export const put = async <T>(path: string, body: unknown) =>
-  apiRequest<T>(path, { method: 'PUT', body, token: await bearer() })
+  endSessionOn401(apiRequest<T>(path, { method: 'PUT', body, token: await bearer() }))
 
 export const del = async <T>(path: string) =>
-  apiRequest<T>(path, { method: 'DELETE', token: await bearer() })
+  endSessionOn401(apiRequest<T>(path, { method: 'DELETE', token: await bearer() }))
