@@ -49,6 +49,31 @@ overrides:
   # security patch should not be the thing that drags a major bump into a
   # transitive dependency its parent never asked for.
   fast-uri: ">=3.1.6 <4"
+  # Reached only through eslint (`@eslint/eslintrc` parses YAML config), so no
+  # request from a user ever reaches it. Pinned for the same reason as `qs` and
+  # `fast-uri` above: a dev-only advisory is still an advisory, and 4.3.2 is a
+  # patch release on the line eslint already asks for.
+  #   js-yaml  >=4.3.2  GHSA (maxTotalMergeKeys does not bound CPU for an empty
+  #                     merge source, so a crafted config can spin)
+  js-yaml: ">=4.3.2 <5"
+  # sharp is NOT ours: `next` declares `^0.34.3` for image optimisation, and
+  # 0.35.4 is the first release carrying the patched libheif —
+  #   GHSA-g89c-p67h-r497 / GHSA-2jg2-4 (heap overflows in HEIF decoding)
+  #
+  # So this override deliberately goes OUTSIDE the range its parent asks for,
+  # which is why it is worth writing down. Two things make that defensible:
+  #
+  #   1. Nothing in either app imports `next/image`, and neither sets an `images`
+  #      config, so Next's optimiser is never handed user-supplied bytes.
+  #      Product images are served by the BACKEND from the database, a different
+  #      origin from the optimiser.
+  #   2. 0.34 -> 0.35 is a minor bump on a library used here only through Next's
+  #      own calls, and the build and both suites are what check it.
+  #
+  # The alternative was Next 16, which is a major upgrade and not something a
+  # libheif patch should drag in. Revisit when this repo moves to Next 16, at
+  # which point the override can go.
+  sharp: ">=0.35.4 <0.36"
   # ── Held one release back, and ONLY because of their age ──────────────────
   #
   # pnpm 11 rejects a lockfile entry published inside `minimumReleaseAge`, which
