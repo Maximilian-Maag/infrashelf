@@ -4,6 +4,8 @@ import userEvent from '@testing-library/user-event'
 import { ProductCard } from './ProductCard'
 
 vi.mock('@/components/ui/ProductImage', () => ({
+  // A stub for the real ProductImage; nothing here is served to a browser.
+  // eslint-disable-next-line @next/next/no-img-element
   ProductImage: ({ alt }: { alt: string }) => <img alt={alt} src="/stub.png" />,
 }))
 
@@ -40,8 +42,20 @@ describe('what the card says', () => {
   })
 
   it('omits the category strip entirely when there is none', () => {
-    renderCard()
-    expect(screen.queryByText('Databases')).not.toBeInTheDocument()
+    /*
+     * Asserted structurally, not by its text.
+     * `queryByText('Databases')` passes whether the strip is absent OR present
+     * and empty — which is exactly what the `categoryName &&` guard becomes when
+     * it is broken. Counting the element is what tells those two apart, and the
+     * mutation run is what showed the text assertion did not.
+     */
+    const { container } = renderCard()
+    expect(container.querySelectorAll('span.uppercase')).toHaveLength(0)
+  })
+
+  it('renders exactly one category strip when there is one', () => {
+    const { container } = renderCard({ categoryName: 'Databases' })
+    expect(container.querySelectorAll('span.uppercase')).toHaveLength(1)
   })
 
   it('omits the description paragraph when it is empty', () => {
@@ -67,7 +81,15 @@ describe('the heading level is a prop, because the two grids sit at different de
 describe('the two links', () => {
   it('both point at the product page', () => {
     renderCard()
-    for (const link of screen.getAllByRole('link')) {
+    const links = screen.getAllByRole('link')
+    /*
+     * The COUNT matters as much as the hrefs.
+     * An <a> with no href has no link role at all, so an empty href drops out of
+     * `getAllByRole` entirely and a loop over what is left passes without ever
+     * seeing the broken one.
+     */
+    expect(links).toHaveLength(2)
+    for (const link of links) {
       expect(link).toHaveAttribute('href', '/catalog/7')
     }
   })
