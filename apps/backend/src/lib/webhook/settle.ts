@@ -168,7 +168,11 @@ const noteOutputsError = async (elementIds: number[], reason: string): Promise<v
     // Explaining the failure must never become the failure. The order has already
     // completed by the time this runs, and losing the explanation is a smaller
     // loss than abandoning that.
-    console.error('[webhook] Could not record why outputs are missing:', err)
+    console.error(
+      `[webhook] Could not record why outputs are missing for element(s) #${elementIds.join(', #')} `
+      + `(reason: ${reason}):`,
+      err,
+    )
   }
 }
 

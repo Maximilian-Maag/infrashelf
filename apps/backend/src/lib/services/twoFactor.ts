@@ -500,7 +500,7 @@ export const confirmEnrollment = async (
     // The stored envelope cannot be read — a rotated key, or a tampered row.
     // Fail, and say so plainly rather than letting the enrollment "succeed"
     // against a secret nobody can verify later.
-    console.error('[2fa] Could not decrypt the pending TOTP secret; check TOTP_ENCRYPTION_KEY')
+    console.error(`[2fa] Could not decrypt the pending TOTP secret for user #${userId}; check TOTP_ENCRYPTION_KEY`)
     await logAudit(userId, 'auth.2fa.enroll_failed', userId, 'Pending secret could not be decrypted')
     return err(500, 'The stored enrollment could not be read. Start again.')
   }
@@ -763,7 +763,7 @@ export const verifySecondFactor = async (
     // Fail CLOSED. A secret we cannot read means we cannot check the factor, and
     // the one thing that must not happen is treating an unreadable factor as
     // absent and letting the login through.
-    console.error('[2fa] Could not decrypt the stored TOTP secret; check TOTP_ENCRYPTION_KEY')
+    console.error(`[2fa] Could not decrypt the stored TOTP secret for user #${userId}; check TOTP_ENCRYPTION_KEY`)
     await logAudit(userId, 'auth.2fa.error', userId, 'Stored secret could not be decrypted')
     return err(500, 'The second factor could not be verified. See the server log.')
   }

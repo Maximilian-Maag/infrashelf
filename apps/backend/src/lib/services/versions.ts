@@ -73,7 +73,14 @@ export const recordProductVersion = async (input: {
       changelog ? `${input.summary} — ${changelog}` : input.summary,
     )
   } catch (e) {
-    console.error('[versions] Failed to record a product version:', e)
+    // Which product, in which environment, and what the version would have said
+    // (#482). Losing a history row must not fail the edit that caused it, so
+    // this line is the whole record of the loss.
+    console.error(
+      `[versions] Failed to record a version for product #${input.productId} `
+      + `(environment ${input.environmentId ?? 'all'}): ${input.summary}:`,
+      e,
+    )
   }
 }
 
