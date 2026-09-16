@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import type {
   ProductDetail,
@@ -62,6 +62,15 @@ interface Props {
   translations: ProductTranslation[]
   costCenters: CostCenter[]
   /**
+   * The size/price grid the SERVER read, or `undefined` when it could not (#473).
+   *
+   * Same distinction the settings cards carry: `undefined` means the read failed,
+   * so the grid retries and surfaces its own error, while a matrix with no rows
+   * is a real answer — this product has no sizes priced yet. An empty grid on a
+   * product that IS priced invites someone to price it a second time.
+   */
+  initialSizes?: SizeMatrix
+  /**
    * The language every string on this form renders in. It used to translate only
    * the handful of strings added with the version history, which left the page
    * reading as half-translated rather than as an untranslated corner (#244).
@@ -71,7 +80,7 @@ interface Props {
   lang?: string
 }
 
-export function ProductEditForm({ product, categories, environments, translations: initTranslations, costCenters, lang = 'en' }: Props) {
+export function ProductEditForm({ product, categories, environments, translations: initTranslations, costCenters, initialSizes, lang = 'en' }: Props) {
   const router = useRouter()
 
   // Basic info
@@ -696,7 +705,7 @@ export function ProductEditForm({ product, categories, environments, translation
 
       {/* Sizes, across every environment at once (#249) */}
       <Card title={t('sizes', lang)}>
-        <SizeMatrixEditor productId={product.id} lang={lang} reloadKey={offeringsKey} />
+        <SizeMatrixEditor productId={product.id} lang={lang} reloadKey={offeringsKey} initialSizes={initialSizes} />
       </Card>
 
       {/* Parameters */}
@@ -1301,6 +1310,7 @@ function SizeMatrixEditor({
   productId,
   lang,
   reloadKey,
+  initialSizes,
 }: {
   productId: number
   lang: string
@@ -1310,32 +1320,71 @@ function SizeMatrixEditor({
    * environment has no column to be priced in until the page is reloaded by hand.
    */
   reloadKey: number
+  /** What the page read, or `undefined` when its read failed (#473). */
+  initialSizes?: SizeMatrix
 }) {
-  const [matrix, setMatrix] = useState<SizeMatrix | null>(null)
-  const [rows, setRows] = useState<RowDraft[]>([])
-  const [newRow, setNewRow] = useState<RowDraft>(BLANK_ROW([], 0))
+  const [matrix, setMatrix] = useState<SizeMatrix | null>(initialSizes ?? null)
+  const [rows, setRows] = useState<RowDraft[]>(initialSizes ? toDrafts(initialSizes) : [])
+  const [newRow, setNewRow] = useState<RowDraft>(
+    initialSizes ? BLANK_ROW(initialSizes.environments, initialSizes.rows.length + 1) : BLANK_ROW([], 0),
+  )
   const [error, setError] = useState<string | null>(null)
   const [busyCode, setBusyCode] = useState<string | null>(null)
   const [savedCode, setSavedCode] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<RowDraft | null>(null)
   const path = `/api/admin/products/${productId}/sizes`
 
+  /** Everything a freshly read matrix decides. Shared by the effect and by `load`. */
+  const apply = useCallback((loaded: SizeMatrix) => {
+    setMatrix(loaded)
+    setRows(toDrafts(loaded))
+    setNewRow(BLANK_ROW(loaded.environments, loaded.rows.length + 1))
+  }, [])
+
+  /*
+   * Fetches and returns; it does not set state — the shape the settings cards
+   * use, and for their reason: every caller decides whether the component is
+   * still mounted before it writes.
+   */
+  const fetchMatrix = useCallback(() => get<SizeMatrix>(path), [path])
+
+  /** Re-read after a write this editor made, where it IS the thing that changed. */
   const load = useCallback(async () => {
     try {
-      const loaded = await get<SizeMatrix>(path)
-      if (!loaded) return
-      setMatrix(loaded)
-      setRows(toDrafts(loaded))
-      setNewRow(BLANK_ROW(loaded.environments, loaded.rows.length + 1))
+      const loaded = await fetchMatrix()
+      if (loaded) apply(loaded)
     } catch (e) {
       setError(e instanceof Error ? e.message : t('failedToLoadGeneric', lang))
     }
-    // `lang` is in here because the fallback message is translated, so the grid is
-    // refetched on a language switch rather than leaving an error in the language
-    // the reader has just left.
-  }, [path, lang])
+    // `lang` is in here because the fallback message is translated, so a grid that
+    // failed is re-read on a language switch rather than left showing an error in
+    // the language the reader has just left.
+  }, [fetchMatrix, apply, lang])
 
-  useEffect(() => { void load() }, [load, reloadKey])
+  /*
+   * The mount fetch is gone (#473): the page reads the grid now, so the first
+   * paint has it. What is left are the two cases the server cannot answer.
+   *
+   * `reloadKey` is one — an offering added or withdrawn redraws the columns, and
+   * that is a change this form made after the page rendered. The other is a
+   * server read that FAILED, which arrives as `undefined` and is not the same
+   * answer as a product with nothing priced.
+   *
+   * The ref is what tells them apart from a re-render: it starts at the key the
+   * props were read under, or at `null` when there were no props to read.
+   */
+  const loadedFor = useRef<number | null>(initialSizes === undefined ? null : reloadKey)
+
+  useEffect(() => {
+    if (loadedFor.current === reloadKey) return
+    loadedFor.current = reloadKey
+    let live = true
+    void fetchMatrix().then(
+      (loaded) => { if (live && loaded) apply(loaded) },
+      (e: unknown) => { if (live) setError(e instanceof Error ? e.message : t('failedToLoadGeneric', lang)) },
+    )
+    return () => { live = false }
+  }, [fetchMatrix, apply, reloadKey, lang])
 
   /** Only the priced cells travel: the ones left out are what the server retires. */
   const save = async (draft: RowDraft) => {

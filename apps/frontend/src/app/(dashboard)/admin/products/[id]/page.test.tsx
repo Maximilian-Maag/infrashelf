@@ -24,13 +24,22 @@ vi.mock('../ProductImageUpload', () => ({
     <div data-testid="gallery" data-count={initial.length} data-error={initialError ?? ''} />,
 }))
 vi.mock('./ProductEditForm', () => ({
-  ProductEditForm: ({ categories, environments, translations, costCenters }: Record<string, unknown[]>) =>
+  ProductEditForm: ({ categories, environments, translations, costCenters, initialSizes }: {
+    categories: unknown[]
+    environments: unknown[]
+    translations: unknown[]
+    costCenters: unknown[]
+    initialSizes?: { rows: unknown[] }
+  }) =>
     <div
       data-testid="form"
       data-categories={categories.length}
       data-environments={environments.length}
       data-translations={translations.length}
       data-costcenters={costCenters.length}
+      // 'unknown' and 'none' are different answers, which is the whole point of
+      // the prop: one says the read failed, the other says nothing is priced.
+      data-sizes={initialSizes === undefined ? 'unknown' : String(initialSizes.rows.length)}
     />,
 }))
 
@@ -39,6 +48,7 @@ const product = { id: 7, name: 'Managed Postgres', categoryId: 1 }
 const answer = (over: Record<string, unknown> = {}) => {
   get.mockImplementation((path: string) => {
     const key = /\/products\/\d+$/.test(path) ? 'product'
+      : path.endsWith('/sizes') ? 'sizes'
       : path.endsWith('/images') ? 'images'
       : path.endsWith('/translations') ? 'translations'
       : path.includes('categories') ? 'categories'
@@ -46,7 +56,7 @@ const answer = (over: Record<string, unknown> = {}) => {
       : 'costCenters'
     const fallback: Record<string, unknown> = {
       product, images: [{ id: 1 }, { id: 2 }], translations: [], categories: [{ id: 1 }],
-      environments: [], costCenters: [],
+      environments: [], costCenters: [], sizes: { environments: [], rows: [{ code: 'S' }] },
     }
     const v = key in over ? over[key] : fallback[key]
     return v instanceof Error ? Promise.reject(v) : Promise.resolve(v)
@@ -66,9 +76,10 @@ beforeEach(() => {
 })
 
 /**
- * Six fetches, one of which the gallery control used to make itself on mount
- * (#462). The page is already a server component that authenticates and 404s
- * before anything renders, so asking there costs nothing extra.
+ * Seven fetches, two of which their own controls used to make on mount — the
+ * gallery (#462) and the size/price grid (#473). The page is already a server
+ * component that authenticates and 404s before anything renders, so asking there
+ * costs nothing extra.
  */
 describe('ProductEditPage', () => {
   it('sends a caller with no session to the login page', async () => {
@@ -117,6 +128,37 @@ describe('ProductEditPage', () => {
     expect(screen.getByTestId('gallery')).toHaveAttribute('data-error', 'HTTP 502: Bad Gateway')
     expect(screen.getByTestId('gallery')).toHaveAttribute('data-count', '0')
     expect(console.error).toHaveBeenCalledWith('[page] could not load gallery for product 7: HTTP 502: Bad Gateway')
+  })
+
+  it('fetches the size grid and hands it to the form', async () => {
+    render(await page())
+
+    expect(get).toHaveBeenCalledWith('/api/admin/products/7/sizes')
+    expect(screen.getByTestId('form')).toHaveAttribute('data-sizes', '1')
+  })
+
+  it('hands over nothing at all when the size grid could not be read', async () => {
+    /*
+     * Not an empty grid — that is a real answer meaning "no sizes priced yet",
+     * and on this screen believing it gets a product priced a second time.
+     * `undefined` says nobody knows, and the editor retries and reports its own
+     * outcome (#473).
+     */
+    answer({ sizes: new ApiError(502, 'Bad Gateway') })
+    render(await page())
+
+    expect(screen.getByTestId('form')).toHaveAttribute('data-sizes', 'unknown')
+  })
+
+  it('sends an ended session to the login page when it is the grid that fails', async () => {
+    // This one is not routed through `section`, so it rethrows the redirect
+    // itself — and without that it would be reported as a product with no sizes.
+    const { redirect: realRedirect } = await vi.importActual<typeof Navigation>('next/navigation')
+    let thrown: unknown
+    try { realRedirect('/login?expired=1') } catch (e) { thrown = e }
+    answer({ sizes: thrown })
+
+    await expect(page()).rejects.toThrow()
   })
 
   it('keeps the form when only the gallery fails, and the reverse', async () => {

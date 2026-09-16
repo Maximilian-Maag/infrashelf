@@ -114,7 +114,11 @@ Almost nothing is tested. Establish component testing with a small render helper
   first fetch lands must not paint one centre's figures under another's name.
 - **ProductEditForm**: false-"Saved!" regression — a failed per-env save shows an
   error, not a success badge; AI-translate error surfaces; webhook/stack/param
-  delete failures surface.
+  delete failures surface. The size/price grid comes from the page as a prop
+  (#473): rendered without a second request when it was read, retried and
+  reported when it was not (`undefined` ≠ an empty grid), and redrawn when an
+  offering is withdrawn — the one case the server cannot answer, because it
+  happened after the page rendered.
 - **The four pages that say "there is nothing here"** ✅ (#478): `approvals`,
   `orders`, `projects` and `cart` each had no test at all, and each holds one
   half of the #415 property. Approvals now reports a queue it could not read
