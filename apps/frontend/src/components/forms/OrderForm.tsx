@@ -98,6 +98,19 @@ export function OrderForm({
 
   useEffect(() => {
     if (!envId) {
+      /*
+       * One of the four effects that stay (#418). The server cannot answer this
+       * one: which parameters apply depends on the environment and project the
+       * user is in the middle of choosing, and nothing in the URL says what that
+       * will be.
+       *
+       * The reset could in principle be derived during render — with no
+       * environment the parameters ARE the product's. What stops that is the two
+       * lines under it: this effect owns the refs `handleSubmit` awaits, and
+       * writing them a render later than the state is precisely the window #406
+       * is about, where a submit sent the previous selection's definitions.
+       */
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- selection-driven; see above
       setResolvedParameters(product.parameters)
       latestParameters.current = product.parameters
       pendingParameters.current = null
@@ -160,6 +173,12 @@ export function OrderForm({
 
   // Load existing deployments for the selected project+product so the user can copy parameters
   useEffect(() => {
+    // Stays, for the reason above (#418): the list is of deployments in the
+    // project the user has just picked from a <select>, which is a choice made
+    // after the page rendered. Clearing it when the project is cleared is the
+    // same effect's business — a stale "copy the settings from" list belongs to
+    // a project that is no longer selected.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- selection-driven; see above
     if (!projectId) { setTemplates([]); setTemplateId(''); return }
     // Switching project before this resolves must not let the old project's
     // elements land in the list — they belong to a project the user left, and
@@ -208,6 +227,12 @@ export function OrderForm({
     if (!fromInfraId || reorderApplied || templates.length === 0) return
     const match = templates.find((tpl) => String(tpl.id) === fromInfraId)
     if (!match) return
+    // Stays (#418), and this one is not a fetch at all: it is a one-shot action
+    // taken WHEN the list arrives, which is what an effect is for. The reorder
+    // link names an element, and until the templates are in hand there is
+    // nothing to match it against. `reorderApplied` is what keeps it one-shot,
+    // so a later edit by the user is not overwritten by the link.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- applies a deep link once its data arrives
     setReorderApplied(true)
     setTemplateId(fromInfraId)
     setParamValues(withoutRedacted(match.parameters ?? {}))
