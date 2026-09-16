@@ -56,6 +56,25 @@ const config = {
    *  2. The disable names its reason. "brand colours", not "cosmetic".
    *  3. Put the attribute on its own line first, so the disable covers the style
    *     and not the `className` beside it that a test legitimately kills.
+   *  4. Excluding an ATTRIBUTE needs the comment IN THE ATTRIBUTE LIST, as
+   *     above. A JSX child comment over the element —
+   *
+   *         {/* Stryker disable next-line all: … *\/}
+   *         <div className="…" style={{ backgroundColor: 'var(--bp)' }}>
+   *
+   *     compiles, reads correctly, and excludes nothing: it does not reach the
+   *     attribute's mutants. Measured on #437 — 36 survivors with that comment,
+   *     36 without, 33 once it moved into the attribute list. Moving the words
+   *     `Stryker disable` to the START of the child comment, which is the usual
+   *     suggestion, changes nothing; the position relative to the mutant is what
+   *     matters, not the text.
+   *
+   *     The child form is not useless — it is right for excluding a JSX CHILD,
+   *     which is what `SectionError.tsx` uses it for. Only attributes need the
+   *     other placement.
+   *
+   *     So: always confirm an exclusion by the mutant COUNT falling, never by the
+   *     comment looking correct. Both forms compile and neither warns.
    *
    * NOT `mutator.excludedMutations`. Turning off `StringLiteral` globally would
    * also stop mutating every URL, every i18n key and every status string — the

@@ -142,11 +142,17 @@ export default async function DashboardLayout({ children }: { children: React.Re
           <LangProvider lang={lang}>{children}</LangProvider>
         </div>
       </main>
-      {/* Stryker disable next-line all: the footer's own colours are appearance
-          only — they are read from the branding custom properties above, which
-          ARE asserted, and the links inside it are asserted by name and href. */}
       {imprintText && (
-        <footer className="mt-10 border-t border-current/25" style={{ backgroundColor: 'var(--bp)' }}>
+        <footer
+          className="mt-10 border-t border-current/25"
+          // Stryker disable next-line all: brand ink — see stryker.config.mjs.
+          // Read from the branding custom properties above, which ARE asserted;
+          // the links inside are asserted by name and href. In the ATTRIBUTE
+          // list, not as a `{/* … */}` comment above the element: that form does
+          // not reach an attribute's mutants and silently excludes nothing
+          // (measured on #437 — 36 survivors either way).
+          style={{ backgroundColor: 'var(--bp)' }}
+        >
           <div className="max-w-screen-2xl mx-auto px-4 py-4 flex flex-col sm:flex-row items-center justify-between gap-2">
             <span className="text-xs" style={{ color: 'var(--bp-ink)' }}>
               © {shopName}{shopSubtitle ? ` — ${shopSubtitle}` : ''}
