@@ -5,9 +5,8 @@ import userEvent from '@testing-library/user-event'
 vi.mock('@/lib/api', () => ({ get: vi.fn(), put: vi.fn() }))
 
 import { DeploymentWindowsManager } from './DeploymentWindowsManager'
-import { get, put } from '@/lib/api'
+import { put } from '@/lib/api'
 
-const mockedGet = vi.mocked(get)
 const mockedPut = vi.mocked(put)
 
 /**
@@ -18,15 +17,24 @@ const mockedPut = vi.mocked(put)
  * the server's words — it is the only thing that knows which two windows
  * overlap.
  */
+/**
+ * The policy the SERVER would have handed over (#460). The component used to ask
+ * for it on mount; `mockedGet` still covers the reload after a save.
+ */
+const defaultSettings = { timeZone: 'Europe/Berlin', windows: [{ startMinute: 480, durationMinutes: 120 }] }
+let serverSettings: typeof defaultSettings | null = defaultSettings
+
+const renderManager = () => render(<DeploymentWindowsManager initial={serverSettings} />)
+
 beforeEach(() => {
   vi.resetAllMocks()
-  mockedGet.mockResolvedValue({ timeZone: 'Europe/Berlin', windows: [{ startMinute: 480, durationMinutes: 120 }] })
+  serverSettings = defaultSettings
   mockedPut.mockResolvedValue({ timeZone: 'Europe/Berlin', windows: [{ startMinute: 480, durationMinutes: 120 }] })
 })
 
 describe('DeploymentWindowsManager', () => {
   it('shows the stored minutes as a clock time and the span they cover', async () => {
-    render(<DeploymentWindowsManager />)
+    renderManager()
 
     // 480 is 08:00, and 08:00 for 120 minutes is 08:00–10:00. Neither number
     // means anything to a reader on its own.
@@ -36,7 +44,7 @@ describe('DeploymentWindowsManager', () => {
 
   it('sends the whole set, as minutes, when root saves', async () => {
     const user = userEvent.setup()
-    render(<DeploymentWindowsManager />)
+    renderManager()
     await screen.findByDisplayValue('08:00')
 
     await user.click(screen.getByRole('button', { name: /add window/i }))
@@ -64,11 +72,11 @@ describe('DeploymentWindowsManager', () => {
    */
   it('adds a window that does not overlap one already there', async () => {
     const user = userEvent.setup()
-    mockedGet.mockResolvedValue({
+    serverSettings = {
       timeZone: 'UTC',
       windows: [{ startMinute: 9 * 60, durationMinutes: 60 }],
-    })
-    render(<DeploymentWindowsManager />)
+    }
+    renderManager()
     await screen.findByDisplayValue('09:00')
 
     await user.click(screen.getByRole('button', { name: /add window/i }))
@@ -81,11 +89,11 @@ describe('DeploymentWindowsManager', () => {
 
   it('removes a window without touching the others', async () => {
     const user = userEvent.setup()
-    mockedGet.mockResolvedValue({
+    serverSettings = {
       timeZone: 'UTC',
       windows: [{ startMinute: 480, durationMinutes: 60 }, { startMinute: 780, durationMinutes: 90 }],
-    })
-    render(<DeploymentWindowsManager />)
+    }
+    renderManager()
     await screen.findByDisplayValue('08:00')
 
     await user.click(screen.getAllByRole('button', { name: /remove/i })[0])
@@ -106,15 +114,15 @@ describe('DeploymentWindowsManager', () => {
    */
   it('does not offer a slot underneath a window that runs past midnight', async () => {
     const user = userEvent.setup()
-    mockedGet.mockResolvedValue({
+    serverSettings = {
       // Every working hour taken, plus one running to 01:30 the next day.
       timeZone: 'UTC',
       windows: [
         { startMinute: 9 * 60, durationMinutes: 15 * 60 - 30 },
         { startMinute: 23 * 60 + 30, durationMinutes: 120 },
       ],
-    })
-    render(<DeploymentWindowsManager />)
+    }
+    renderManager()
     await screen.findByDisplayValue('23:30')
 
     await user.click(screen.getByRole('button', { name: /add window/i }))
@@ -131,7 +139,7 @@ describe('DeploymentWindowsManager', () => {
   it('can save an empty set', async () => {
     const user = userEvent.setup()
     mockedPut.mockResolvedValue({ timeZone: 'Europe/Berlin', windows: [] })
-    render(<DeploymentWindowsManager />)
+    renderManager()
     await screen.findByDisplayValue('08:00')
 
     await user.click(screen.getByRole('button', { name: /remove/i }))
@@ -150,11 +158,26 @@ describe('DeploymentWindowsManager', () => {
   it('shows the server’s rejection verbatim', async () => {
     const user = userEvent.setup()
     mockedPut.mockRejectedValue(new Error('Two windows overlap; merge them or move one'))
-    render(<DeploymentWindowsManager />)
+    renderManager()
     await screen.findByDisplayValue('08:00')
 
     await user.click(screen.getByRole('button', { name: /^save$/i }))
 
     expect(await screen.findByText(/two windows overlap/i)).toBeInTheDocument()
+  })
+
+  it('does not say provisioning runs at any time when the policy is unknown', async () => {
+    // `windowsNone` is not an empty list — it is a claim about how the
+    // installation behaves. Rendering it over a failed fetch tells an operator
+    // their restrictions are gone (#415, #460).
+    render(<DeploymentWindowsManager initial={null} initialError="backend unreachable" />)
+
+    expect(screen.getByText('backend unreachable')).toBeInTheDocument()
+    expect(screen.queryByText(/runs at any time/i)).not.toBeInTheDocument()
+  })
+
+  it('does say it when the policy really has no windows', async () => {
+    render(<DeploymentWindowsManager initial={{ timeZone: 'UTC', windows: [] }} />)
+    expect(screen.getByText(/runs at any time/i)).toBeInTheDocument()
   })
 })

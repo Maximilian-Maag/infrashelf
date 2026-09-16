@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
-import { get, put } from '@/lib/api'
+import {useState } from 'react'
+import { put } from '@/lib/api'
 import { Card } from '@/components/ui/Card'
 import { Alert } from '@/components/ui/Alert'
 import { Input } from '@/components/ui/Input'
@@ -9,12 +9,12 @@ import { Button } from '@/components/ui/Button'
 import { useLang } from '@/lib/useLang'
 import { t } from '@/lib/i18n'
 
-interface WindowRow {
+export interface WindowRow {
   startMinute: number
   durationMinutes: number
 }
 
-interface Settings {
+export interface Settings {
   timeZone: string
   windows: WindowRow[]
 }
@@ -41,30 +41,46 @@ const spanOf = (w: WindowRow) => `${toClock(w.startMinute)}–${toClock((w.start
  * wrong on its own. That also makes a rearrangement — moving 08:00 to 13:00
  * while 13:00 still exists — one legal save rather than an illegal intermediate.
  */
-export function DeploymentWindowsManager() {
+interface Props {
+  /**
+   * The window policy the SERVER already fetched (#460).
+   *
+   * `null` means the fetch failed — distinct from a policy with no windows in
+   * it, which reads "provisioning runs at any time" and is a claim about how the
+   * installation behaves rather than an empty list (#415).
+   */
+  initial: Settings | null
+  /** Why the server could not fetch it, if it could not. */
+  initialError?: string | null
+}
+
+export function DeploymentWindowsManager({ initial, initialError = null }: Props) {
   const lang = useLang()
-  const [windows, setWindows] = useState<WindowRow[]>([])
-  const [timeZone, setTimeZone] = useState('UTC')
-  const [loading, setLoading] = useState(true)
+  const [windows, setWindows] = useState<WindowRow[]>(initial?.windows ?? [])
+  const [timeZone, setTimeZone] = useState(initial?.timeZone ?? 'UTC')
   const [saving, setSaving] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(initialError)
+  /*
+   * Whether the policy is actually known (#415, #460).
+   *
+   * "No windows defined — provisioning runs at any time" is a statement about
+   * how the installation behaves, not an empty list; rendering it over a failed
+   * fetch tells an operator their restrictions are gone.
+   *
+   * A plain value rather than state: the page fetches once and a save takes its
+   * answer from the PUT's response, so nothing can change it afterwards.
+   */
+  const loadFailed = initial === null
   const [saved, setSaved] = useState(false)
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      const settings = await get<Settings>('/api/admin/deployment-windows')
-      setWindows(settings?.windows ?? [])
-      setTimeZone(settings?.timeZone ?? 'UTC')
-      setError(null)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => { void load() }, [load])
+  /*
+   * No `load` here, unlike its siblings (#460).
+   *
+   * The page fetches the policy, and a save takes its new state straight from
+   * the PUT's own response — the server returns the settings it stored, so
+   * asking for them again would be a second round trip to learn what the first
+   * one just said. There is no other path that needs a reload.
+   */
 
   const update = (index: number, patch: Partial<WindowRow>) => {
     setSaved(false)
@@ -150,7 +166,6 @@ export function DeploymentWindowsManager() {
     }
   }
 
-  if (loading) return <Card><p className="text-sm text-slate-500">{t('loading', lang)}</p></Card>
 
   return (
     <form onSubmit={save} className="space-y-4">
@@ -170,7 +185,7 @@ export function DeploymentWindowsManager() {
           />
         </div>
 
-        {windows.length === 0 ? (
+        {windows.length === 0 && !loadFailed ? (
           <p className="text-sm text-slate-500 mb-4">{t('windowsNone', lang)}</p>
         ) : (
           <ul className="space-y-3 mb-4">

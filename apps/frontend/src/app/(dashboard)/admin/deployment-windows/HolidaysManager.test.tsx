@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event'
 
 vi.mock('@/lib/api', () => ({ get: vi.fn(), patch: vi.fn(), put: vi.fn(), del: vi.fn() }))
 
-import { HolidaysManager } from './HolidaysManager'
+import { HolidaysManager, type HolidaysPayload } from './HolidaysManager'
 import { get, patch, put, del } from '@/lib/api'
 
 const mockedGet = vi.mocked(get)
@@ -44,8 +44,16 @@ const payload = (over: Partial<{ feed: FeedShape; holidays: unknown[] }> = {}) =
   ...over,
 })
 
+/**
+ * The policy the SERVER would have handed over (#460). `mockedGet` still covers
+ * the reload after an import or an edit.
+ */
+let serverPayload: HolidaysPayload | null = null
+const renderManager = () => render(<HolidaysManager initial={serverPayload} />)
+
 beforeEach(() => {
   vi.resetAllMocks()
+  serverPayload = payload() as HolidaysPayload
   mockedGet.mockResolvedValue(payload())
   mockedPatch.mockResolvedValue(undefined)
   mockedPut.mockResolvedValue(undefined)
@@ -54,7 +62,7 @@ beforeEach(() => {
 
 describe('HolidaysManager', () => {
   it('lists the cached dates with where each came from', async () => {
-    render(<HolidaysManager />)
+    renderManager()
     expect(await screen.findByText('2026-12-25')).toBeInTheDocument()
     expect(screen.getByText('Christmas')).toBeInTheDocument()
     expect(screen.getByText('feed')).toBeInTheDocument()
@@ -65,8 +73,8 @@ describe('HolidaysManager', () => {
    * like fresh data unless the screen says otherwise.
    */
   it('warns when the last good read is old', async () => {
-    mockedGet.mockResolvedValue(payload({ feed: { ...payload().feed, stale: true, ageDays: 45 } }))
-    render(<HolidaysManager />)
+    serverPayload = payload({ feed: { ...payload().feed, stale: true, ageDays: 45 } }) as HolidaysPayload
+    renderManager()
     expect(await screen.findByText(/has not been read successfully/i)).toBeInTheDocument()
   })
 
@@ -76,8 +84,8 @@ describe('HolidaysManager', () => {
    * at all (the fail-closed rule), and nothing else on screen would say so.
    */
   it('says plainly when a configured feed has never been read', async () => {
-    mockedGet.mockResolvedValue(payload({ feed: { ...payload().feed, neverSucceeded: true, lastSuccessAt: null } }))
-    render(<HolidaysManager />)
+    serverPayload = payload({ feed: { ...payload().feed, neverSucceeded: true, lastSuccessAt: null } }) as HolidaysPayload
+    renderManager()
     expect(await screen.findByText(/never been read/i)).toBeInTheDocument()
     expect(screen.getByText(/NOT being applied/)).toBeInTheDocument()
   })
@@ -87,7 +95,7 @@ describe('HolidaysManager', () => {
   it('previews a feed without saving it', async () => {
     const user = userEvent.setup()
     mockedPatch.mockResolvedValue([{ date: '2027-01-01', name: 'New Year' }])
-    render(<HolidaysManager />)
+    renderManager()
     await screen.findByText('2026-12-25')
 
     await user.click(screen.getByRole('button', { name: /preview/i }))
@@ -100,7 +108,7 @@ describe('HolidaysManager', () => {
 
   it('clears the feed when the url is emptied', async () => {
     const user = userEvent.setup()
-    render(<HolidaysManager />)
+    renderManager()
     await screen.findByText('2026-12-25')
 
     await user.clear(screen.getByLabelText(/holiday feed url/i))
@@ -120,7 +128,7 @@ describe('HolidaysManager', () => {
    */
   it('marks a holiday as worked through rather than deleting it', async () => {
     const user = userEvent.setup()
-    render(<HolidaysManager />)
+    renderManager()
     await screen.findByText('2026-12-25')
 
     await user.click(screen.getByRole('button', { name: /work through/i }))
@@ -133,7 +141,7 @@ describe('HolidaysManager', () => {
 
   it('adds a holiday by hand', async () => {
     const user = userEvent.setup()
-    render(<HolidaysManager />)
+    renderManager()
     await screen.findByText('2026-12-25')
 
     await user.type(screen.getByLabelText(/^date$/i), '2026-12-28')
@@ -150,7 +158,7 @@ describe('HolidaysManager', () => {
   it('reports a failed refresh without losing the list', async () => {
     const user = userEvent.setup()
     mockedPatch.mockResolvedValue({ refreshed: false, error: 'The feed answered 502 Bad Gateway' })
-    render(<HolidaysManager />)
+    renderManager()
     await screen.findByText('2026-12-25')
 
     await user.click(screen.getByRole('button', { name: /refresh now/i }))

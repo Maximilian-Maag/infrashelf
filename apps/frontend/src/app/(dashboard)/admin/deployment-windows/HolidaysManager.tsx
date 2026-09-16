@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import {useState, useCallback } from 'react'
 import { get, patch, put, del } from '@/lib/api'
 import { Card } from '@/components/ui/Card'
 import { Alert } from '@/components/ui/Alert'
@@ -26,7 +26,7 @@ interface FeedStatus {
   observedCount: number
 }
 
-interface HolidaysPayload {
+export interface HolidaysPayload {
   feed: FeedStatus
   holidays: HolidayRow[]
 }
@@ -42,14 +42,22 @@ interface HolidaysPayload {
  * decision path never waits on a third party, and the cost of that trade is
  * that stale data looks exactly like fresh data unless something says so.
  */
-export function HolidaysManager() {
+interface Props {
+  /** The holiday policy the SERVER already fetched (#460); null if it could not. */
+  initial: HolidaysPayload | null
+  /** Why it could not, if it could not. */
+  initialError?: string | null
+}
+
+export function HolidaysManager({ initial, initialError = null }: Props) {
   const lang = useLang()
-  const [data, setData] = useState<HolidaysPayload | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [data, setData] = useState<HolidaysPayload | null>(initial)
+  // The server already has it, so nothing is pending on arrival.
+  const [loading, setLoading] = useState(false)
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(initialError)
   const [notice, setNotice] = useState<string | null>(null)
-  const [feedUrl, setFeedUrl] = useState('')
+  const [feedUrl, setFeedUrl] = useState(initial?.feed.url ?? '')
   const [preview, setPreview] = useState<{ date: string; name: string }[] | null>(null)
   const [newDate, setNewDate] = useState('')
   const [newName, setNewName] = useState('')
@@ -67,8 +75,6 @@ export function HolidaysManager() {
       setLoading(false)
     }
   }, [])
-
-  useEffect(() => { void load() }, [load])
 
   const run = async (what: () => Promise<string | null>) => {
     setBusy(true); setError(null); setNotice(null)
