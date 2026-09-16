@@ -54,37 +54,37 @@ logs_saying(file, message, messageNamesAValue) := {"consoleCalls": [{
 	"messageNamesAValue": messageNamesAValue,
 }]}
 
-test_a_log_about_an_order_that_names_no_id_warns if {
+# A deny since #482: every call site in the four directories names its record,
+# and a warn at zero does not keep it there.
+test_a_log_about_an_order_that_names_no_id_is_denied if {
 	facts := logs("apps/backend/src/lib/services/orders.ts", false)
-	warned := policy.warn with input as facts
 	denied := policy.deny with input as facts
-	count(denied) == 0
-	some v in warned
+	some v in denied
 	v.rule == "log_names_the_record"
 	contains(v.why, "#116")
 }
 
 test_a_log_that_interpolates_an_id_passes if {
 	facts := logs("apps/backend/src/lib/services/orders.ts", true)
-	warned := policy.warn with input as facts
-	count(warned) == 0
+	denied := policy.deny with input as facts
+	count(denied) == 0
 }
 
-# "Default branding created" has no record to name, and reporting it forever is
-# how a warn stops being read.
+# "Default branding created" has no record to name, and denying it would make the
+# rule impossible to satisfy rather than merely noisy.
 test_bootstrap_logs_are_out_of_scope if {
 	facts := logs("apps/backend/src/lib/bootstrap/index.ts", false)
-	warned := policy.warn with input as facts
-	count(warned) == 0
+	denied := policy.deny with input as facts
+	count(denied) == 0
 }
 
 test_webhook_and_ci_modules_are_in_scope if {
 	webhook := logs("apps/backend/src/lib/webhook/handler.ts", false)
 	ci := logs("apps/backend/src/lib/ci/gitlab.ts", false)
-	webhook_warned := policy.warn with input as webhook
-	ci_warned := policy.warn with input as ci
-	count(webhook_warned) == 1
-	count(ci_warned) == 1
+	webhook_denied := policy.deny with input as webhook
+	ci_denied := policy.deny with input as ci
+	count(webhook_denied) == 1
+	count(ci_denied) == 1
 }
 
 # The shape the old reading let through, and the reason the fact is about the
@@ -92,14 +92,14 @@ test_webhook_and_ci_modules_are_in_scope if {
 # the one that is always there, so "any non-literal argument" made this call
 # count as naming the record. It says what went wrong, not which order it went
 # wrong for.
-test_a_fixed_message_with_an_error_argument_still_warns if {
+test_a_fixed_message_with_an_error_argument_is_still_denied if {
 	facts := logs_saying(
 		"apps/backend/src/lib/notification/email.ts",
 		"'[notification] Failed to send email:'",
 		false,
 	)
-	warned := policy.warn with input as facts
-	some v in warned
+	denied := policy.deny with input as facts
+	some v in denied
 	v.rule == "log_names_the_record"
 	contains(v.detail, "carries no id")
 }

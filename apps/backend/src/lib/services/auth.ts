@@ -130,7 +130,9 @@ const issueSession = async (user: SessionUser, context: LoginContext): Promise<R
     })
     return ok(token)
   } catch (e) {
-    console.error('[auth] Could not open a session — check JWT_SECRET and the database:', e)
+    // The user id, because "which account cannot sign in" is the question support
+    // is asked, and "all of them" and "this one" need different answers (#482).
+    console.error(`[auth] Could not open a session for user #${user.id} — check JWT_SECRET and the database:`, e)
     return err(500, 'The server is misconfigured and cannot issue a session. See the server log.')
   }
 }
@@ -197,7 +199,7 @@ export const checkLoginPassword = async (
     try {
       mfaToken = await signMfaChallenge(user.id, user.passwordHash, rememberMe)
     } catch (e) {
-      console.error('[auth] Could not sign an MFA challenge — check JWT_SECRET:', e)
+      console.error(`[auth] Could not sign an MFA challenge for user #${user.id} — check JWT_SECRET:`, e)
       return err(500, 'The server is misconfigured and cannot issue a session. See the server log.')
     }
     await logAudit(user.id, 'auth.2fa.challenged', user.id, 'Password accepted; second factor required')

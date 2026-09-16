@@ -253,7 +253,7 @@ export const finishRegistration = async (
     // registration, not a server fault, so it is a 400 — but it is worth logging,
     // because an origin mismatch here is a configuration error that looks
     // identical to a user cancelling.
-    console.error('[webauthn] Registration verification failed:', e)
+    console.error(`[webauthn] Registration verification failed for user #${userId}:`, e)
     await logAudit(userId, 'auth.webauthn.register_failed', userId, 'Registration response rejected')
     return err(400, 'That security key could not be registered. Check the browser and try again.')
   }
@@ -378,7 +378,7 @@ export const verifyAuthentication = async (
       requireUserVerification: false,
     })
   } catch (e) {
-    console.error('[webauthn] Authentication verification failed:', e)
+    console.error(`[webauthn] Authentication verification failed for user #${userId}:`, e)
     await logAudit(userId, 'auth.webauthn.login_failed', userId, 'Assertion rejected')
     return err(401, 'That security key could not be verified.')
   }
@@ -579,7 +579,7 @@ export const verifyPasswordlessAuthentication = async (
       requireUserVerification: true,
     })
   } catch (e) {
-    console.error('[webauthn] Passwordless verification failed:', e)
+    console.error(`[webauthn] Passwordless verification failed for user #${stored.userId}:`, e)
     await logAudit(stored.userId, 'auth.webauthn.login_failed', stored.userId, 'Passwordless assertion rejected')
     return refused()
   }

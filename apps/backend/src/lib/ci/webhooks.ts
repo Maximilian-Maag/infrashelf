@@ -175,7 +175,10 @@ export const triggerPipelineStacksTracked = async (
       pipelineIds.push(pid)
       await reportStarted(onStarted, pid)
     } catch (err) {
-      console.error('[ci] Pipeline stack trigger failed:', err)
+      // Named: a failed trigger is how an order silently does not provision, and
+      // "which stack, for which product in which environment" is the first
+      // question asked of the log (#482).
+      console.error(`[ci] Pipeline stack #${stack.id} ("${stack.name}") failed to trigger for product #${productId} in environment #${environmentId}:`, err)
       failures.push(`pipeline stack "${stack.name}" (#${stack.id}): ${errMessage(err)}`)
     }
   }
@@ -207,7 +210,7 @@ export const triggerProductWebhooksTracked = async (
       pipelineIds.push(pid)
       await reportStarted(onStarted, pid)
     } catch (err) {
-      console.error('[ci] Pipeline trigger failed:', err)
+      console.error(`[ci] Product webhook #${wh.id} ("${wh.name}") failed to trigger for product #${productId} in environment #${environmentId}:`, err)
       failures.push(`product webhook "${wh.name}" (#${wh.id}): ${errMessage(err)}`)
     }
   }

@@ -355,6 +355,14 @@ const recordParameterChange = async (
       })
     }
   } catch (e) {
-    console.error('[parameters] Failed to record a version for a parameter change:', e)
+    // Names the parameter and its scope (#482). Best-effort by design — a
+    // parameter edit must not fail because its history could not be written —
+    // so this is the only trace, and "a version was not recorded" cannot be
+    // matched to the change that caused it.
+    console.error(
+      `[parameters] Failed to record a version for ${param.scope} parameter "${param.name}" `
+      + `(scope #${param.scopeId}, environment ${param.environmentId ?? 'all'}, ${action}):`,
+      e,
+    )
   }
 }
