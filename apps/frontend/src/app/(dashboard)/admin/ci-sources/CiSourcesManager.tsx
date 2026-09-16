@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import {useState, useCallback } from 'react'
 import type { CiSource, CiProvider, CreateCiSourceRequest, UpdateCiSourceRequest } from '@infrashelf/types'
 import { get, post, put, del } from '@/lib/api'
 import { Card } from '@/components/ui/Card'
@@ -21,17 +21,37 @@ const PROVIDERS: { value: CiProvider; label: string }[] = [
 
 const emptyForm = () => ({ name: '', url: '', accessToken: '', provider: 'gitlab' as CiProvider })
 
-export function CiSourcesManager() {
+interface Props {
+  /**
+   * The rows the SERVER already fetched (#452).
+   *
+   * This component used to ask for them on mount, which meant the page arrived
+   * with a spinner and then asked — a waterfall the server was in a position to
+   * resolve before it sent anything. `load()` below is still here, because a
+   * reload after a create, an edit or a delete is a response to an action rather
+   * than to mounting.
+   */
+  initial: CiSource[]
+  /**
+   * Why the server could not fetch them, if it could not (#415). Carried through
+   * rather than recomputed: an empty list and a failed fetch are different facts,
+   * and the one the reader acts on is the wrong one when they look the same.
+   */
+  initialError?: string | null
+}
+
+export function CiSourcesManager({ initial, initialError = null }: Props) {
   const lang = useLang()
-  const [sources, setSources] = useState<CiSource[]>([])
-  const [loading, setLoading] = useState(true)
+  const [sources, setSources] = useState<CiSource[]>(initial)
+  // The server already has the rows, so nothing is pending on arrival.
+  const [loading, setLoading] = useState(false)
   const [addOpen, setAddOpen] = useState(false)
   const [editTarget, setEditTarget] = useState<CiSource | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<CiSource | null>(null)
   const [form, setForm] = useState(emptyForm())
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
-  const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [deleteError, setDeleteError] = useState<string | null>(initialError)
   /*
    * Whether the LAST load failed, kept apart from `deleteError` (#415).
    *
@@ -40,7 +60,7 @@ export function CiSourcesManager() {
    * `deleteError` cannot answer this on its own — it also carries a failed
    * delete, where the list really is what it says.
    */
-  const [loadFailed, setLoadFailed] = useState(false)
+  const [loadFailed, setLoadFailed] = useState(initialError !== null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -55,8 +75,6 @@ export function CiSourcesManager() {
       setLoading(false)
     }
   }, [lang])
-
-  useEffect(() => { void load() }, [load])
 
   function setField(k: keyof typeof form, v: string) {
     setForm((f) => ({ ...f, [k]: v }))
