@@ -60,7 +60,13 @@ export default async function ProductDetailPage({ params, searchParams }: Props)
     get<Category[]>('/api/admin/categories'),
   ])
 
-  if (productRes.status === 'rejected') notFound()
+  if (productRes.status === 'rejected') {
+    // A 401 redirect is not a failed fetch (#434). `allSettled` collects it
+    // as a rejection like any other, so without this an ended session is
+    // reported as a product that does not exist.
+    unstable_rethrow(productRes.reason)
+    notFound()
+  }
   const product = productRes.value
 
   // Cross-selling, at the size this catalogue actually is: "other products in this
