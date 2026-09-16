@@ -63,10 +63,17 @@ export default async function DashboardHome() {
 
   return (
     <div className="space-y-8">
-      {/* Hero banner. Stryker disable next-line all: its colours come from the
-          branding custom properties the layout derives, which are asserted
-          there; here they are appearance only. */}
-      <div className="rounded-xl overflow-hidden" style={{ backgroundColor: 'var(--bp)', color: 'var(--bp-ink)' }}>
+      {/* Hero banner. */}
+      <div
+        className="rounded-xl overflow-hidden"
+        // Stryker disable next-line all: brand ink — see stryker.config.mjs.
+        // These colours are the branding custom properties the layout derives,
+        // and they are asserted there. The directive has to sit in the ATTRIBUTE
+        // list like this: a `{/* … */}` child comment above the element does not
+        // reach the attribute's mutants, which is how the first attempt at this
+        // exclusion silently did nothing (#437).
+        style={{ backgroundColor: 'var(--bp)', color: 'var(--bp-ink)' }}
+      >
         <div className="px-8 py-10 flex flex-col sm:flex-row items-center gap-6">
           <div className="flex-1">
             {/* The page's <h1>. It used to be an <h2>, which left the route

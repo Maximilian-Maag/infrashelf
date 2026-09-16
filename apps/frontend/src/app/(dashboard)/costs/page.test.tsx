@@ -7,7 +7,8 @@ import CostsPage from './page'
 
 const auth = vi.fn()
 vi.mock('@/lib/auth', () => ({ auth: () => auth() }))
-vi.mock('@/lib/getLang', () => ({ getLang: async () => 'en' }))
+const lang = vi.fn(async () => 'en')
+vi.mock('@/lib/getLang', () => ({ getLang: () => lang() }))
 
 const redirect = vi.fn((url: string) => { throw new Error(`NEXT_REDIRECT:${url}`) })
 vi.mock('next/navigation', async (importOriginal) => ({
@@ -61,6 +62,7 @@ beforeEach(() => {
   redirect.mockClear()
   vi.spyOn(console, 'error').mockImplementation(() => {})
   auth.mockResolvedValue({ user: { name: 'Ada', role: 'admin' } })
+  lang.mockResolvedValue('en')
   answer()
 })
 
@@ -183,12 +185,26 @@ describe('CostsPage', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 
-  it('converts into the viewer’s currency when a rate is available', async () => {
-    // Every figure on the page goes through one `money()`; without the rate it
-    // stays in EUR, labelled EUR, rather than claiming a conversion.
+  it('leaves the figures in EUR when no rate is stored', async () => {
+    // Labelled EUR rather than claiming a conversion that did not happen: the
+    // figure stays true and only its currency says so.
     answer({ rates: [] })
     render(await CostsPage({ searchParams: params() }))
     expect(screen.getByText('1,234.50 EUR')).toBeInTheDocument()
+  })
+
+  it('converts into the viewer’s currency when a rate IS stored', async () => {
+    // The other half, and the one that was missing: every figure on the page
+    // goes through one `money()`, so a broken conversion is wrong everywhere at
+    // once. A Danish reader, because `en` maps to EUR and the report is already
+    // in EUR — at that locale no conversion can happen at all.
+    lang.mockResolvedValue('da')
+    answer({ rates: [{ currencyCode: 'DKK', rate: '7.46' }] })
+    render(await CostsPage({ searchParams: params() }))
+
+    // 1234.50 EUR × 7.46, grouped and separated the Danish way.
+    expect(screen.getByText('9.209,37 DKK')).toBeInTheDocument()
+    expect(screen.queryByText(/EUR/)).not.toBeInTheDocument()
   })
 
   it('leaves a trace when the report itself failed', async () => {
