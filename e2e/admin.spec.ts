@@ -112,10 +112,36 @@ test.describe('Admin area', () => {
     await expectNoServerError(page)
   })
 
-  test('unauthenticated user is redirected to /login from /admin', async ({ page }) => {
-    await page.context().clearCookies()
-    await page.goto('/admin')
-    await expect(page).toHaveURL(/\/login/, { timeout: 6000 })
+  /*
+   * A context that never had a session, rather than one emptied just now (#454).
+   *
+   * This used to be `clearCookies()` on the signed-in context followed straight
+   * by `goto`, and it failed about one run in two. The trace of a failing run
+   * says why: the navigation carried the cookie anyway —
+   *
+   *     GET 200 /admin   cookie: authjs.session-token=eyJhbGciOiJkaXIiLCJ…
+   *
+   * while every request after it carried only `callback-url` and `csrf-token`.
+   * The clear did happen; the navigation issued before it reached the network
+   * stack. So the server rendered the admin page correctly and the test was
+   * asserting against a precondition it had not established — which is why the
+   * failure showed a fully authenticated page rather than a slow redirect.
+   *
+   * `storageState` is passed EXPLICITLY as empty, and that is the whole trick.
+   * `browser.newContext()` inherits the project's `use` options — which is how
+   * `baseURL` reaches it, and also how the root storage state would. A bare
+   * `newContext()` here was signed in as root and failed six times out of six,
+   * which is at least an honest failure: the cookie race failed one in two.
+   */
+  test('unauthenticated user is redirected to /login from /admin', async ({ browser }) => {
+    const anonymous = await browser.newContext({ storageState: { cookies: [], origins: [] } })
+    try {
+      const page = await anonymous.newPage()
+      await page.goto('/admin')
+      await expect(page).toHaveURL(/\/login/, { timeout: 6000 })
+    } finally {
+      await anonymous.close()
+    }
   })
 
   test('new product page loads', async ({ page }) => {
