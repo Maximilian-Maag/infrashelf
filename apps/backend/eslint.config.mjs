@@ -42,26 +42,30 @@ const config = [
   ...nextTypescript,
   {
     /*
-     * OFF, with a date on it: `react-hooks/set-state-in-effect` (#418).
+     * ON, and the thirty files that used to trip it are gone (#418).
      *
-     * eslint-config-next 16 ships React's newer hook rules, and this one flags
+     * eslint-config-next 16 ships React's newer hook rules, and this one flagged
      * 29 places across ~25 files — every one the same shape: fetch in an effect,
-     * then `setState` with what came back. That is not a defect list, it is the
+     * then `setState` with what came back. That was not a defect list, it was the
      * data-fetching pattern this app was written in, and the rule is right that
-     * it is no longer the recommended one.
+     * it is no longer the recommended one. Switching it off with a date on it
+     * was the honest thing to do in the Next 16 upgrade; leaving it off would
+     * not have been.
      *
-     * Switched off rather than fixed in the Next 16 upgrade, deliberately.
-     * Rewriting 29 data-fetching call sites inside a dependency bump makes both
-     * halves unreviewable, and a regression in either would be hard to pin on
-     * the right one. #418 carries the migration, file by file, with the tests
-     * that make each one safe.
+     * What the migration found on the way is the argument for the rule. Four
+     * pages claimed "there are none" about lists they had failed to read (#415),
+     * a revoked session met a 500 instead of the login screen (#427), the size
+     * grid on the pricing screen opened empty on a product that WAS priced
+     * (#473), and the audit log and the catalogue could not be linked, paged or
+     * navigated back through at all (#471, #472) — all of it downstream of
+     * fetching on mount instead of on the server.
      *
-     * The other five findings the same upgrade surfaced WERE fixed here: a
-     * component created during render, a mutable cursor, a ref written during
-     * render, a module-scope write from a component, and an internal
-     * `location.assign`. They were one-offs; this one is an architecture.
+     * Four effects remain, each with a directive naming why: three in OrderForm
+     * and one in BudgetModal. They are selection-driven — what to fetch depends
+     * on what the user is in the middle of choosing, so there is nothing in the
+     * URL for a server component to read.
      */
-    rules: { 'react-hooks/set-state-in-effect': 'off' },
+    rules: { 'react-hooks/set-state-in-effect': 'error' },
   },
   {
     // Type-aware linting, for the four rules below and nothing else. It is what
