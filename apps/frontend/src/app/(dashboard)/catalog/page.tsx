@@ -84,10 +84,20 @@ export default function CatalogPage() {
   // must not have its answer land on top of the fast one's (#138).
   const loadGeneration = useRef(0)
 
-  // sync URL search param into local state
-  useEffect(() => {
-    setSearch(searchParams.get('q') ?? '')
-  }, [searchParams])
+  /*
+   * Adopt the URL's `q` when it changes from outside — a link from the header's
+   * search box, a back/forward, a shared URL — during render rather than in an
+   * effect (#469, same as InfraFilters in #462).
+   *
+   * As an effect the box showed the previous query for a frame, which on arrival
+   * from a search link is the wrong term next to the right results.
+   */
+  const urlQuery = searchParams.get('q') ?? ''
+  const [shownUrlQuery, setShownUrlQuery] = useState(urlQuery)
+  if (urlQuery !== shownUrlQuery) {
+    setShownUrlQuery(urlQuery)
+    setSearch(urlQuery)
+  }
 
   // What has actually been asked of the database. Typing no longer filters a
   // list held in the browser, so every keystroke would otherwise be a request.
