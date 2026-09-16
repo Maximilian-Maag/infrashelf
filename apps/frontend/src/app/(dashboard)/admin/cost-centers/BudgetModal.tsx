@@ -49,6 +49,24 @@ export function BudgetModal({ target, onClose, onSaved, lang }: Props) {
 
   const id = target?.id ?? null
 
+  /*
+   * The one fetch on this screen that must NOT move to the server (#462, #418).
+   *
+   * It is a response to the operator opening this dialog, not to a page
+   * mounting, and the figure it reads has to be live: what has already been
+   * committed against this centre is what decides whether the limit about to be
+   * typed is sensible, and a figure copied out of the list rendered a minute ago
+   * is exactly the one a person would act on wrongly.
+   *
+   * The page does hand down a budget map for the row badges. That is not a
+   * substitute — a badge may be a minute stale without consequence; a limit
+   * being set may not.
+   *
+   * So this one keeps its effect, and will need an `eslint-disable` naming that
+   * reason when `react-hooks/set-state-in-effect` is switched back on (#418).
+   * The directive is not here yet because the rule is still off, and a disable
+   * for a rule that is off is itself a lint warning.
+   */
   useEffect(() => {
     if (id === null) return
     let cancelled = false

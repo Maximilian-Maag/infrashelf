@@ -45,9 +45,21 @@ export function InfraFilters({ facets, lang, resultCount }: Props) {
   const urlSearch = searchParams.get('search') ?? ''
   const [search, setSearch] = useState(urlSearch)
 
-  // Adopt the URL value when it changes from the outside (back/forward, or the
-  // Clear button) without clobbering what is being typed.
-  useEffect(() => { setSearch(urlSearch) }, [urlSearch])
+  /*
+   * Adopt the URL value when it changes from the outside (back/forward, or the
+   * Clear button) without clobbering what is being typed — during render rather
+   * than in an effect (#462).
+   *
+   * As an effect the box showed the OLD text for a frame after a Back, which on
+   * a filter bar reads as the navigation not having happened. Setting state
+   * during render is React's answer for a prop, or a URL, that state mirrors: it
+   * re-runs this component before committing, so the stale value never paints.
+   */
+  const [shownUrlSearch, setShownUrlSearch] = useState(urlSearch)
+  if (urlSearch !== shownUrlSearch) {
+    setShownUrlSearch(urlSearch)
+    setSearch(urlSearch)
+  }
 
   useEffect(() => {
     if (search === urlSearch) return
