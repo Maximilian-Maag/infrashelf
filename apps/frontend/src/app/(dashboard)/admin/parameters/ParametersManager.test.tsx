@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import type { Parameter, DeploymentEnvironment } from '@infrashelf/types'
 
 // jsdom does not implement the native <dialog> methods; stub them so Modal's
 // open/close effects don't throw (same stub as EnvironmentsManager.test.tsx).
@@ -46,10 +47,26 @@ const environments = [
 ]
 
 /** Answers the two GETs the component makes on mount. */
+/**
+ * What the SERVER would have handed over (#460). The page fetches the
+ * parameters, the environments and the projects now; `get` is still mocked for
+ * the reload after a write.
+ */
+let serverParams: unknown[] = []
+
 const mockApi = (params: unknown[] = [parameter()]) => {
+  serverParams = params
   vi.mocked(get).mockImplementation((async (path: string) =>
     path.includes('/environments') ? environments : params) as never)
 }
+
+const renderManager = () =>
+  render(
+    <ParametersManager
+      initial={serverParams as Parameter[]}
+      initialEnvironments={environments as DeploymentEnvironment[]}
+    />,
+  )
 
 /** The body of the last write, whichever verb it was. */
 const lastWrite = (): Record<string, unknown> => {
@@ -92,7 +109,7 @@ describe('ParametersManager — which environment a global parameter applies to 
    */
   it('offers every environment, and all-environments first', async () => {
     mockApi()
-    render(<ParametersManager />)
+    renderManager()
     await userEvent.click(await screen.findByRole('button', { name: /add parameter/i }))
 
     const select = openDialog().getByLabelText(/^environment$/i)
@@ -103,7 +120,7 @@ describe('ParametersManager — which environment a global parameter applies to 
 
   it('sends the chosen environment when creating', async () => {
     mockApi()
-    render(<ParametersManager />)
+    renderManager()
     await userEvent.click(await screen.findByRole('button', { name: /add parameter/i }))
 
     await userEvent.type(openDialog().getByLabelText(/variable name/i), 'REGION')
@@ -121,7 +138,7 @@ describe('ParametersManager — which environment a global parameter applies to 
    */
   it('says nothing about the environment when the default is left alone', async () => {
     mockApi()
-    render(<ParametersManager />)
+    renderManager()
     await userEvent.click(await screen.findByRole('button', { name: /add parameter/i }))
 
     await userEvent.type(openDialog().getByLabelText(/variable name/i), 'REGION')
@@ -139,7 +156,7 @@ describe('ParametersManager — which environment a global parameter applies to 
    */
   it('clears the environment back to all, explicitly, when edited', async () => {
     mockApi([parameter({ environmentId: 7 })])
-    render(<ParametersManager />)
+    renderManager()
     await userEvent.click(await screen.findByRole('button', { name: /^edit$/i }))
 
     expect(openDialog().getByLabelText(/^environment$/i)).toHaveValue('7')
@@ -154,7 +171,7 @@ describe('ParametersManager — which environment a global parameter applies to 
 
   it('names the environment on a narrowed row, and says nothing on an unnarrowed one', async () => {
     mockApi([parameter({ id: 1, environmentId: 7 }), parameter({ id: 2, name: 'hostname', label: 'Hostname' })])
-    render(<ParametersManager />)
+    renderManager()
 
     // Not <option>: both modals are mounted at all times and their environment
     // dropdowns contain every name, so a bare text query matches the form as
@@ -167,4 +184,23 @@ describe('ParametersManager — which environment a global parameter applies to 
     const allEnvBadges = screen.queryAllByText(/all environments/i).filter((el) => el.tagName !== 'OPTION')
     expect(allEnvBadges).toHaveLength(0)
   })
+
+describe('ParametersManager load failure', () => {
+  it('does not claim there are no global parameters when the load failed', async () => {
+    // "No global parameters yet" is a state an operator acts on — by defining
+    // one that already exists (#415, #460).
+    render(<ParametersManager initial={[]} initialError="backend unreachable" />)
+
+    // Scoped to the card: every Modal renders whether or not it is open, and the
+    // delete dialog carries its own copy of the error.
+    const card = screen.getByRole('heading', { name: /global parameters/i }).closest('div.rounded-xl') as HTMLElement
+    expect(within(card).getByText('backend unreachable')).toBeInTheDocument()
+    expect(within(card).queryByText(/no global parameters yet/i)).not.toBeInTheDocument()
+  })
+
+  it('says there are none when there really are none', async () => {
+    render(<ParametersManager initial={[]} />)
+    expect(screen.getByText(/no global parameters/i)).toBeInTheDocument()
+  })
+})
 })

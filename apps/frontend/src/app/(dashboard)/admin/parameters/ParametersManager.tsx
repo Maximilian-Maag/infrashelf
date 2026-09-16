@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import {useState, useCallback } from 'react'
 import type {
   Parameter,
   ParameterType,
@@ -33,20 +33,46 @@ const emptyForm = () => ({
   projectIds: [] as number[],
 })
 
-export function ParametersManager() {
+interface Props {
+  /**
+   * The global parameters the SERVER already fetched (#460), with the scope
+   * filter already applied — it used to happen in the browser, after asking for
+   * every parameter in the installation.
+   */
+  initial: Parameter[]
+  /** The two lists the form chooses from. Absent ones cost the dropdowns only. */
+  initialEnvironments?: DeploymentEnvironment[]
+  initialProjects?: Project[]
+  /** Why the server could not fetch the parameters, if it could not (#415). */
+  initialError?: string | null
+}
+
+export function ParametersManager({
+  initial,
+  initialEnvironments = [],
+  initialProjects = [],
+  initialError = null,
+}: Props) {
   const lang = useLang()
   const TYPES = parameterTypeOptions(lang)
-  const [params, setParams] = useState<Parameter[]>([])
-  const [environments, setEnvironments] = useState<DeploymentEnvironment[]>([])
-  const [projects, setProjects] = useState<Project[]>([])
-  const [loading, setLoading] = useState(true)
+  const [params, setParams] = useState<Parameter[]>(initial)
+  const [environments, setEnvironments] = useState<DeploymentEnvironment[]>(initialEnvironments)
+  const [projects, setProjects] = useState<Project[]>(initialProjects)
+  // The server already has them, so nothing is pending on arrival.
+  const [loading, setLoading] = useState(false)
   const [addOpen, setAddOpen] = useState(false)
   const [editTarget, setEditTarget] = useState<Parameter | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<Parameter | null>(null)
   const [form, setForm] = useState(emptyForm())
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
-  const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [deleteError, setDeleteError] = useState<string | null>(initialError)
+  /*
+   * Whether the LAST load failed (#415, #460). Without it an outage rendered the
+   * error and "no global parameters yet" together, and the false one is what an
+   * operator acts on — by defining a parameter that already exists.
+   */
+  const [loadFailed, setLoadFailed] = useState(initialError !== null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -65,14 +91,14 @@ export function ParametersManager() {
       setEnvironments(envs ?? [])
       setProjects(projectList ?? [])
       setDeleteError(null)
+      setLoadFailed(false)
     } catch (e) {
+      setLoadFailed(true)
       setDeleteError(e instanceof Error ? e.message : t('failedToLoadParameters', lang))
     } finally {
       setLoading(false)
     }
   }, [lang])
-
-  useEffect(() => { void load() }, [load])
 
   function setField<K extends keyof typeof form>(k: K, v: typeof form[K]) {
     setForm((f) => ({ ...f, [k]: v }))
@@ -165,7 +191,7 @@ export function ParametersManager() {
         )}
         {loading ? (
           <div className="flex justify-center py-8"><div className="h-8 w-8 animate-spin rounded-full border-4 border-slate-200 border-t-blue-600" /></div>
-        ) : params.length === 0 ? (
+        ) : params.length === 0 && !loadFailed ? (
           <p className="text-center py-6 text-slate-600">{t('noGlobalParametersYet', lang)}</p>
         ) : (
           <div className="space-y-2">
