@@ -63,9 +63,14 @@ describe('NewProjectButton', () => {
     await user.type(within(dialog).getByLabelText(/^name/i), 'Webshop Platform')
     await user.click(within(dialog).getByRole('button', { name: /create project/i }))
 
-    await waitFor(() => expect(mockedPost).toHaveBeenCalledWith('/api/projects', expect.objectContaining({
+    // The WHOLE body, not `objectContaining`: the point of this test is that a
+    // failed cost-centre read leaves the project without an account, and a
+    // partial assertion would pass while an id was smuggled in from somewhere.
+    await waitFor(() => expect(mockedPost).toHaveBeenCalledWith('/api/projects', {
       name: 'Webshop Platform',
-    })))
+      description: undefined,
+      costCenterId: undefined,
+    }))
   })
 
   it('refuses a name that is only whitespace, without asking the server', async () => {
