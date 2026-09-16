@@ -87,14 +87,15 @@ export default async function InfrastructurePage({ searchParams }: Props) {
   ])
 
   // A rejected list is NOT an empty inventory. An invalid bookmarked filter comes
-  // back 400 — exactly what parseInfraFilters rejects rather than silently ignores —
-  // and a backend outage rejects too; showing "nothing matches" for either claims
-  // the infrastructure is gone.
-  // Carries the reason now, not just the fact (#415): a bookmarked filter the
-  // backend rejects comes back 400 and an outage comes back 502, and this page
-  // said "an unexpected error occurred" for both while discarding the one line
-  // that would have told the operator which. It is logged server-side too, so a
-  // failure the user reloads past still leaves a trace.
+  // back 400 — exactly what parseInfraFilters rejects rather than silently
+  // ignores — and a backend outage rejects too; showing "nothing matches" for
+  // either claims the infrastructure is gone.
+  //
+  // It carries the REASON, not just the fact (#415). The 400 and the 502 are
+  // different problems and this page said "an unexpected error occurred" for
+  // both, discarding the one line that would have told the operator which. It is
+  // logged server-side as well, so a failure the user reloads past still leaves
+  // a trace.
   const list = section<InfrastructurePage | null>(listRes, null, 'infrastructure list')
   const listFailed = list.error !== null
   // One window, not every element ever provisioned (#158). An installation
@@ -102,11 +103,9 @@ export default async function InfrastructurePage({ searchParams }: Props) {
   // this is the list that grows without anybody placing an order.
   const page = list.data ?? { items: [], total: 0, limit: 0, offset: 0 }
   const elements = page.items
-  // Empty facets degrade to unpopulated dropdowns rather than a broken page —
-  // the free-text search and date filters still work.
-  // Unpopulated dropdowns are a degradation the page already tolerates — the
-  // free-text search and date filters still work — so this one is logged rather
-  // than shown.
+  // Empty facets degrade to unpopulated dropdowns rather than a broken page: the
+  // free-text search and date filters still work without them. A degradation the
+  // page already tolerates, so this one is logged rather than shown.
   const facets = section(facetsRes, { environments: [], projects: [], products: [] } as InfraFacets, 'infrastructure facets').data
 
   // Group by project — but only for the default date ordering. Bucketing by
