@@ -115,6 +115,15 @@ Almost nothing is tested. Establish component testing with a small render helper
 - **ProductEditForm**: false-"Saved!" regression — a failed per-env save shows an
   error, not a success badge; AI-translate error surfaces; webhook/stack/param
   delete failures surface.
+- **The four pages that say "there is nothing here"** ✅ (#478): `approvals`,
+  `orders`, `projects` and `cart` each had no test at all, and each holds one
+  half of the #415 property. Approvals now reports a queue it could not read
+  instead of printing "0 orders pending approval" over "no pending orders";
+  orders and projects deliberately let a failure reach the `(dashboard)` error
+  boundary, which is a decision worth pinning because the next person to add a
+  `try` would not know; cart degrades three of its four reads and says which,
+  losing only the exchange rates quietly, because without them the figure is
+  still true.
 - **Catalogue** ✅: the shop is a server component now (#472), so it is tested in
   two halves. `page.test.tsx`: the query it builds (page window, trimmed search,
   category, language), a category it cannot read treated as no filter, each of
