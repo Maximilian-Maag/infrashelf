@@ -362,7 +362,12 @@ describe('ImportFromRepo', () => {
     const button = await screen.findByRole('button', { name: 'Importing…' })
     expect(button).toBeDisabled()
     expect(button).toHaveAttribute('aria-busy', 'true')
+
+    // Awaited, not just released: the handler sets state after `post` resolves,
+    // and letting that land after the test ends is an act warning and a write
+    // into the next test's render.
     release(outcome())
+    expect(await screen.findByRole('status')).toBeInTheDocument()
   })
 
   it('starts a second import from a clean slate', async () => {
