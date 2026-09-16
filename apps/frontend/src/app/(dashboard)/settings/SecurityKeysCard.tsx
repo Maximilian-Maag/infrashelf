@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
 import { useSession } from 'next-auth/react'
 import { startRegistration } from '@simplewebauthn/browser'
 import type {
@@ -29,12 +29,27 @@ import { t } from '@/lib/i18n'
  * prompt, and the private key never leaves the authenticator; what comes back is
  * a public key and an attestation for the server to verify.
  */
-export function SecurityKeysCard() {
+/** Nothing can change whether this browser supports WebAuthn, so there is nothing to subscribe to. */
+const subscribeToNothing = () => () => {}
+
+interface Props {
+  /**
+   * The keys the SERVER read, or `undefined` when it could not (#466).
+   *
+   * Same distinction as the sessions card: `[]` means this account has no
+   * security keys, `undefined` means the endpoint did not answer. Showing the
+   * first for the second tells someone their account has no second factor
+   * registered at the moment they came here to check.
+   */
+  initialCredentials?: WebauthnCredential[] | null
+}
+
+export function SecurityKeysCard({ initialCredentials }: Props) {
   const { data: session, update: updateSession } = useSession()
   // The token's copy of the gate, which is what the middleware reads.
   const mustEnroll = session?.mustEnrollSecondFactor === true
   const lang = useLang()
-  const [credentials, setCredentials] = useState<WebauthnCredential[] | null>(null)
+  const [credentials, setCredentials] = useState<WebauthnCredential[] | null>(initialCredentials ?? null)
   const [label, setLabel] = useState('')
   const [busy, setBusy] = useState(false)
   /** The key the confirmation modal is about, or null while it is closed. */
@@ -43,26 +58,53 @@ export function SecurityKeysCard() {
   const [error, setError] = useState<string | null>(null)
   const [recoveryCodes, setRecoveryCodes] = useState<string[]>([])
 
-  const load = useCallback(async () => {
-    try {
-      const data = await get<WebauthnCredentialsResponse>('/api/users/me/webauthn')
-      setCredentials(data.credentials)
-    } catch {
-      // A list that cannot be read is not worth an error banner over the whole
-      // settings page; the card shows nothing until it can.
-      setCredentials(null)
-    }
-  }, [])
+  /*
+   * Fetches and returns; it does not set state — the shape the sessions card
+   * uses, and for its reason: every caller decides whether the component is
+   * still mounted before it writes.
+   *
+   * A list that cannot be read is not worth an error banner over the whole
+   * settings page, so it resolves to `null` and the card shows nothing until it
+   * can.
+   */
+  const fetchCredentials = useCallback(
+    () => get<WebauthnCredentialsResponse>('/api/users/me/webauthn')
+      .then((data) => data.credentials)
+      .catch(() => null),
+    [],
+  )
 
-  useEffect(() => {
-    void load()
-  }, [load])
+  /** Re-read after registering or removing a key. */
+  const load = useCallback(async () => setCredentials(await fetchCredentials()), [fetchCredentials])
 
-  /** Whether this browser can do WebAuthn at all — an old one simply cannot. */
-  const [supported, setSupported] = useState(true)
+  /*
+   * Only when the server could not read them (#466) — the page fetches this now,
+   * like the sessions card beside it. `undefined` means that read failed, and
+   * then this retries and reports its own outcome.
+   */
   useEffect(() => {
-    setSupported(typeof window !== 'undefined' && Boolean(window.PublicKeyCredential))
-  }, [])
+    if (initialCredentials !== undefined) return
+    let live = true
+    void fetchCredentials().then((next) => { if (live) setCredentials(next) })
+    return () => { live = false }
+    // `initialCredentials` is a mount-time decision, not something to react to.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fetchCredentials])
+
+  /*
+   * Whether this browser can do WebAuthn at all — an old one simply cannot.
+   *
+   * A property of the environment, not of this component, and unreadable during
+   * the server render: `useSyncExternalStore` takes a server snapshot and a
+   * client one, which is exactly the shape of the question (#466). As state set
+   * by an effect it started optimistic, so a browser without WebAuthn was
+   * briefly offered a form it cannot use.
+   */
+  const supported = useSyncExternalStore(
+    subscribeToNothing,
+    () => Boolean(window.PublicKeyCredential),
+    () => true,
+  )
 
   async function handleRegister(e: React.FormEvent) {
     e.preventDefault()

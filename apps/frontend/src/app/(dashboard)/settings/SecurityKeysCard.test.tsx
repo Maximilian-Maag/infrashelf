@@ -99,4 +99,42 @@ describe('SecurityKeysCard lifts the enrolment gate (#197)', () => {
     await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument())
     expect(updateSession).not.toHaveBeenCalled()
   })
+
+  it('uses the keys the server read, without asking again', async () => {
+    // The page fetches these now (#466); a card that re-asked would show "no
+    // security keys" for a frame on a page whose whole purpose is to say
+    // otherwise.
+    render(<SecurityKeysCard initialCredentials={[{ id: 9, label: 'YubiKey', createdAt: '2026-01-01T00:00:00.000Z' }] as never} />)
+
+    expect(await screen.findByText('YubiKey')).toBeInTheDocument()
+    expect(get).not.toHaveBeenCalled()
+  })
+
+  it('asks for itself when the server could not read them', async () => {
+    // `undefined` is not `[]`: the first means nobody knows, and the card has to
+    // find out rather than claim the account has no keys.
+    vi.mocked(get).mockResolvedValue({ credentials: [{ id: 9, label: 'YubiKey', createdAt: '2026-01-01T00:00:00.000Z' }] } as never)
+    render(<SecurityKeysCard />)
+
+    expect(await screen.findByText('YubiKey')).toBeInTheDocument()
+    expect(get).toHaveBeenCalledWith('/api/users/me/webauthn')
+  })
+
+  it('refuses, and says why, on a browser that cannot do WebAuthn', async () => {
+    // Decided from the environment rather than assumed and corrected, so an old
+    // browser is never briefly offered a form it cannot use (#466).
+    const original = window.PublicKeyCredential
+    // @ts-expect-error — removing it is the whole point of the test
+    delete window.PublicKeyCredential
+    try {
+      render(<SecurityKeysCard initialCredentials={[]} />)
+      // The form stays visible but cannot be submitted, and says why — better
+      // than a missing control with no explanation.
+      expect(screen.getByRole('alert')).toBeInTheDocument()
+      const submit = screen.getAllByRole('button').find((b) => b.getAttribute('type') === 'submit')
+      expect(submit).toBeDisabled()
+    } finally {
+      window.PublicKeyCredential = original
+    }
+  })
 })

@@ -242,4 +242,20 @@ describe('TwoFactorCard — enrollment is required', () => {
     await screen.findByText('aaaa-bbbb')
     expect(updateSession).not.toHaveBeenCalled()
   })
+
+  it('uses the status the server read, without asking again', async () => {
+    // A card that re-asked would say "two-factor is off" for a frame, which is
+    // the most reassuring thing it can say and the worst to say wrongly (#466).
+    render(<TwoFactorCard initialStatus={{ enabled: true } as never} />)
+
+    expect(get).not.toHaveBeenCalled()
+  })
+
+  it('asks for itself when the server could not read it', async () => {
+    // `undefined` is not `null`: the first means nobody knows, and the card has
+    // to find out rather than claim no second factor is enrolled.
+    vi.mocked(get).mockResolvedValue({ enabled: false } as never)
+    render(<TwoFactorCard />)
+    await waitFor(() => expect(get).toHaveBeenCalledWith('/api/users/me/2fa'))
+  })
 })
