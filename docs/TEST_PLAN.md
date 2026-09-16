@@ -115,9 +115,17 @@ Almost nothing is tested. Establish component testing with a small render helper
 - **ProductEditForm**: false-"Saved!" regression — a failed per-env save shows an
   error, not a success badge; AI-translate error surfaces; webhook/stack/param
   delete failures surface.
-- **AuditTable** ✅ (debounce): text filters are debounced (one request after
-  rapid typing). Still worth adding: assert the export uses a header-authenticated
-  fetch + blob download (not `window.open` with a token in the URL).
+- **Audit log** ✅: the page is a server component now (#471), so the three parts
+  are tested apart. `page.test.tsx`: the filters it forwards and the ones it
+  drops, the offset→page conversion (including an offset off a page boundary and
+  one that is not a decimal integer), a rejected list reported rather than
+  rendered as an empty log (#221), and pager links that carry the filters.
+  `AuditFilters.test.tsx`: dates apply immediately, the two free-text fields are
+  debounced together, a filter change returns to page one, and a URL that
+  changed from outside is adopted during render rather than a frame late.
+  `AuditExport.test.tsx`: the export goes through `/api/proxy` with the filters
+  currently in the URL and no token in it, and the server's own 413 reason
+  reaches the screen.
 
 ### Lib/hooks (`lib/*.test.ts`)
 - **i18n** (`lib/i18n.test.ts`) ✅: sample key present in all 25 languages; status

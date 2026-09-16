@@ -22,8 +22,10 @@ interface PagerProps {
  * Links rather than buttons, because these pages are server components: the row
  * data for page two only exists after a request, so the control that asks for
  * it is a destination and not a state change. That also makes a page shareable
- * and the back button work, which client-side paging in `AuditTable` gives up —
- * that one is a client component for its live filters, so it has no choice.
+ * and the back button work. The audit log used to be the exception named here —
+ * a client component paging in `useState`, with no choice because its filters
+ * were in `useState` too — until #471 moved them into the URL and it became
+ * another caller of this.
  *
  * Renders nothing at all when everything fits on one page. A pager that is
  * always present but always disabled is a permanent invitation to look for rows
