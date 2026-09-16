@@ -36,14 +36,22 @@ export function ProductImage({
   const [failed, setFailed] = useState(false)
   const imgRef = useRef<HTMLImageElement>(null)
 
+  /*
+   * A different picture starts out not-failed — decided during render rather
+   * than in an effect (#450). As an effect, a product whose predecessor had no
+   * image rendered the placeholder once more before clearing the flag.
+   */
+  const src = `${productId}:${version ?? ''}`
+  const [shownSrc, setShownSrc] = useState(src)
+  if (src !== shownSrc) {
+    setShownSrc(src)
+    setFailed(false)
+  }
+
   // onError alone is not enough: the browser starts loading while parsing the
   // server-rendered HTML, so an image that 404s before hydration fires its error
   // event with no handler attached and the broken-image icon stays. A finished
   // load with no intrinsic width is that same failure, observed after the fact.
-  useEffect(() => {
-    setFailed(false)
-  }, [productId, version])
-
   useEffect(() => {
     const img = imgRef.current
     if (img?.complete && img.naturalWidth === 0) setFailed(true)

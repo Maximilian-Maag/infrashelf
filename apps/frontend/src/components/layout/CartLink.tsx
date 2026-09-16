@@ -36,10 +36,22 @@ interface Props {
  */
 export function CartLink({ count: initialCount, lang }: Props) {
   const [count, setCount] = useState(initialCount)
+  const [serverCount, setServerCount] = useState(initialCount)
 
-  // Adopt the server's count when the page re-renders (router.refresh after a
-  // mutation, or a plain navigation).
-  useEffect(() => { setCount(initialCount) }, [initialCount])
+  /*
+   * Adopt the server's count when the page re-renders (router.refresh after a
+   * mutation, or a plain navigation) — during render, not in an effect (#450).
+   *
+   * As an effect this painted the OLD count first and corrected it on a second
+   * pass, so a refresh after "add to cart" showed the previous number for a
+   * frame. Setting state during render is the pattern React documents for
+   * exactly this: it re-runs this component before committing anything, so the
+   * stale value never reaches the screen.
+   */
+  if (initialCount !== serverCount) {
+    setServerCount(initialCount)
+    setCount(initialCount)
+  }
 
   useEffect(() => {
     const handler = (e: Event) => setCount((e as CustomEvent<number>).detail)

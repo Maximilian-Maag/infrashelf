@@ -104,7 +104,24 @@ describe('useLang langchange event', () => {
   it('adopts the language the switcher announces', () => {
     const { result } = renderHook(() => useLang('en'))
     act(() => {
+      // Exactly what `persistLang` does, in that order: write the cookie, then
+      // announce. The hook re-reads the cookie on the announcement rather than
+      // trusting the event's payload (#450), so the two can no longer disagree —
+      // and this test would pass on a payload that contradicted the cookie
+      // before.
+      setCookie('hu')
       window.dispatchEvent(new CustomEvent('langchange', { detail: 'hu' }))
+    })
+    expect(result.current).toBe('hu')
+  })
+
+  it('believes the cookie over the announcement, if they ever differ', () => {
+    // They cannot today — `persistLang` writes both — but the cookie is what the
+    // server will read on the next request, so it is the one that decides.
+    const { result } = renderHook(() => useLang('en'))
+    act(() => {
+      setCookie('hu')
+      window.dispatchEvent(new CustomEvent('langchange', { detail: 'sv' }))
     })
     expect(result.current).toBe('hu')
   })
