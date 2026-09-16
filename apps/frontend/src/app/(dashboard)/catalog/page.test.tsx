@@ -568,4 +568,32 @@ describe('CatalogPage announces its own state', () => {
     expect(screen.getByTestId('product-card-10')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /show more/i })).toBeEnabled()
   })
+
+describe('CatalogPage — the URL is where the query lives', () => {
+  it('adopts a `q` that changed from outside, without a stale frame', async () => {
+    // The search box is in the header, which navigates here — so arriving from
+    // it, from a back/forward, or from a shared link changes the URL under this
+    // page. As an effect the heading named the PREVIOUS term for a frame, beside
+    // the right results (#469).
+    currentParams = new URLSearchParams('q=nginx')
+    mockApi([10])
+    const { rerender } = render(<CatalogPage />)
+    expect(await screen.findByText(/nginx/)).toBeInTheDocument()
+
+    currentParams = new URLSearchParams('q=postgres')
+    rerender(<CatalogPage />)
+    expect(screen.getByText(/postgres/)).toBeInTheDocument()
+    expect(screen.queryByText(/“nginx”/)).not.toBeInTheDocument()
+  })
+
+  /*
+   * The other half — that the adoption is keyed on the URL VALUE changing, so a
+   * local clear is not undone on the next render — is guarded on `InfraFilters`
+   * instead (#462), where the search really is an editable box. Here the only
+   * thing that clears it is a button inside the empty-result state, which this
+   * harness cannot produce: `mockApi` controls the favourites, not whether the
+   * catalogue comes back empty.
+   */
+
+})
 })
