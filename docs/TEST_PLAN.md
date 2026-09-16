@@ -114,7 +114,11 @@ Almost nothing is tested. Establish component testing with a small render helper
   first fetch lands must not paint one centre's figures under another's name.
 - **ProductEditForm**: false-"Saved!" regression — a failed per-env save shows an
   error, not a success badge; AI-translate error surfaces; webhook/stack/param
-  delete failures surface.
+  delete failures surface. The size/price grid comes from the page as a prop
+  (#473): rendered without a second request when it was read, retried and
+  reported when it was not (`undefined` ≠ an empty grid), and redrawn when an
+  offering is withdrawn — the one case the server cannot answer, because it
+  happened after the page rendered.
 - **AuditTable** ✅ (debounce): text filters are debounced (one request after
   rapid typing). Still worth adding: assert the export uses a header-authenticated
   fetch + blob download (not `window.open` with a token in the URL).

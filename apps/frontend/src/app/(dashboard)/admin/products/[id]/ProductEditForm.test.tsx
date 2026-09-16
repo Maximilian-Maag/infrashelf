@@ -62,7 +62,7 @@ const product = {
   parameters: [],
 } as unknown as ProductDetail
 
-const renderForm = (over?: Partial<ProductDetail>) =>
+const renderForm = (over?: Partial<ProductDetail>, props?: { initialSizes?: SizeMatrix }) =>
   render(
     <ProductEditForm
       product={{ ...product, ...over }}
@@ -70,7 +70,7 @@ const renderForm = (over?: Partial<ProductDetail>) =>
       environments={environments}
       translations={[]}
       costCenters={costCenters}
-     
+      {...props}
     />,
   )
 
@@ -605,6 +605,61 @@ describe('ProductEditForm size matrix', () => {
     // The price it was struck at is still on screen: it is what the orders placed
     // while it was active were charged.
     expect(screen.getByText('retired · 100.00 CHF')).toBeInTheDocument()
+  })
+
+  /*
+   * #473. The page reads the grid now, so the first paint has it — an editor
+   * that asks on mount shows an empty grid while it waits, and an empty grid on
+   * this screen is a claim that nothing is priced.
+   */
+  it('renders the grid the page read, without asking for it again', async () => {
+    renderForm(undefined, { initialSizes: MATRIX })
+
+    expect(screen.getByLabelText('XL — AWS Frankfurt — Price')).toHaveValue('40.00')
+    // Synchronously, not after a round trip: no `find*` above, and nothing asked.
+    await waitFor(() => expect(mockedGet).toHaveBeenCalled())
+    expect(mockedGet.mock.calls.map((c) => String(c[0]))).not.toContain('/api/admin/products/7/sizes')
+  })
+
+  it('retries on its own when the page could not read the grid', async () => {
+    // `undefined` is not the same answer as a matrix with no rows: it means the
+    // server's read failed, and the editor says so rather than showing a product
+    // that is priced as a product that is not.
+    withMatrix(MATRIX)
+    renderForm()
+
+    expect(await screen.findByLabelText('XL — AWS Frankfurt — Price')).toHaveValue('40.00')
+  })
+
+  it('reports its own failure rather than showing an unpriced product', async () => {
+    mockedGet.mockReset().mockImplementation((async (path: string) => {
+      if (path.endsWith('/sizes')) throw new Error('503 Service Unavailable')
+      return []
+    }) as never)
+
+    renderForm()
+
+    expect(await screen.findByText('503 Service Unavailable')).toBeInTheDocument()
+  })
+
+  it('redraws the columns when an offering is withdrawn', async () => {
+    // The columns ARE the offerings, so a withdrawal has to redraw the grid even
+    // though the page handed one in — otherwise the withdrawn environment keeps
+    // a column whose saves would 404. This is the case the server cannot answer:
+    // it happened after the page rendered.
+    const user = userEvent.setup()
+    stubGet({ '/api/admin/products/7/sizes': { environments: [MATRIX.environments[0]], rows: MATRIX.rows } })
+    renderForm(undefined, { initialSizes: MATRIX })
+
+    expect(screen.getByLabelText('XL — On-Premise Vienna — Price')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Remove' }))
+    const dialog = await screen.findByRole('dialog', { name: /Remove AWS Frankfurt\?/ })
+    await user.click(within(dialog).getByRole('button', { name: 'Remove' }))
+
+    await waitFor(() =>
+      expect(screen.queryByLabelText('XL — On-Premise Vienna — Price')).not.toBeInTheDocument(),
+    )
   })
 
   it('says a size needs an offering before it can be priced', async () => {
