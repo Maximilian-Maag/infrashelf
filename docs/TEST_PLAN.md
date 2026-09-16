@@ -119,6 +119,16 @@ Almost nothing is tested. Establish component testing with a small render helper
   reported when it was not (`undefined` ≠ an empty grid), and redrawn when an
   offering is withdrawn — the one case the server cannot answer, because it
   happened after the page rendered.
+- **Catalogue** ✅: the shop is a server component now (#472), so it is tested in
+  two halves. `page.test.tsx`: the query it builds (page window, trimmed search,
+  category, language), a category it cannot read treated as no filter, each of
+  the three reads degrading on its own — a refused category list, one that never
+  answers (the deadline is what covers that; `allSettled` does not), a favourites
+  outage that costs the stars only — and a rejected product list carrying its
+  reason rather than rendering as an empty shop. `CatalogBrowser.test.tsx`: the
+  stars and their rollback, the shelf that can hold a product no page has
+  fetched, "load more" appending under the same query, an append that lands after
+  its query was navigated away from, and the URL the category buttons write.
 - **Audit log** ✅: the page is a server component now (#471), so the three parts
   are tested apart. `page.test.tsx`: the filters it forwards and the ones it
   drops, the offset→page conversion (including an offset off a page boundary and

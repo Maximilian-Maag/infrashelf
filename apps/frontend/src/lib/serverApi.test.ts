@@ -41,6 +41,19 @@ describe('serverApi', () => {
     expect(redirect).not.toHaveBeenCalled()
   })
 
+  it('passes a deadline through to the request', async () => {
+    // A server component `await`ing a request that is accepted and never
+    // answered holds the whole response open, and the reader gets nothing at all
+    // rather than a page missing one panel — which is why the catalogue gives
+    // its category list a deadline (#472).
+    apiRequest.mockResolvedValue([])
+    const signal = AbortSignal.abort()
+
+    await get('/api/admin/categories', signal)
+
+    expect(apiRequest).toHaveBeenCalledWith('/api/admin/categories', { token: 'token-abc', signal })
+  })
+
   it('ends the session when the backend says 401', async () => {
     apiRequest.mockRejectedValue(new ApiError(401, 'Unauthorized'))
 

@@ -43,7 +43,8 @@ test.describe('Product Catalog', () => {
     // name in an sr-only span (WCAG 2.4.9), so its accessible name is "Details: <product>".
     const placeOrderLinks = page.getByRole('link', { name: /^details\b/i })
     const noProducts = page.getByText(/no products found/i)
-    // Wait for catalog to finish loading (client component fetches async)
+    // The page is server-rendered now (#472), so the tiles are in the first
+    // response — the timeout is for a slow backend, not for a client fetch.
     await expect(placeOrderLinks.or(noProducts).first()).toBeVisible({ timeout: 10000 })
     const count = await placeOrderLinks.count()
     const isEmpty = await noProducts.isVisible()
@@ -69,6 +70,32 @@ test.describe('Product Catalog', () => {
     await loginAsRoot(page)
     await page.goto('/catalog?q=server')
     await expect(page.getByText(/results for/i)).toBeVisible()
+  })
+
+  /*
+   * #472. The category used to be `useState`, so a filtered shop could not be
+   * sent to anyone and Back left the shop entirely rather than returning to the
+   * previous category.
+   */
+  test('a chosen category is a URL, and Back returns to the previous view', async ({ page }) => {
+    await goToCatalog(page)
+
+    // The sidebar lists whatever categories the installation has; the first one
+    // after "All products" is enough to prove the mechanism.
+    const chips = page.locator('aside').getByRole('button')
+    const count = await chips.count()
+    requireSeeded(count > 1, 'no category in the sidebar to filter by')
+
+    await chips.nth(1).click()
+    await expect(page).toHaveURL(/[?&]category=\d+/)
+    // And it is the filter in effect, not merely a parameter in the address bar.
+    await expect(chips.nth(1)).toHaveAttribute('aria-pressed', 'true')
+
+    await page.goBack()
+    await expect(page).toHaveURL(/\/catalog$/)
+    await expect(page.getByRole('button', { name: /all products/i }).first())
+      .toHaveAttribute('aria-pressed', 'true')
+    await expectNoServerError(page)
   })
 
   test('mobile All pill button is present', async ({ page }) => {
