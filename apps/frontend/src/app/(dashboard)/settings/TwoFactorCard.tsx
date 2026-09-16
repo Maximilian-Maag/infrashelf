@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { useSession } from 'next-auth/react'
 import type {
   ConfirmTotpEnrollmentRequest,
@@ -31,14 +31,26 @@ import { t } from '@/lib/i18n'
  */
 type Step = 'idle' | 'scanning' | 'codes'
 
-export function TwoFactorCard() {
+interface Props {
+  /**
+   * The status the SERVER read, or `undefined` when it could not (#466).
+   *
+   * `undefined` and `null` are different answers and both are load-bearing:
+   * `null` means no second factor is enrolled, `undefined` means nobody knows.
+   * Rendering the first for the second is what this prop exists to stop — "two
+   * factor is off" is the most reassuring thing this card can say.
+   */
+  initialStatus?: TwoFactorStatusResponse | null
+}
+
+export function TwoFactorCard({ initialStatus }: Props) {
   const lang = useLang()
   // Read from the session rather than passed in: the same flag the middleware
   // redirected on, so the card cannot disagree with the thing that sent the user
   // here (issue #197).
   const { data: session, update: updateSession } = useSession()
   const mustEnroll = session?.mustEnrollSecondFactor === true
-  const [status, setStatus] = useState<TwoFactorStatusResponse | null>(null)
+  const [status, setStatus] = useState<TwoFactorStatusResponse | null>(initialStatus ?? null)
   const [step, setStep] = useState<Step>('idle')
   const [password, setPassword] = useState('')
   const [currentCode, setCurrentCode] = useState('')
@@ -48,21 +60,42 @@ export function TwoFactorCard() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const loadStatus = async () => {
-    try {
-      setStatus(await get<TwoFactorStatusResponse>('/api/users/me/2fa'))
-    } catch {
-      // A status that cannot be read is not worth an error banner over the whole
-      // settings page; the card simply shows nothing until it can.
-      setStatus(null)
-    }
-  }
+  /*
+   * Fetches and returns; it does not set state — the shape the sessions card
+   * beside this one uses, and for its reason: every caller decides whether the
+   * component is still mounted before it writes.
+   *
+   * A status that cannot be read is not worth an error banner over the whole
+   * settings page, so it resolves to `null` and the card shows nothing until it
+   * can.
+   */
+  const fetchStatus = useCallback(
+    () => get<TwoFactorStatusResponse>('/api/users/me/2fa').catch(() => null),
+    [],
+  )
 
-  // Once, on mount. The dependency this used to have was `token`, and the token
-  // is no longer a prop — the API call carries the session cookie instead (#146).
+  /** Re-read after enrolling or removing, where the card IS the thing that changed. */
+  const loadStatus = async () => setStatus(await fetchStatus())
+
+  /*
+   * Only when the server could not read it (#466).
+   *
+   * The page fetches this now, like the sessions card beside it, so the first
+   * paint shows the real answer instead of "two-factor is off" — which is the
+   * most reassuring thing this card can say and the worst one to say wrongly.
+   *
+   * `undefined` means the server's own read failed, and then this retries and
+   * surfaces its own outcome. `null` is a real answer: no second factor
+   * enrolled.
+   */
   useEffect(() => {
-    void loadStatus()
-  }, [])
+    if (initialStatus !== undefined) return
+    let live = true
+    void fetchStatus().then((next) => { if (live) setStatus(next) })
+    return () => { live = false }
+    // `initialStatus` is a mount-time decision, not something to react to.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fetchStatus])
 
   async function handleStart(e: React.FormEvent) {
     e.preventDefault()

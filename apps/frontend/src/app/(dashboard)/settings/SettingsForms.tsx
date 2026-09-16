@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import type { UpdateProfileRequest, ChangePasswordRequest, Role } from '@infrashelf/types'
+import type { UpdateProfileRequest, ChangePasswordRequest, Role, TwoFactorStatusResponse, WebauthnCredential } from '@infrashelf/types'
 import { put } from '@/lib/api'
 import { Card } from '@/components/ui/Card'
 import { Alert } from '@/components/ui/Alert'
@@ -16,9 +16,20 @@ interface Props {
   initialName: string
   email: string
   role: Role | undefined
+  /*
+   * Threaded straight through to the two security cards (#466).
+   *
+   * They used to fetch their own state on mount, so a settings page arrived
+   * saying "two-factor is off" and "no security keys" — the two most reassuring
+   * things either card can say — and corrected itself afterwards. `undefined`
+   * means the server's read failed and the card should retry; it is not the same
+   * as `null` or `[]`, which are real answers.
+   */
+  initialTwoFactor?: TwoFactorStatusResponse | null
+  initialCredentials?: WebauthnCredential[] | null
 }
 
-export function SettingsForms({ initialName, email, role }: Props) {
+export function SettingsForms({ initialName, email, role, initialTwoFactor, initialCredentials }: Props) {
   const lang = useLang()
   const [name, setName] = useState(initialName)
   const [profileSaving, setProfileSaving] = useState(false)
@@ -139,12 +150,12 @@ export function SettingsForms({ initialName, email, role }: Props) {
           with nowhere to do it. */}
       {(role === 'root' || role === 'admin') && (
         <>
-          <TwoFactorCard />
+          <TwoFactorCard initialStatus={initialTwoFactor} />
           {/* A sibling, not a tab inside it: the two are not alternatives to pick
               between. Either satisfies the requirement, and holding both is the
               sensible thing — a key for every day, an app for the day the key is
               in the other coat (#197 part 2). */}
-          <SecurityKeysCard />
+          <SecurityKeysCard initialCredentials={initialCredentials} />
         </>
       )}
     </div>
