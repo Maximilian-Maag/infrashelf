@@ -63,7 +63,9 @@ export default async function DashboardHome() {
 
   return (
     <div className="space-y-8">
-      {/* Hero banner */}
+      {/* Hero banner. Stryker disable next-line all: its colours come from the
+          branding custom properties the layout derives, which are asserted
+          there; here they are appearance only. */}
       <div className="rounded-xl overflow-hidden" style={{ backgroundColor: 'var(--bp)', color: 'var(--bp-ink)' }}>
         <div className="px-8 py-10 flex flex-col sm:flex-row items-center gap-6">
           <div className="flex-1">
