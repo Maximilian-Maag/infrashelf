@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import {useState, useCallback } from 'react'
 import type {
   DeploymentEnvironment,
   CiSource,
@@ -20,6 +20,17 @@ import { t } from '@/lib/i18n'
 
 interface Props {
   ciSources: CiSource[]
+  /**
+   * The environments the SERVER already fetched (#458).
+   *
+   * `ciSources` beside it has always come from the page — this is the same
+   * arrangement, applied to the list the component used to ask for on mount.
+   * `load()` below stays for the reload after a create, an edit or a delete: a
+   * response to an action rather than to mounting.
+   */
+  initial: DeploymentEnvironment[]
+  /** Why the server could not fetch them, if it could not (#415). */
+  initialError?: string | null
 }
 
 const emptyForm = () => ({
@@ -29,17 +40,18 @@ const emptyForm = () => ({
   respectsDeploymentWindows: false,
 })
 
-export function EnvironmentsManager({ ciSources }: Props) {
+export function EnvironmentsManager({ ciSources, initial, initialError = null }: Props) {
   const lang = useLang()
-  const [envs, setEnvs] = useState<DeploymentEnvironment[]>([])
-  const [loading, setLoading] = useState(true)
+  const [envs, setEnvs] = useState<DeploymentEnvironment[]>(initial)
+  // The server already has them, so nothing is pending on arrival.
+  const [loading, setLoading] = useState(false)
   const [addOpen, setAddOpen] = useState(false)
   const [editTarget, setEditTarget] = useState<DeploymentEnvironment | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<DeploymentEnvironment | null>(null)
   const [form, setForm] = useState(emptyForm())
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
-  const [loadError, setLoadError] = useState<string | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(initialError)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -56,8 +68,6 @@ export function EnvironmentsManager({ ciSources }: Props) {
       setLoading(false)
     }
   }, [lang])
-
-  useEffect(() => { void load() }, [load])
 
   // Value typed per field rather than as `string`: the form gained a boolean
   // with #330, and widening to `string | boolean` would let a checkbox be set

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import type { DeploymentEnvironment } from '@infrashelf/types'
 
 // jsdom does not implement the native <dialog> methods; stub them so Modal's
@@ -40,32 +40,30 @@ describe('EnvironmentsManager load failure', () => {
   // empty and rendered the empty-state copy, which tells an administrator their
   // environments do not exist at the moment they are least able to check.
   it('reports a failed load instead of claiming there are no environments', async () => {
-    mockedGet.mockRejectedValue(new Error('502 Bad Gateway'))
+    // The server carries the reason over now rather than the manager
+    // discovering it on mount (#458).
+    render(<EnvironmentsManager ciSources={[]} initial={[]} initialError="502 Bad Gateway" />)
 
-    render(<EnvironmentsManager ciSources={[]} />)
-
-    expect(await screen.findByText('502 Bad Gateway')).toBeInTheDocument()
+    expect(screen.getByText('502 Bad Gateway')).toBeInTheDocument()
     expect(screen.queryByText(/no environments yet/i)).not.toBeInTheDocument()
   })
 
   it('clears the error once a later load succeeds', async () => {
-    mockedGet.mockRejectedValueOnce(new Error('502 Bad Gateway'))
-    render(<EnvironmentsManager ciSources={[]} />)
-    expect(await screen.findByText('502 Bad Gateway')).toBeInTheDocument()
+    const failed = render(<EnvironmentsManager ciSources={[]} initial={[]} initialError="502 Bad Gateway" />)
+    expect(within(failed.container).getByText('502 Bad Gateway')).toBeInTheDocument()
+    failed.unmount()
 
-    mockedGet.mockResolvedValue(envs as never)
-    // A second mount stands in for the retry path — the point is that the
-    // error is cleared by a successful load rather than latched forever.
-    render(<EnvironmentsManager ciSources={[]} />)
+    // A second mount stands in for the retry path — the point is that the error
+    // belongs to the load that failed, not to the component for ever.
+    render(<EnvironmentsManager ciSources={[]} initial={envs} />)
 
-    await waitFor(() => expect(screen.getByText('Production')).toBeInTheDocument())
+    expect(screen.getByText('Production')).toBeInTheDocument()
+    expect(screen.queryByText('502 Bad Gateway')).not.toBeInTheDocument()
   })
 
   it('still shows the empty state when the load succeeds with nothing in it', async () => {
-    mockedGet.mockResolvedValue([] as never)
+    render(<EnvironmentsManager ciSources={[]} initial={[]} />)
 
-    render(<EnvironmentsManager ciSources={[]} />)
-
-    expect(await screen.findByText(/no environments yet/i)).toBeInTheDocument()
+    expect(screen.getByText(/no environments yet/i)).toBeInTheDocument()
   })
 })
