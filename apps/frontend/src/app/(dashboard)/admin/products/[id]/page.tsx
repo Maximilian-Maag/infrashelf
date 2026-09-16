@@ -1,5 +1,5 @@
 import { auth } from '@/lib/auth'
-import { redirect, notFound } from 'next/navigation'
+import { redirect, notFound, unstable_rethrow } from 'next/navigation'
 import type {
   Role,
   ProductDetail,
@@ -48,7 +48,13 @@ export default async function AdminProductDetailPage({ params, searchParams }: P
     get<CostCenter[]>('/api/admin/cost-centers'),
   ])
 
-  if (productRes.status === 'rejected') notFound()
+  if (productRes.status === 'rejected') {
+    // A 401 redirect is not a failed fetch (#434). `allSettled` collects it
+    // as a rejection like any other, so without this an ended session is
+    // reported as a product that does not exist.
+    unstable_rethrow(productRes.reason)
+    notFound()
+  }
 
   const product = productRes.value
   // The product is already a 404 when it fails. These four seed the form, and on

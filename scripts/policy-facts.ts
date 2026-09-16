@@ -1736,7 +1736,30 @@ function swallowedRedirects(): SwallowedRedirectFact[] {
     }
     const rethrows = (node: ts.Node): boolean => /unstable_rethrow\s*\(/.test(node.getText(sf))
 
+    // `Promise.allSettled` collects a thrown `redirect()` as a rejection like any
+    // other, so `if (res.status === 'rejected') notFound()` swallows it just as a
+    // `catch` does — and reports an ended session as a product that does not
+    // exist. Found on #445, after the `catch` shape had already been fixed.
+    const settledNames = new Set<string>()
+    visit(sf, (n) => {
+      if (!ts.isVariableDeclaration(n) || !n.initializer) return
+      if (!/Promise\s*\.\s*allSettled/.test(n.initializer.getText(sf))) return
+      if (!ts.isArrayBindingPattern(n.name)) return
+      for (const el of n.name.elements) {
+        if (ts.isBindingElement(el) && ts.isIdentifier(el.name)) settledNames.add(el.name.text)
+      }
+    })
+
     visit(sf, (node) => {
+      if (ts.isIfStatement(node) && settledNames.size > 0) {
+        const cond = node.expression.getText(sf)
+        const named = [...settledNames].find((n) =>
+          new RegExp(`\\b${n}\\.status\\s*===\\s*['\"]rejected['\"]`).test(cond))
+        if (named && !rethrows(node.thenStatement)) {
+          out.push({ file: rel, line: lineOf(sf, node), kind: "allSettled 'rejected' branch", call: named })
+        }
+        return
+      }
       if (ts.isTryStatement(node) && node.catchClause) {
         const call = callInside(node.tryBlock)
         if (call && !rethrows(node.catchClause.block)) {

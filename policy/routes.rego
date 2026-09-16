@@ -238,6 +238,16 @@ deny contains v if {
 #                          "there are none"; `lib/section.ts` rethrows for that
 #   #434  try / .catch   — this
 #
+# And a fourth, found on #445 while writing tests AFTER this rule existed:
+#
+#   #445  allSettled + `if (res.status === 'rejected') notFound()`
+#
+# `allSettled` collects a thrown `redirect()` as a rejection like any other, so
+# that `if` swallows it exactly as a `catch` does — and an ended session was
+# reported as a product that does not exist. Two pages had it. The rule covers
+# that shape now; the first version did not, which is why it was worth writing a
+# test rather than trusting the gate.
+#
 # The first two were each fixed once and then re-learned. `unstable_rethrow(e)`
 # as the first line of the catch is the whole remedy, and this rule is what makes
 # it structural instead of remembered.

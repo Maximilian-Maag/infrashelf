@@ -273,6 +273,22 @@ test_a_promise_catch_without_a_rethrow_is_denied if {
 	v.rule == "catch_rethrows_navigation"
 }
 
+# The shape #445 found: `allSettled` collects the redirect as a rejection, and
+# `if (res.status === 'rejected') notFound()` swallows it the same way a `catch`
+# does. The first version of this rule did not cover it.
+test_an_allsettled_rejected_branch_without_a_rethrow_is_denied if {
+	facts := swallowed([{
+		"file": "apps/frontend/src/app/(dashboard)/catalog/[id]/page.tsx",
+		"line": 63,
+		"kind": "allSettled 'rejected' branch",
+		"call": "productRes",
+	}])
+	denied := policy.deny with input as facts
+	some v in denied
+	v.rule == "catch_rethrows_navigation"
+	contains(v.detail, "productRes")
+}
+
 # Both are reported, so fixing one does not hide the other.
 test_every_swallow_is_reported if {
 	facts := swallowed([
