@@ -61,16 +61,16 @@ export function ProductSpecs({ parameters, lang }: Props) {
         <caption className="sr-only">{t('specifications', lang)}</caption>
         <thead className="bg-slate-50">
           <tr>
-            <th scope="col" className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">
+            <th scope="col" className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wider text-slate-600">
               {t('parameter', lang)}
             </th>
-            <th scope="col" className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">
+            <th scope="col" className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wider text-slate-600">
               {t('type', lang)}
             </th>
-            <th scope="col" className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">
+            <th scope="col" className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wider text-slate-600">
               {t('defaultValue', lang)}
             </th>
-            <th scope="col" className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">
+            <th scope="col" className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wider text-slate-600">
               {t('required', lang)}
             </th>
           </tr>
@@ -92,7 +92,7 @@ export function ProductSpecs({ parameters, lang }: Props) {
                 <th scope="row" className="px-4 py-2 text-left align-top font-medium text-slate-900">
                   {parameter.label || parameter.name}
                   {parameter.description && (
-                    <span className="mt-0.5 block text-xs font-normal text-slate-500">
+                    <span className="mt-0.5 block text-xs font-normal text-slate-600">
                       {parameter.description}
                     </span>
                   )}

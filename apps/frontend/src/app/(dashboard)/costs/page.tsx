@@ -91,7 +91,7 @@ export default async function CostsPage({ searchParams }: Props) {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <Card>
               <div className="space-y-2">
-                <p className="text-sm font-medium text-slate-500">{t('totalSpend', lang)}</p>
+                <p className="text-sm font-medium text-slate-600">{t('totalSpend', lang)}</p>
                 <p className="text-3xl font-bold text-slate-900">{money(report.totalEur)}</p>
                 <p className="text-sm text-slate-600">
                   {report.orderCount} {t('ordersCounted', lang)}
@@ -210,7 +210,7 @@ function Breakdown({
                     style={{ width: `${max > 0 ? Math.max(2, (bucket.totalEur / max) * 100) : 0}%` }}
                   />
                 </div>
-                <span className="text-xs text-slate-500 whitespace-nowrap">
+                <span className="text-xs text-slate-600 whitespace-nowrap">
                   {bucket.orderCount} {t('ordersCounted', lang)}
                 </span>
               </div>

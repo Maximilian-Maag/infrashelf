@@ -198,7 +198,7 @@ export function BudgetModal({ target, onClose, onSaved, lang }: Props) {
                   </span>
                 </div>
               )}
-              <p className="mt-2 text-xs text-slate-500">{t('budgetCommittedHint', lang)}</p>
+              <p className="mt-2 text-xs text-slate-600">{t('budgetCommittedHint', lang)}</p>
               {/* A caveat nobody sees is not a caveat: `committed` is missing
                   these orders' spend entirely, and there is no number to add —
                   the price is unknown, not small. */}

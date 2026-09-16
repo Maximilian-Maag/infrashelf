@@ -196,7 +196,7 @@ export function InfraFilters({ facets, lang, resultCount }: Props) {
       {/* Announced rather than merely drawn: a filter change re-renders the list
           below without moving focus, so a screen-reader user would otherwise get
           no feedback that anything happened. */}
-      <p className="text-xs text-slate-500" role="status" aria-live="polite" aria-busy={isPending}>
+      <p className="text-xs text-slate-600" role="status" aria-live="polite" aria-busy={isPending}>
         {resultCount} {t('matchingElements', lang)}
       </p>
     </div>

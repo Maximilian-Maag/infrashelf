@@ -35,8 +35,8 @@ interface Props {
 export function CostCaveats({ estimatedOrders, unconverted, unpricedOrders = 0, lang, monthInProgress }: Props) {
   return (
     <div className="mt-3 space-y-1 border-t border-slate-100 pt-2">
-      <p className="text-xs text-slate-500">{t('notAProjection', lang)}</p>
-      {monthInProgress && <p className="text-xs text-slate-500">{t('monthInProgress', lang)}</p>}
+      <p className="text-xs text-slate-600">{t('notAProjection', lang)}</p>
+      {monthInProgress && <p className="text-xs text-slate-600">{t('monthInProgress', lang)}</p>}
       {estimatedOrders > 0 && (
         <p className="text-xs text-amber-700">
           {t('estimatedNotice', lang)} ({estimatedOrders})

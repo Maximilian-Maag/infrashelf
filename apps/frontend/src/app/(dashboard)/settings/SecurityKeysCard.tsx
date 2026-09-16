@@ -177,7 +177,7 @@ export function SecurityKeysCard() {
               <li key={c.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
                 <div>
                   <p className="text-sm font-medium text-slate-900">{c.label}</p>
-                  <p className="text-xs text-slate-500">
+                  <p className="text-xs text-slate-600">
                     {t('added', lang)} {new Date(c.createdAt).toLocaleDateString(lang)}
                     {c.lastUsedAt
                       ? ` · ${t('lastUsed', lang)} ${new Date(c.lastUsedAt).toLocaleDateString(lang)}`

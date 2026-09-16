@@ -229,7 +229,7 @@ export default async function ProductDetailPage({ params, searchParams }: Props)
           <dl className="divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white text-sm">
             {product.owner && (
               <div className="flex items-baseline justify-between gap-3 px-4 py-2">
-                <dt className="text-slate-500">{t('owner', lang)}</dt>
+                <dt className="text-slate-600">{t('owner', lang)}</dt>
                 <dd className="text-right font-medium text-slate-900">{product.owner}</dd>
               </div>
             )}
@@ -237,14 +237,14 @@ export default async function ProductDetailPage({ params, searchParams }: Props)
               {/* "Order" rather than "Approval": the row answers what happens when
                   you order this, and the sentence in the value says whether that
                   involves waiting for somebody. */}
-              <dt className="text-slate-500">{t('order', lang)}</dt>
+              <dt className="text-slate-600">{t('order', lang)}</dt>
               <dd className="text-right text-slate-700">
                 {ordersNeedApproval ? t('approvalRequired', lang) : t('approvalImmediate', lang)}
               </dd>
             </div>
             {product.docsUrl && (
               <div className="flex items-baseline justify-between gap-3 px-4 py-2">
-                <dt className="text-slate-500">{t('documentation', lang)}</dt>
+                <dt className="text-slate-600">{t('documentation', lang)}</dt>
                 <dd className="text-right">
                   {/* Underlined at rest, like the breadcrumb above and for the same
                       reason: colour alone is not enough (WCAG 1.4.1). */}
@@ -278,7 +278,7 @@ export default async function ProductDetailPage({ params, searchParams }: Props)
                       <span className="text-sm font-medium text-slate-900">
                         {price.display}
                         {price.original && (
-                          <span className="ml-2 text-xs font-normal text-slate-500">({price.original})</span>
+                          <span className="ml-2 text-xs font-normal text-slate-600">({price.original})</span>
                         )}
                       </span>
                     </li>

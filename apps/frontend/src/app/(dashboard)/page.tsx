@@ -175,7 +175,7 @@ export default async function DashboardHome() {
                   <h3 className="font-semibold text-sm text-slate-800 group-hover:underline leading-snug mb-1 line-clamp-2">
                     {product.name}
                   </h3>
-                  <p className="text-xs text-slate-500 line-clamp-2 flex-1">{product.description}</p>
+                  <p className="text-xs text-slate-600 line-clamp-2 flex-1">{product.description}</p>
                   <span className="text-xs font-medium mt-2" style={{ color: 'var(--bp-text)' }}>{t('orderNow', lang)}</span>
                 </div>
               </Link>
@@ -209,7 +209,7 @@ export default async function DashboardHome() {
                         tells them apart, and it is already in the URL. */}
                     <span className="sr-only"> #{order.id}</span>
                   </p>
-                  <p className="text-xs text-slate-500">
+                  <p className="text-xs text-slate-600">
                     {order.environmentName} · {order.projectName} · {new Date(order.createdAt).toLocaleDateString(lang)}
                   </p>
                 </div>

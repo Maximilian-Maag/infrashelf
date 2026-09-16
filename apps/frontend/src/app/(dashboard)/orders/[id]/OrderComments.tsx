@@ -126,11 +126,11 @@ export function OrderComments({
                   <span className="text-sm font-medium text-slate-900">
                     {comment.userName ?? `User #${comment.userId}`}
                   </span>
-                  <span className="text-xs text-slate-500">
+                  <span className="text-xs text-slate-600">
                     {new Date(comment.createdAt).toLocaleString(lang)}
                   </span>
                   {comment.edited && (
-                    <span className="text-xs italic text-slate-500">({t('edited', lang)})</span>
+                    <span className="text-xs italic text-slate-600">({t('edited', lang)})</span>
                   )}
                   {comment.internal && (
                     <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">
@@ -222,7 +222,7 @@ export function OrderComments({
                 {t('internalNote', lang)}
               </label>
             </div>
-            <p className="mt-1 ml-6 text-xs text-slate-500">{t('internalNoteHint', lang)}</p>
+            <p className="mt-1 ml-6 text-xs text-slate-600">{t('internalNoteHint', lang)}</p>
           </div>
         )}
         <div className="flex justify-end">

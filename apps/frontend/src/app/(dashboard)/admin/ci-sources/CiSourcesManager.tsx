@@ -187,7 +187,7 @@ export function CiSourcesManager({ initial, initialError = null }: Props) {
                       {src.provider}
                     </span>
                   </div>
-                  <p className="text-xs text-slate-500 font-mono break-words">{src.url}</p>
+                  <p className="text-xs text-slate-600 font-mono break-words">{src.url}</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <Button size="sm" variant="secondary" onClick={() => openEdit(src)}>{t('edit', lang)}</Button>

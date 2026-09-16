@@ -348,7 +348,7 @@ export default function CatalogPage() {
       {/* Category sidebar */}
       <aside className="hidden md:block w-52 shrink-0">
         <div className="bg-white rounded-lg border border-slate-200 p-4 sticky top-28">
-          <h2 className="font-bold text-xs text-slate-500 mb-3 uppercase tracking-wide">{t('categories', lang)}</h2>
+          <h2 className="font-bold text-xs text-slate-600 mb-3 uppercase tracking-wide">{t('categories', lang)}</h2>
           <ul className="space-y-1">
             <li>
               <button
@@ -402,7 +402,7 @@ export default function CatalogPage() {
             ) : (
               <>
                 <h1 className="text-xl font-bold text-slate-800">{t('productCatalog', lang)}</h1>
-                <p className="text-sm text-slate-500 mt-0.5">{t('productCatalogSubtitle', lang)}</p>
+                <p className="text-sm text-slate-600 mt-0.5">{t('productCatalogSubtitle', lang)}</p>
               </>
             )}
           </div>
@@ -415,7 +415,7 @@ export default function CatalogPage() {
               load are otherwise the same silence. InfraFilters already does
               this; this is the same wiring (#186). */}
           <span
-            className="text-sm text-slate-500"
+            className="text-sm text-slate-600"
             role="status"
             aria-live="polite"
             aria-busy={loading}
@@ -492,7 +492,7 @@ export default function CatalogPage() {
             <svg className="h-14 w-14 mx-auto mb-4 text-slate-200" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
             </svg>
-            <p className="font-semibold text-slate-500">{t('noProducts', lang)}</p>
+            <p className="font-semibold text-slate-600">{t('noProducts', lang)}</p>
             {search && (
               <button onClick={() => setSearch('')} className="text-sm mt-2 inline-flex min-h-11 items-center hover:underline" style={{ color: 'var(--bp-text)' }}>
                 ← {t('allProducts', lang)}

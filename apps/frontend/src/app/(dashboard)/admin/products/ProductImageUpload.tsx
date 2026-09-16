@@ -322,7 +322,7 @@ export function ProductImageUpload({ productId, initial, initialError = null, on
             placeholder={t('placeholderImageAltExample', lang)}
             className="min-h-11 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-slate-600">
             {t('imageDescriptionHint', lang)} {t('requiredForEveryImage', lang)}
           </p>
         </div>
@@ -345,7 +345,7 @@ export function ProductImageUpload({ productId, initial, initialError = null, on
             }}
             className="block w-full max-w-full text-sm text-slate-700 file:mr-3 file:rounded-md file:border file:border-slate-300 file:bg-white file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-slate-700 hover:file:bg-slate-50"
           />
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-slate-600">
             {t('imageFormatHintPlain', lang)} {t('maxPicturesPerProduct', lang)}: {MAX_IMAGES}.
             {images.length >= MAX_IMAGES && ` ${t('removeOneToAddAnother', lang)}`}
           </p>

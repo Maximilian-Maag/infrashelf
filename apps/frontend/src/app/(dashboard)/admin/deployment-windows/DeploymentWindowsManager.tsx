@@ -186,7 +186,7 @@ export function DeploymentWindowsManager({ initial, initialError = null }: Props
         </div>
 
         {windows.length === 0 && !loadFailed ? (
-          <p className="text-sm text-slate-500 mb-4">{t('windowsNone', lang)}</p>
+          <p className="text-sm text-slate-600 mb-4">{t('windowsNone', lang)}</p>
         ) : (
           <ul className="space-y-3 mb-4">
             {windows.map((w, i) => (
@@ -213,7 +213,7 @@ export function DeploymentWindowsManager({ initial, initialError = null }: Props
                   onChange={(e) => update(i, { durationMinutes: Number(e.target.value) })}
                   required
                 />
-                <span className="pb-2 text-sm text-slate-500 tabular-nums">{spanOf(w)}</span>
+                <span className="pb-2 text-sm text-slate-600 tabular-nums">{spanOf(w)}</span>
                 <Button type="button" variant="secondary" onClick={() => removeWindow(i)} className="mb-0.5">
                   {t('remove', lang)}
                 </Button>

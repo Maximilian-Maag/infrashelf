@@ -213,7 +213,7 @@ export function AuditTable() {
                 {
                   header: t('date', lang),
                   render: (row) => (
-                    <span className="text-xs text-slate-500 whitespace-nowrap">
+                    <span className="text-xs text-slate-600 whitespace-nowrap">
                       {new Date(row.createdAt).toLocaleString(lang)}
                     </span>
                   ),
@@ -232,7 +232,7 @@ export function AuditTable() {
         // which is always on the page — audit.spec.ts read that instead of this
         // pager for months and never ran the assertion underneath it.
         <div data-testid="audit-pager" className="flex items-center justify-between">
-          <p className="text-sm text-slate-500">
+          <p className="text-sm text-slate-600">
             {t('page', lang)} {page} / {totalPages} · {total} {t('entriesLower', lang)}
           </p>
           <div className="flex gap-2">

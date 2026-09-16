@@ -234,7 +234,7 @@ export function EnvironmentsManager({ ciSources, initial, initialError = null }:
               <div key={env.id} className="flex items-center justify-between rounded-lg border border-slate-100 px-4 py-3">
                 <div>
                   <p className="font-medium text-slate-900">{env.name}</p>
-                  {env.description && <p className="text-xs text-slate-500">{env.description}</p>}
+                  {env.description && <p className="text-xs text-slate-600">{env.description}</p>}
                 </div>
                 <div className="flex gap-2">
                   <Button size="sm" variant="secondary" onClick={() => openEdit(env)}>{t('edit', lang)}</Button>
@@ -286,7 +286,7 @@ export function EnvironmentsManager({ ciSources, initial, initialError = null }:
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium text-slate-700">{t('callbackSecretLabel', lang)}</p>
-                <p className="text-xs text-slate-500">{t('callbackSecretHint', lang)}</p>
+                <p className="text-xs text-slate-600">{t('callbackSecretHint', lang)}</p>
               </div>
             </div>
             {secretError && (

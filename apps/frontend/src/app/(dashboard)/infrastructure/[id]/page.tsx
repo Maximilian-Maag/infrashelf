@@ -103,7 +103,7 @@ export default async function InfrastructureDetailPage({ params }: Props) {
               <span className="flex items-center gap-2">
                 <StatusBadge status={element.displayStatus ?? element.status} lang={lang} />
                 {deploymentFailed && (
-                  <span className="text-xs text-slate-500">{t('deploymentFailed', lang)}</span>
+                  <span className="text-xs text-slate-600">{t('deploymentFailed', lang)}</span>
                 )}
               </span>
             </Field>
@@ -150,7 +150,7 @@ export default async function InfrastructureDetailPage({ params }: Props) {
           <dl className="divide-y divide-slate-100">
             {outputs.map(([key, value]) => (
               <div key={key} className="flex flex-col gap-1 py-2 sm:flex-row sm:items-baseline sm:gap-4">
-                <dt className="min-w-48 font-mono text-xs text-slate-500">{key}</dt>
+                <dt className="min-w-48 font-mono text-xs text-slate-600">{key}</dt>
                 <dd className="break-all font-mono text-sm text-slate-900">{value}</dd>
               </div>
             ))}
@@ -166,13 +166,13 @@ export default async function InfrastructureDetailPage({ params }: Props) {
             <dl className="divide-y divide-slate-100">
               {parameters.map(([key, value]) => (
                 <div key={key} className="flex flex-col gap-1 py-2 sm:flex-row sm:items-baseline sm:gap-4">
-                  <dt className="min-w-48 font-mono text-xs text-slate-500">{key}</dt>
+                  <dt className="min-w-48 font-mono text-xs text-slate-600">{key}</dt>
                   <dd className="break-all font-mono text-sm text-slate-900">{value}</dd>
                 </div>
               ))}
             </dl>
             {element.redactedParameters?.length > 0 && (
-              <p className="mt-3 text-xs text-slate-500">
+              <p className="mt-3 text-xs text-slate-600">
                 {t('sensitiveRedacted', lang)} {element.redactedParameters.join(', ')}
               </p>
             )}
@@ -188,7 +188,7 @@ export default async function InfrastructureDetailPage({ params }: Props) {
             {pipelines.map((pipelineId) => (
               <li key={pipelineId} className="flex items-baseline justify-between gap-4 py-2">
                 <span className="font-mono text-xs text-slate-700">{pipelineId}</span>
-                <span className="text-xs text-slate-500">
+                <span className="text-xs text-slate-600">
                   {/* The status comes from the run these ids belong to — the order
                       for a provisioning run, the element for a teardown — which the
                       API resolves via pipelinePhase. */}
@@ -212,7 +212,7 @@ export default async function InfrastructureDetailPage({ params }: Props) {
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</dt>
+      <dt className="text-xs font-medium uppercase tracking-wide text-slate-600">{label}</dt>
       <dd className="mt-0.5 text-sm text-slate-900">{children}</dd>
     </div>
   )

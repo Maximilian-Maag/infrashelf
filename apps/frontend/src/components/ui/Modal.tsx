@@ -82,7 +82,7 @@ export function Modal({ open, onClose, title, ariaLabel, children, size = 'md', 
             // 44px target (WCAG 2.5.5) does not push the title inward: the ✕ stays
             // optically where it was, its clickable box just now reaches the
             // padding it always looked like it filled.
-            className="flex h-11 w-11 -mr-2 shrink-0 items-center justify-center rounded-md text-slate-500 hover:text-slate-700 hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 transition-colors"
+            className="flex h-11 w-11 -mr-2 shrink-0 items-center justify-center rounded-md text-slate-600 hover:text-slate-700 hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 transition-colors"
             aria-label={closeLabel}
           >
             <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">

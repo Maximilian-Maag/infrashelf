@@ -229,7 +229,7 @@ function InfraRow({
             </Link>
             <StatusBadge status={item.displayStatus ?? item.status} lang={lang} />
             {deploymentFailed && (
-              <span className="text-xs text-slate-500">
+              <span className="text-xs text-slate-600">
                 {t('deploymentFailed', lang)} · #{item.orderId}
               </span>
             )}
@@ -247,7 +247,7 @@ function InfraRow({
               </span>
             )}
           </div>
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-slate-600">
             {showProject && <>{item.projectName ?? `Project #${item.projectId}`} · </>}
             {item.environmentName}
             {/* The size this element runs at (issue #98) … */}
@@ -270,7 +270,7 @@ function InfraRow({
               <div className="mt-2 rounded bg-slate-50 p-2 space-y-1">
                 {outputs.map(([k, v]) => (
                   <div key={k} className="flex gap-2 text-xs">
-                    <span className="font-mono text-slate-500 min-w-24">{k}:</span>
+                    <span className="font-mono text-slate-600 min-w-24">{k}:</span>
                     <span className="font-mono text-slate-900 break-all">{v}</span>
                   </div>
                 ))}

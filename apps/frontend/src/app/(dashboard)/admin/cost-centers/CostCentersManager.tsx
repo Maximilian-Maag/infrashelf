@@ -256,7 +256,7 @@ function BudgetBadge({ state, lang }: { state: BudgetState | undefined; lang: st
     >
       {state.exhausted && <span className="mr-1 font-medium">{t('budgetOverspent', lang)}:</span>}
       {`${state.committed.toFixed(2)} / ${formatBudgetMoney(state.amount, state.currency)}`}
-      <span className="ml-1 text-slate-500">
+      <span className="ml-1 text-slate-600">
         ({t(state.period === 'monthly' ? 'budgetPeriodMonthlyShort' : 'budgetPeriodTotalShort', lang)})
       </span>
     </span>

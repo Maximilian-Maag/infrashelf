@@ -88,7 +88,7 @@ export function HolidaysManager({ initial, initialError = null }: Props) {
     }
   }
 
-  if (loading) return <Card><p className="text-sm text-slate-500">{t('loading', lang)}</p></Card>
+  if (loading) return <Card><p className="text-sm text-slate-600">{t('loading', lang)}</p></Card>
 
   const feed = data?.feed
   const rows = data?.holidays ?? []
@@ -170,7 +170,7 @@ export function HolidaysManager({ initial, initialError = null }: Props) {
           <p className="text-sm font-medium text-slate-700 mb-1">
             {t('holidayFeedPreviewResult', lang)} ({preview.length})
           </p>
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-slate-600">
             {preview.slice(0, 8).map((h) => `${h.date} ${h.name}`).join(' · ')}
             {preview.length > 8 ? ' …' : ''}
           </p>
@@ -195,7 +195,7 @@ export function HolidaysManager({ initial, initialError = null }: Props) {
       </div>
 
       {rows.length === 0 ? (
-        <p className="text-sm text-slate-500">{t('holidaysNone', lang)}</p>
+        <p className="text-sm text-slate-600">{t('holidaysNone', lang)}</p>
       ) : (
         <ul className="divide-y divide-slate-100">
           {rows.map((h) => (
