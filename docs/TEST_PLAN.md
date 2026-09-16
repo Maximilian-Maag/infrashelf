@@ -114,7 +114,11 @@ Almost nothing is tested. Establish component testing with a small render helper
   first fetch lands must not paint one centre's figures under another's name.
 - **ProductEditForm**: false-"Saved!" regression — a failed per-env save shows an
   error, not a success badge; AI-translate error surfaces; webhook/stack/param
-  delete failures surface.
+  delete failures surface. The size/price grid comes from the page as a prop
+  (#473): rendered without a second request when it was read, retried and
+  reported when it was not (`undefined` ≠ an empty grid), and redrawn when an
+  offering is withdrawn — the one case the server cannot answer, because it
+  happened after the page rendered.
 - **Catalogue** ✅: the shop is a server component now (#472), so it is tested in
   two halves. `page.test.tsx`: the query it builds (page window, trimmed search,
   category, language), a category it cannot read treated as no filter, each of

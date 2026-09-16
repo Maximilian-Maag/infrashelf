@@ -7,6 +7,7 @@ import type {
   DeploymentEnvironment,
   ProductTranslation,
   CostCenter,
+  SizeMatrix,
 } from '@infrashelf/types'
 import { get } from '@/lib/serverApi'
 import { SectionError } from '@/components/ui/SectionError'
@@ -39,7 +40,7 @@ export default async function AdminProductDetailPage({ params, searchParams }: P
   if (role !== 'root') redirect('/admin')
   const lang = await getLang()
 
-  const [productRes, categoriesRes, environmentsRes, translationsRes, costCentersRes, imagesRes] = await Promise.allSettled([
+  const [productRes, categoriesRes, environmentsRes, translationsRes, costCentersRes, imagesRes, sizesRes] = await Promise.allSettled([
     get<ProductDetail>(`/api/admin/products/${id}`),
     get<Category[]>('/api/admin/categories'),
     get<DeploymentEnvironment[]>('/api/admin/environments'),
@@ -48,6 +49,8 @@ export default async function AdminProductDetailPage({ params, searchParams }: P
     get<CostCenter[]>('/api/admin/cost-centers'),
     // The gallery, which the upload control used to ask for on mount (#462).
     get<GalleryImage[]>(`/api/admin/products/${id}/images`),
+    // The size/price grid, which the matrix editor used to ask for on mount (#473).
+    get<SizeMatrix>(`/api/admin/products/${id}/sizes`),
   ])
 
   if (productRes.status === 'rejected') {
@@ -71,6 +74,17 @@ export default async function AdminProductDetailPage({ params, searchParams }: P
   const translations = section(translationsRes, [] as ProductTranslation[], `translations for product ${id}`)
   const costCenters = section(costCentersRes, [] as CostCenter[], `cost centers for product ${id}`)
   const images = section(imagesRes, [] as GalleryImage[], `gallery for product ${id}`)
+  /*
+   * Not through `section` (#473): its whole job is to turn a failure into a
+   * fallback, and the fallback here would be an empty grid — which is a real
+   * answer meaning "no sizes priced yet", on the one screen where believing it
+   * gets a product priced twice. `undefined` says nobody knows, and the editor
+   * retries and reports its own outcome. `unstable_rethrow` because a redirect
+   * from an ended session arrives here as a rejection like any other (#427) —
+   * `section` does that for the five above; this one has to do it itself.
+   */
+  if (sizesRes.status === 'rejected') unstable_rethrow(sizesRes.reason)
+  const sizes = sizesRes.status === 'fulfilled' ? (sizesRes.value ?? undefined) : undefined
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
@@ -119,6 +133,7 @@ export default async function AdminProductDetailPage({ params, searchParams }: P
         environments={environments.data}
         translations={translations.data}
         costCenters={costCenters.data}
+        initialSizes={sizes}
         lang={lang}
       />
     </div>
