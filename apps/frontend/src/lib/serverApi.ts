@@ -78,8 +78,14 @@ const endSessionOn401 = async <T>(call: Promise<T>): Promise<T> => {
   }
 }
 
-export const get = async <T>(path: string) =>
-  endSessionOn401(apiRequest<T>(path, { token: await bearer() }))
+/**
+ * `signal` for the same reason the browser's `get` has one: a caller that must
+ * not hang. It matters more here — a server component `await`ing a request that
+ * is accepted and never answered holds the whole response open, and the reader
+ * gets nothing at all rather than a page missing one panel (#472).
+ */
+export const get = async <T>(path: string, signal?: AbortSignal) =>
+  endSessionOn401(apiRequest<T>(path, { token: await bearer(), signal }))
 
 export const post = async <T>(path: string, body: unknown) =>
   endSessionOn401(apiRequest<T>(path, { method: 'POST', body, token: await bearer() }))
