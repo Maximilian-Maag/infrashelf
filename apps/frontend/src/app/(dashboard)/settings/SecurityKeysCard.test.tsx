@@ -137,4 +137,20 @@ describe('SecurityKeysCard lifts the enrolment gate (#197)', () => {
       window.PublicKeyCredential = original
     }
   })
+
+  it('does not say there are no security keys while that is unknown', async () => {
+    // This card already had it right — its "no security keys" line is gated on
+    // `credentials !== null`, and `null` is its unknown. Pinned because the
+    // sibling card had the same shape and got it wrong (#466).
+    vi.mocked(get).mockRejectedValue(new Error('backend unreachable'))
+    render(<SecurityKeysCard />)
+
+    await waitFor(() => expect(get).toHaveBeenCalled())
+    expect(screen.queryByText(/no security keys/i)).not.toBeInTheDocument()
+  })
+
+  it('says there are none once that is actually known', async () => {
+    render(<SecurityKeysCard initialCredentials={[]} />)
+    expect(screen.getByText(/no security keys/i)).toBeInTheDocument()
+  })
 })
