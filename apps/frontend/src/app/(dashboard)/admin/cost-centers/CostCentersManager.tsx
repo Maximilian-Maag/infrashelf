@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import {useState, useCallback } from 'react'
 import type {
   BudgetState,
   CostCenter,
@@ -17,26 +17,57 @@ import { useLang } from '@/lib/useLang'
 import { t } from '@/lib/i18n'
 import { BudgetModal, formatBudgetMoney } from './BudgetModal'
 
-export function CostCentersManager() {
+interface Props {
+  /** The cost centres the SERVER already fetched (#458). */
+  initial: CostCenter[]
+  /**
+   * The budget badges, keyed by cost-centre id.
+   *
+   * A separate request on the server too, and its failure is deliberately NOT
+   * the list's failure: this page is how a cost centre is renamed or retired,
+   * and none of that should become unreachable because the budget endpoint is
+   * unhappy. An absent badge and an unknown budget look the same, and neither
+   * claims a limit that is not there.
+   */
+  initialBudgets?: Record<number, BudgetState>
+  /** Why the server could not fetch the cost centres, if it could not (#415). */
+  initialError?: string | null
+}
+
+export function CostCentersManager({ initial, initialBudgets = {}, initialError = null }: Props) {
   const lang = useLang()
-  const [ccs, setCcs] = useState<CostCenter[]>([])
-  const [loading, setLoading] = useState(true)
+  const [ccs, setCcs] = useState<CostCenter[]>(initial)
+  // The server already has them, so nothing is pending on arrival.
+  const [loading, setLoading] = useState(false)
   const [addOpen, setAddOpen] = useState(false)
   const [editTarget, setEditTarget] = useState<CostCenter | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<CostCenter | null>(null)
   const [budgetTarget, setBudgetTarget] = useState<CostCenter | null>(null)
   /** Budget state by cost-centre id, for the badges on the rows. */
-  const [budgets, setBudgets] = useState<Record<number, BudgetState>>({})
+  const [budgets, setBudgets] = useState<Record<number, BudgetState>>(initialBudgets)
   const [formCode, setFormCode] = useState('')
   const [formName, setFormName] = useState('')
   const [formActive, setFormActive] = useState(true)
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
-  const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [deleteError, setDeleteError] = useState<string | null>(initialError)
+  /*
+   * Whether the LAST load failed, kept apart from `deleteError` (#415, #458).
+   *
+   * Without it an outage rendered the error and "no cost centres yet" together:
+   * two claims on one screen, one of them false, and the false one is what an
+   * operator acts on. `deleteError` cannot answer this alone — it also carries a
+   * failed delete, where the list really is what it says.
+   *
+   * `EnvironmentsManager` beside this one has said so since its own outage; this
+   * is the same fix.
+   */
+  const [loadFailed, setLoadFailed] = useState(initialError !== null)
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
+      setLoadFailed(false)
       setCcs((await get<CostCenter[]>('/api/admin/cost-centers')) ?? [])
       setDeleteError(null)
       /*
@@ -54,13 +85,12 @@ export function CostCentersManager() {
         setBudgets({})
       }
     } catch (e) {
+      setLoadFailed(true)
       setDeleteError(e instanceof Error ? e.message : t('failedToLoadCostCenters', lang))
     } finally {
       setLoading(false)
     }
   }, [lang])
-
-  useEffect(() => { void load() }, [load])
 
   function openAdd() {
     setFormCode(''); setFormName(''); setFormActive(true); setFormError(null); setAddOpen(true)
@@ -129,7 +159,7 @@ export function CostCentersManager() {
         )}
         {loading ? (
           <div className="flex justify-center py-8"><div className="h-8 w-8 animate-spin rounded-full border-4 border-slate-200 border-t-blue-600" /></div>
-        ) : ccs.length === 0 ? (
+        ) : ccs.length === 0 && !loadFailed ? (
           <p className="text-center py-6 text-slate-600">{t('noCostCentersYet', lang)}</p>
         ) : (
           <div className="space-y-2">

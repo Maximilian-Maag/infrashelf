@@ -48,8 +48,37 @@ const budgetState = (over: Partial<BudgetState> = {}): BudgetState => ({
   ...over,
 })
 
-/** Route the three GETs this screen makes; `budgets` defaults to none set. */
+/**
+ * The badges the SERVER would have handed over (#458).
+ *
+ * The list and the badges are fetched by the page now; only the per-centre
+ * `/budget` read in the modal is still a client fetch, so that is all `mockApi`
+ * still routes.
+ */
+let serverBudgets: BudgetState[] = []
+
+/**
+ * The card, excluding the dialogs behind it.
+ *
+ * Every `Modal` renders whether or not it is open, and the delete dialog carries
+ * its own copy of `deleteError` — so a page-level query for the message matches
+ * twice while only one of them is on screen.
+ */
+const listCard = () =>
+  (screen.getByRole('heading', { name: 'Cost Centers' }).closest('div.rounded-xl') as HTMLElement)
+
+/** Render with whatever `mockApi` was told the budgets are. */
+const renderManager = () =>
+  render(
+    <CostCentersManager
+      initial={costCenters}
+      initialBudgets={Object.fromEntries(serverBudgets.map((b) => [b.costCenterId, b]))}
+    />,
+  )
+
+/** Route the GETs this screen still makes; `budgets` defaults to none set. */
 function mockApi(budgets: BudgetState[] = [], perCentre?: BudgetState | Error) {
+  serverBudgets = budgets
   mockedGet.mockReset().mockImplementation((async (url: string) => {
     if (url === '/api/admin/cost-centers') return costCenters
     if (url === '/api/admin/cost-centers/budgets') return budgets
@@ -68,7 +97,7 @@ beforeEach(() => mockApi())
 describe('CostCentersManager budget badges (#325)', () => {
   it('shows committed over the limit, not the limit alone', async () => {
     mockApi([budgetState()])
-    render(<CostCentersManager />)
+    renderManager()
 
     // The number a person came for is how much is gone, so both halves are
     // rendered; a badge showing only "10000.00 EUR" repeats what they set.
@@ -77,7 +106,7 @@ describe('CostCentersManager budget badges (#325)', () => {
 
   it('marks an exhausted budget in words, not only in colour', async () => {
     mockApi([budgetState({ committed: 12_000, remaining: -2_000, exhausted: true })])
-    render(<CostCentersManager />)
+    renderManager()
 
     // #185: colour alone is not a carrier. The badge has to SAY it.
     expect(await screen.findByText(/Over budget/)).toBeInTheDocument()
@@ -85,22 +114,36 @@ describe('CostCentersManager budget badges (#325)', () => {
 
   it('renders no badge for a cost centre with no budget', async () => {
     mockApi([budgetState({ costCenterId: 2, amount: null, currency: null, period: null, behaviour: null })])
-    render(<CostCentersManager />)
+    renderManager()
 
     await screen.findByText('Platform')
     expect(screen.queryByText(/\d+\.\d\d \/ /)).not.toBeInTheDocument()
   })
 
+  it('does not claim there are no cost centres when the load failed', async () => {
+    // The error used to render ABOVE the list while "no cost centres yet"
+    // rendered below it: two claims on one screen, one of them false, and the
+    // false one is what an operator acts on (#415, #458).
+    render(<CostCentersManager initial={[]} initialError="backend unreachable" />)
+
+    expect(within(listCard()).getByText('backend unreachable')).toBeInTheDocument()
+    expect(within(listCard()).queryByText(/no cost cent/i)).not.toBeInTheDocument()
+  })
+
+  it('says there are none when there really are none', async () => {
+    render(<CostCentersManager initial={[]} />)
+    expect(screen.getByText(/no cost cent/i)).toBeInTheDocument()
+  })
+
   it('still lists the cost centres when the budgets request fails', async () => {
     // Renaming and retiring a cost centre must not become unreachable because
     // the budget endpoint is unhappy.
-    mockedGet.mockReset().mockImplementation((async (url: string) => {
-      if (url === '/api/admin/cost-centers') return costCenters
-      throw new Error('budgets are down')
-    }) as never)
-    render(<CostCentersManager />)
+    // The page hands over an empty badge map when that request failed, and the
+    // list is unaffected — an absent badge and an unknown budget look the same,
+    // and neither claims a limit that is not there.
+    render(<CostCentersManager initial={costCenters} initialBudgets={{}} />)
 
-    expect(await screen.findByText('Platform')).toBeInTheDocument()
+    expect(screen.getByText('Platform')).toBeInTheDocument()
     expect(screen.queryByText(/budgets are down/)).not.toBeInTheDocument()
   })
 })
@@ -109,7 +152,7 @@ describe('CostCentersManager budget modal (#325)', () => {
   it('saves the amount, currency, period and behaviour that were chosen', async () => {
     const user = userEvent.setup()
     mockApi([], budgetState({ amount: null, currency: null, period: null, behaviour: null, committed: 400, remaining: 0 }))
-    render(<CostCentersManager />)
+    renderManager()
 
     await user.click((await screen.findAllByRole('button', { name: 'Budget' }))[0])
     const dialog = await screen.findByRole('dialog')
@@ -140,7 +183,7 @@ describe('CostCentersManager budget modal (#325)', () => {
   it('defaults a new budget to block rather than warn', async () => {
     const user = userEvent.setup()
     mockApi([], budgetState({ amount: null, currency: null, period: null, behaviour: null, committed: 0, remaining: 0 }))
-    render(<CostCentersManager />)
+    renderManager()
 
     await user.click((await screen.findAllByRole('button', { name: 'Budget' }))[0])
     const dialog = await screen.findByRole('dialog')
@@ -151,7 +194,7 @@ describe('CostCentersManager budget modal (#325)', () => {
   it('prefills the existing budget when there is one', async () => {
     const user = userEvent.setup()
     mockApi([budgetState()], budgetState())
-    render(<CostCentersManager />)
+    renderManager()
 
     await user.click((await screen.findAllByRole('button', { name: 'Budget' }))[0])
     const dialog = await screen.findByRole('dialog')
@@ -164,7 +207,7 @@ describe('CostCentersManager budget modal (#325)', () => {
   it('asks before removing a budget, and removes it when confirmed', async () => {
     const user = userEvent.setup()
     mockApi([budgetState()], budgetState())
-    render(<CostCentersManager />)
+    renderManager()
 
     await user.click((await screen.findAllByRole('button', { name: 'Budget' }))[0])
     const dialog = await screen.findByRole('dialog')
@@ -186,7 +229,7 @@ describe('CostCentersManager budget modal (#325)', () => {
   it('offers no removal for a cost centre that has no budget', async () => {
     const user = userEvent.setup()
     mockApi([], budgetState({ amount: null, currency: null, period: null, behaviour: null }))
-    render(<CostCentersManager />)
+    renderManager()
 
     await user.click((await screen.findAllByRole('button', { name: 'Budget' }))[0])
     const dialog = await screen.findByRole('dialog')
@@ -206,7 +249,7 @@ describe('CostCentersManager budget modal (#325)', () => {
       if (url === '/api/admin/cost-centers/1/budget') return budgetState({ amount: 9999, committed: 12 })
       throw new Error('the budget service is down')
     }) as never)
-    render(<CostCentersManager />)
+    renderManager()
 
     const buttons = await screen.findAllByRole('button', { name: 'Budget' })
     await user.click(buttons[0])
@@ -231,7 +274,7 @@ describe('CostCentersManager budget modal (#325)', () => {
     const user = userEvent.setup()
     const state = budgetState({ unpriced: 3 })
     mockApi([state], state)
-    render(<CostCentersManager />)
+    renderManager()
 
     await user.click((await screen.findAllByRole('button', { name: 'Budget' }))[0])
     const dialog = await screen.findByRole('dialog')
@@ -243,7 +286,7 @@ describe('CostCentersManager budget modal (#325)', () => {
     const user = userEvent.setup()
     const state = budgetState({ unconverted: [{ currency: 'JPY', amount: 90_000 }] })
     mockApi([state], state)
-    render(<CostCentersManager />)
+    renderManager()
 
     await user.click((await screen.findAllByRole('button', { name: 'Budget' }))[0])
     const dialog = await screen.findByRole('dialog')
@@ -253,7 +296,7 @@ describe('CostCentersManager budget modal (#325)', () => {
   it('warns what monthly actually measures, and only for monthly', async () => {
     const user = userEvent.setup()
     mockApi([], budgetState({ amount: null, currency: null, period: null, behaviour: null }))
-    render(<CostCentersManager />)
+    renderManager()
 
     await user.click((await screen.findAllByRole('button', { name: 'Budget' }))[0])
     const dialog = await screen.findByRole('dialog')
@@ -269,7 +312,7 @@ describe('CostCentersManager budget modal (#325)', () => {
     const user = userEvent.setup()
     mockApi([], budgetState())
     mockedPut.mockRejectedValue(new Error('Not found'))
-    render(<CostCentersManager />)
+    renderManager()
 
     await user.click((await screen.findAllByRole('button', { name: 'Budget' }))[0])
     const dialog = await screen.findByRole('dialog')
@@ -292,7 +335,7 @@ describe('CostCentersManager budget modal (#325)', () => {
       }
       return budgetState({ costCenterId: 2, amount: 50, currency: 'EUR', committed: 7, remaining: 43 })
     }) as never)
-    render(<CostCentersManager />)
+    renderManager()
 
     const buttons = await screen.findAllByRole('button', { name: 'Budget' })
     await user.click(buttons[0])
