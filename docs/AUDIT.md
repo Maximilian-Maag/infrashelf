@@ -40,7 +40,8 @@ changed blind.
    the `Authorization` header, so every export 401'd; the token was also placed
    in the URL (history/Referer/logs). Now fetched with the header and downloaded
    from the response blob.
-   *File:* `audit/AuditTable.tsx`.
+   *File:* `audit/AuditTable.tsx` — since #471 the buttons live in
+   `audit/AuditExport.tsx`, which kept the header-authenticated blob download.
 
 4. **CSV formula injection in audit export** — cells beginning with `= + - @`
    (tab/CR) are executed as formulas by Excel/Sheets. Audit fields capture
@@ -299,7 +300,8 @@ at all levels are in `docs/TEST_PLAN.md`.
 - Backend: +21 regression tests (order validation/ownership, multi-pipeline,
   rate-limit spoofing, CI pagination, cascade ordering).
 - Frontend: +31 tests — new component tests for `Input`, `Select`, `Table`,
-  `Modal`, `Toast`, `StatusBadge`, plus `AuditTable` debounce, and lib tests for
+  `Modal`, `Toast`, `StatusBadge`, plus the audit filters' debounce (in
+  `AuditTable` then, `AuditFilters` since #471), and lib tests for
   `i18n` (key/lang completeness + fallback) and `locale` (conversion + locale
   formatting).
 

@@ -64,53 +64,67 @@ test.describe('Audit log', () => {
     }
   })
 
-  test('filtering by action updates the audit table', async ({ page }) => {
-    await page.getByLabel(/^action$/i).fill('login')
-    // Table should reload — just check it doesn't crash
-    await page.waitForTimeout(600)
-    await expectNoServerError(page)
-  })
-
   /*
-   * Scoped to the pager, and that is the whole point.
+   * The pager is links now, not buttons (#471).
    *
-   * This read `page.getByRole('button', { name: /next/i })` at document level,
-   * which also matches the dev-tools button `next dev` injects into every page.
-   * That button is always there, so the guard was reporting on the overlay
-   * rather than on the table — whenever the overlay happened to mount first the
-   * body ran against a table with no pagination and failed on a Previous that
-   * was never rendered, and the rest of the time the assertion did not run at
-   * all. It had therefore never once checked what it is named after.
+   * Its predecessor read `page.getByRole('button', { name: /next/i })` at
+   * document level, which also matches the dev-tools button `next dev` injects
+   * into every page. That button is always there, so the guard was reporting on
+   * the overlay rather than on the table — whenever the overlay happened to
+   * mount first the body ran against a table with no pagination and failed on a
+   * Previous that was never rendered, and the rest of the time the assertion did
+   * not run at all. It had therefore never once checked what it is named after.
    *
-   * The behaviour is worth asserting properly: Previous is rendered but
-   * disabled on page 1, and clicking Next both enables it and advances the
-   * counter. Asserting only "both buttons exist" would pass against a pager
-   * whose buttons do nothing.
+   * What is worth asserting has changed with the mechanism: page two used to be
+   * component state, so all it could show was that a counter moved. It is a URL
+   * now, which is the point of the change — a filtered page of the audit log is
+   * something one administrator sends another — so that is what this checks.
    */
   test('pagination pages through the log when there is more than one page', async ({ page }) => {
-    const pager = page.getByTestId('audit-pager')
     const rows = page.getByRole('row')
     await expect(rows.first()).toBeVisible({ timeout: 15_000 })
+
+    const next = page.getByRole('link', { name: /next/i })
 
     // No pager is a legitimate state, not a reason to skip: it means the log fits
     // on one page, and that is worth asserting rather than shrugging at. A pager
     // that failed to render over 20+ entries would otherwise read as "fits on one
     // page" for ever.
-    if ((await pager.count()) === 0) {
+    if ((await next.count()) === 0) {
       expect(await rows.count(), 'no pager, so the log must fit on one page').toBeLessThanOrEqual(21)
+      // Page one is the bare URL, and nothing may have put an offset on it.
+      await expect(page).toHaveURL(/\/audit$/)
       return
     }
 
-    const prevBtn = pager.getByRole('button', { name: /previous/i })
-    const nextBtn = pager.getByRole('button', { name: /next/i })
+    // Previous is absent on page one rather than disabled: a disabled <a> is not
+    // a thing the platform has.
+    await expect(page.getByRole('link', { name: /previous/i })).toHaveCount(0)
 
-    await expect(pager).toContainText(/page 1 \/ \d+/i)
-    await expect(prevBtn).toBeDisabled()
-    await expect(nextBtn).toBeEnabled()
+    await next.click()
 
-    await nextBtn.click()
+    await expect(page).toHaveURL(/offset=20/)
+    await expect(page.getByRole('link', { name: /previous/i })).toBeVisible()
+    // And it is a real destination: reloading it lands on the same page rather
+    // than back at the top of the log.
+    await page.reload()
+    await expect(page).toHaveURL(/offset=20/)
+  })
 
-    await expect(pager).toContainText(/page 2 \/ \d+/i)
-    await expect(prevBtn).toBeEnabled()
+  /*
+   * The filters are in the URL, which is the whole point of #471: /audit is
+   * where one administrator tells another "look at what happened here", and
+   * before this the only thing that could be shared was instructions for
+   * reproducing the view.
+   */
+  test('a filtered view is a URL', async ({ page }) => {
+    await page.getByLabel(/^action$/i).fill('login')
+    await expect(page).toHaveURL(/action=login/)
+
+    // Arriving at that URL cold shows the same filtered view, filter bar
+    // included, with no client fetch needed to get there.
+    await page.goto('/audit?action=login')
+    await expect(page.getByLabel(/^action$/i)).toHaveValue('login')
+    await expectNoServerError(page)
   })
 })
