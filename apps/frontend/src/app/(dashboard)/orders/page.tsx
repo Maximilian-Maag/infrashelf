@@ -82,7 +82,7 @@ export default async function OrdersPage({ searchParams }: Props) {
           {
             header: t('date', lang),
             render: (row) => (
-              <span className="text-xs text-slate-500">
+              <span className="text-xs text-slate-600">
                 {new Date(row.createdAt).toLocaleDateString(lang)}
               </span>
             ),

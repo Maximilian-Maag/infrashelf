@@ -112,12 +112,12 @@ export default async function OrderDetailPage({ params }: Props) {
       <Card title={t('orderDetails', lang)}>
         <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4 text-sm">
           <div>
-            <dt className="font-medium text-slate-500">{t('product', lang)}</dt>
+            <dt className="font-medium text-slate-600">{t('product', lang)}</dt>
             <dd className="text-slate-900">{snapshot?.productName ?? order.productName ?? `#${order.productId}`}</dd>
           </div>
           {snapshot && (
             <div>
-              <dt className="font-medium text-slate-500">{t('price', lang)}</dt>
+              <dt className="font-medium text-slate-600">{t('price', lang)}</dt>
               <dd className="text-slate-900">
                 {/* The snapshot's price is the UNIT price that applied — the size's
                     once sizes exist (issue #98). Multiplied out here because the
@@ -134,7 +134,7 @@ export default async function OrderDetailPage({ params }: Props) {
               rename. */}
           {(snapshot?.sizeCode ?? order.sizeCode) && (
             <div>
-              <dt className="font-medium text-slate-500">{t('size', lang)}</dt>
+              <dt className="font-medium text-slate-600">{t('size', lang)}</dt>
               <dd className="text-slate-900">
                 {snapshot?.sizeLabel || snapshot?.sizeCode || order.sizeCode}
               </dd>
@@ -142,14 +142,14 @@ export default async function OrderDetailPage({ params }: Props) {
           )}
           {quantity > 1 && (
             <div>
-              <dt className="font-medium text-slate-500">{t('quantity', lang)}</dt>
+              <dt className="font-medium text-slate-600">{t('quantity', lang)}</dt>
               {/* One order, N infrastructure elements (issue #104) — one approval
                   covered all of them. */}
               <dd className="text-slate-900">{quantity}</dd>
             </div>
           )}
           <div>
-            <dt className="font-medium text-slate-500">{t('status', lang)}</dt>
+            <dt className="font-medium text-slate-600">{t('status', lang)}</dt>
             {/* `data-testid` because "Pending" appears twice on this page with
                 two different meanings: the ORDER's status here, and the
                 placeholder for a pipeline that has not reported below. A test
@@ -163,33 +163,33 @@ export default async function OrderDetailPage({ params }: Props) {
               stops it lingering on an order that already deployed. */}
           {order.status === 'scheduled' && order.scheduledFor && (
             <div>
-              <dt className="font-medium text-slate-500">{t('provisioningStarts', lang)}</dt>
+              <dt className="font-medium text-slate-600">{t('provisioningStarts', lang)}</dt>
               <dd className="text-slate-900">{new Date(order.scheduledFor).toLocaleString(lang)}</dd>
             </div>
           )}
           <div>
-            <dt className="font-medium text-slate-500">{t('environment', lang)}</dt>
+            <dt className="font-medium text-slate-600">{t('environment', lang)}</dt>
             <dd className="text-slate-900">{order.environmentName ?? `#${order.environmentId}`}</dd>
           </div>
           <div>
-            <dt className="font-medium text-slate-500">{t('project', lang)}</dt>
+            <dt className="font-medium text-slate-600">{t('project', lang)}</dt>
             <dd className="text-slate-900">{order.projectName ?? `#${order.projectId}`}</dd>
           </div>
           <div>
-            <dt className="font-medium text-slate-500">{t('orderedBy', lang)}</dt>
+            <dt className="font-medium text-slate-600">{t('orderedBy', lang)}</dt>
             <dd className="text-slate-900">{order.userName ?? `User #${order.userId}`}</dd>
           </div>
           <div>
-            <dt className="font-medium text-slate-500">{t('created', lang)}</dt>
+            <dt className="font-medium text-slate-600">{t('created', lang)}</dt>
             <dd className="text-slate-900">{new Date(order.createdAt).toLocaleString(lang)}</dd>
           </div>
           <div>
-            <dt className="font-medium text-slate-500">{t('updated', lang)}</dt>
+            <dt className="font-medium text-slate-600">{t('updated', lang)}</dt>
             <dd className="text-slate-900">{new Date(order.updatedAt).toLocaleString(lang)}</dd>
           </div>
           {order.costCenterId && (
             <div>
-              <dt className="font-medium text-slate-500">{t('costCenter', lang)}</dt>
+              <dt className="font-medium text-slate-600">{t('costCenter', lang)}</dt>
               {/* `IT-4711 — Platform Networking`, not `#3`. The id is what the
                   order is charged against; the code and the name are what the
                   person reading this page recognises. The fallback keeps the id
@@ -204,7 +204,7 @@ export default async function OrderDetailPage({ params }: Props) {
           )}
         </dl>
 
-        <p className="mt-4 text-xs text-slate-500">
+        <p className="mt-4 text-xs text-slate-600">
           {snapshot
             ? `${t('asOrdered', lang)} — ${t('asOrderedHint', lang)}`
             : t('noSnapshotHint', lang)}
@@ -224,8 +224,8 @@ export default async function OrderDetailPage({ params }: Props) {
             <table className="min-w-full text-sm divide-y divide-slate-100">
               <thead>
                 <tr>
-                  <th className="text-left py-2 pr-4 font-medium text-slate-500">{t('parameter', lang)}</th>
-                  <th className="text-left py-2 font-medium text-slate-500">{t('value', lang)}</th>
+                  <th className="text-left py-2 pr-4 font-medium text-slate-600">{t('parameter', lang)}</th>
+                  <th className="text-left py-2 font-medium text-slate-600">{t('value', lang)}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -278,12 +278,12 @@ export default async function OrderDetailPage({ params }: Props) {
                       #{el.id}
                     </ButtonLink>
                     {quantity > 1 && (
-                      <span className="text-xs text-slate-500">
+                      <span className="text-xs text-slate-600">
                         {el.sequence}/{quantity}
                       </span>
                     )}
                     <StatusBadge status={el.status} lang={lang} />
-                    {el.sizeCode && <span className="text-xs text-slate-500">{el.sizeCode}</span>}
+                    {el.sizeCode && <span className="text-xs text-slate-600">{el.sizeCode}</span>}
                   </div>
 
                   {outputs.length > 0 ? (
@@ -298,7 +298,7 @@ export default async function OrderDetailPage({ params }: Props) {
                       </tbody>
                     </table>
                   ) : (
-                    <p className="mt-2 text-xs text-slate-500">{t('noOutputs', lang)}</p>
+                    <p className="mt-2 text-xs text-slate-600">{t('noOutputs', lang)}</p>
                   )}
                 </li>
               )
@@ -317,7 +317,7 @@ export default async function OrderDetailPage({ params }: Props) {
                     has always been written and was never selected into the order,
                     so this list read as a run that never reported — the same map
                     /infrastructure/{id} has shown all along. */}
-                <span className="text-xs text-slate-500">
+                <span className="text-xs text-slate-600">
                   {order.pipelineStatus?.[pid] ?? t('statusPending', lang)}
                 </span>
               </li>

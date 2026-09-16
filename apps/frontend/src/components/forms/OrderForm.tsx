@@ -415,7 +415,7 @@ export function OrderForm({
           <p className="mt-1 text-sm text-slate-900" data-testid="overhead-cost-center">
             {selectedEnv?.overheadCostCenterName ?? '—'}
           </p>
-          <p className="mt-1 text-xs text-slate-500">{t('overheadCostCenterHint', lang)}</p>
+          <p className="mt-1 text-xs text-slate-600">{t('overheadCostCenterHint', lang)}</p>
         </div>
       )}
 
@@ -457,12 +457,12 @@ export function OrderForm({
             ]}
           />
           {templateId && (
-            <p className="mt-1 text-xs text-slate-500">
+            <p className="mt-1 text-xs text-slate-600">
               {`${t('paramsPrefilled', lang)}${templateId}. ${t('paramsPrefilledHint', lang)}`}
             </p>
           )}
           {fromInfraId && templateId === fromInfraId && (
-            <p className="mt-1 text-xs text-slate-500" role="status">{t('reorderHint', lang)}</p>
+            <p className="mt-1 text-xs text-slate-600" role="status">{t('reorderHint', lang)}</p>
           )}
         </div>
       )}

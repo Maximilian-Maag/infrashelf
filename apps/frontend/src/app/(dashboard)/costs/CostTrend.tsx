@@ -173,7 +173,7 @@ export function CostTrend({ series, money, lang, estimatedOrders, unconverted }:
           the table below names every month in full — and dropped altogether on a
           phone, where a twelve-month axis cannot fit legibly and a clipped label is
           worse than the table it duplicates. */}
-      <div aria-hidden="true" className="hidden text-xs text-slate-500 sm:flex">
+      <div aria-hidden="true" className="hidden text-xs text-slate-600 sm:flex">
         {series.map((period, i) => (
           <span key={period.period} className="min-w-0 flex-1 truncate text-center">
             {(last - i) % step === 0 ? monthLabel(period.period, lang) : ''}
@@ -205,7 +205,7 @@ export function CostTrend({ series, money, lang, estimatedOrders, unconverted }:
         <summary className="cursor-pointer text-xs text-slate-600 min-h-11 py-3">{t('details', lang)}</summary>
         <table className="mt-2 w-full text-sm">
           <thead>
-            <tr className="text-left text-xs text-slate-500">
+            <tr className="text-left text-xs text-slate-600">
               <th scope="col" className="py-1 font-medium">{t('month', lang)}</th>
               <th scope="col" className="py-1 text-right font-medium">{t('totalSpend', lang)}</th>
               <th scope="col" className="py-1 text-right font-medium">{t('ordersCounted', lang)}</th>

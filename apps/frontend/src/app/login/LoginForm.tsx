@@ -372,7 +372,7 @@ export function LoginForm({ shopName, shopSubtitle, logoDataUrl, primaryColor, s
                     {loading ? t('twoFactorVerifying', lang) : t('useSecurityKey', lang)}
                   </button>
                   {hasTotp && (
-                    <p className="text-center text-xs text-slate-500">{t('orUseCode', lang)}</p>
+                    <p className="text-center text-xs text-slate-600">{t('orUseCode', lang)}</p>
                   )}
                 </div>
               )}

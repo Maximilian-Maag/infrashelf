@@ -140,7 +140,7 @@ export function CostDistribution({
               wide "100 %" and a narrow "0 %" label off their own marks. Hidden from
               assistive technology: read out as "0 25 50 75 100" it is noise next to
               the exact shares in the table below. */}
-          <div aria-hidden="true" className="relative mt-1 h-4 text-xs text-slate-500">
+          <div aria-hidden="true" className="relative mt-1 h-4 text-xs text-slate-600">
             {TICKS.map((fraction) => (
               <span
                 key={fraction}
@@ -166,7 +166,7 @@ export function CostDistribution({
           hidden from assistive technology and the row reads as label, amount, share. */}
       <table className="mt-3 w-full text-sm">
         <thead>
-          <tr className="text-left text-xs text-slate-500">
+          <tr className="text-left text-xs text-slate-600">
             <th scope="col" className="py-1 font-medium">{dimension}</th>
             <th scope="col" className="py-1 text-right font-medium">{t('totalSpend', lang)}</th>
             <th scope="col" className="py-1 text-right font-medium">{t('share', lang)}</th>

@@ -189,7 +189,7 @@ export function DelegationPanel({ delegations }: Props) {
       )}
 
       {given.length === 0 && delegations.candidates.length > 0 && (
-        <p className="text-sm text-slate-500">{t('noDelegation', lang)}</p>
+        <p className="text-sm text-slate-600">{t('noDelegation', lang)}</p>
       )}
     </section>
   )

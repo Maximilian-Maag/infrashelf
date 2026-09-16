@@ -85,7 +85,7 @@ export default async function AdminProductsPage() {
           {
             header: t('created', lang),
             render: (row) => (
-              <span className="text-xs text-slate-500">{new Date(row.createdAt).toLocaleDateString(lang)}</span>
+              <span className="text-xs text-slate-600">{new Date(row.createdAt).toLocaleDateString(lang)}</span>
             ),
           },
           {

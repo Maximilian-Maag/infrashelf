@@ -56,7 +56,7 @@ export default async function AdminPage() {
             <h2 className="font-semibold text-slate-900 group-hover:text-blue-700 transition-colors mb-1">
               {t(section.title, lang)}
             </h2>
-            <p className="text-sm text-slate-500">{t(section.description, lang)}</p>
+            <p className="text-sm text-slate-600">{t(section.description, lang)}</p>
           </Link>
         ))}
       </div>

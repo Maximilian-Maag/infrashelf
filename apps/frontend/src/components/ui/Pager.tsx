@@ -49,7 +49,7 @@ export function Pager({ total, limit, offset, basePath, params = {}, lang }: Pag
 
   return (
     <div className="flex items-center justify-between">
-      <p className="text-sm text-slate-500">
+      <p className="text-sm text-slate-600">
         {t('page', lang)} {page} / {totalPages} · {total.toLocaleString(lang)} {t('entriesLower', lang)}
       </p>
       <div className="flex gap-2">

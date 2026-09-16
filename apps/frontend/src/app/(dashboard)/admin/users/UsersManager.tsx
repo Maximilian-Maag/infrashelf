@@ -194,7 +194,7 @@ export function UsersManager({ initial, initialError = null }: Props) {
                         {t(ROLE_KEYS[user.role], lang)}
                       </span>
                     </div>
-                    <p className="text-xs text-slate-500">{user.email}</p>
+                    <p className="text-xs text-slate-600">{user.email}</p>
                   </div>
                 </div>
                 {/* Wraps: three buttons on one row measured 489px on a 320px

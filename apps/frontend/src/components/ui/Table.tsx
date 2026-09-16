@@ -51,7 +51,7 @@ export function Table<T extends { id?: number | string }>({
         <thead className="bg-slate-50">
           <tr>
             {columns.map((col) => {
-              const cls = `px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider ${col.className ?? ''}`
+              const cls = `px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider ${col.className ?? ''}`
               return col.header ? (
                 <th key={col.header} scope="col" className={cls}>
                   {col.header}
@@ -67,7 +67,7 @@ export function Table<T extends { id?: number | string }>({
             <tr>
               <td
                 colSpan={columns.length}
-                className="px-4 py-8 text-center text-slate-500"
+                className="px-4 py-8 text-center text-slate-600"
               >
                 {emptyMessage}
               </td>

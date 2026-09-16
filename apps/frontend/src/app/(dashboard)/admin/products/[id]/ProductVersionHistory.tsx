@@ -125,11 +125,11 @@ export function ProductVersionHistory({ productId, lang = 'en' }: Props) {
           <table className="min-w-full text-sm divide-y divide-slate-100">
             <thead>
               <tr>
-                <th className="text-left py-2 pr-4 font-medium text-slate-500">{t('date', lang)}</th>
-                <th className="text-left py-2 pr-4 font-medium text-slate-500">{t('environment', lang)}</th>
-                <th className="text-left py-2 pr-4 font-medium text-slate-500">{t('changes', lang)}</th>
-                <th className="text-left py-2 pr-4 font-medium text-slate-500">{t('changelog', lang)}</th>
-                <th className="text-left py-2 font-medium text-slate-500">{t('user', lang)}</th>
+                <th className="text-left py-2 pr-4 font-medium text-slate-600">{t('date', lang)}</th>
+                <th className="text-left py-2 pr-4 font-medium text-slate-600">{t('environment', lang)}</th>
+                <th className="text-left py-2 pr-4 font-medium text-slate-600">{t('changes', lang)}</th>
+                <th className="text-left py-2 pr-4 font-medium text-slate-600">{t('changelog', lang)}</th>
+                <th className="text-left py-2 font-medium text-slate-600">{t('user', lang)}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">

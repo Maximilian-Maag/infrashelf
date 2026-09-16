@@ -34,7 +34,7 @@ const describeIt = async (user: ReturnType<typeof userEvent.setup>, text = 'Traf
   await user.type(newAltInput(), text)
 }
 
-/** The gallery the component loads on mount. */
+/** The gallery the SERVER hands over, and that `load()` re-reads after a change. */
 const gallery = (images: { id: number; alt: string }[] = []) =>
   images.map((image, position) => ({ ...image, position, mime: 'image/png' }))
 
@@ -43,7 +43,15 @@ const gallery = (images: { id: number; alt: string }[] = []) =>
  * successful write. Individual tests override the write with mockResolvedValueOnce
  * or by inspecting the call.
  */
+let serverGallery: ReturnType<typeof gallery> = []
+
+const renderUpload = (props: { onChanged?: () => void; productId?: number } = {}) => {
+  const { productId = 7, ...rest } = props
+  return render(<ProductImageUpload productId={productId} initial={serverGallery} {...rest} />)
+}
+
 const stubFetch = (images: { id: number; alt: string }[] = []) => {
+  serverGallery = gallery(images)
   vi.stubGlobal(
     'fetch',
     vi.fn(async (_url: string, init?: RequestInit) => {
@@ -67,7 +75,7 @@ afterEach(() => {
 describe('ProductImageUpload — uploading', () => {
   it('appends the chosen file as multipart, through the proxy and with no token', async () => {
     const user = userEvent.setup()
-    render(<ProductImageUpload productId={7} />)
+    renderUpload()
     await describeIt(user)
 
     await user.upload(fileInput(), file('p.png', 'image/png'))
@@ -87,7 +95,7 @@ describe('ProductImageUpload — uploading', () => {
 
   it('refuses a file over 10 MB without uploading it', async () => {
     const user = userEvent.setup()
-    render(<ProductImageUpload productId={7} />)
+    renderUpload()
     await describeIt(user)
 
     await user.upload(fileInput(), file('huge.png', 'image/png', 11 * 1024 * 1024))
@@ -101,7 +109,7 @@ describe('ProductImageUpload — uploading', () => {
     // is exactly how a file reaches the server and fails there: `accept` goes by
     // the declared type, the server goes by the bytes.
     const user = userEvent.setup()
-    render(<ProductImageUpload productId={7} />)
+    renderUpload()
     await describeIt(user)
     vi.mocked(fetch).mockResolvedValueOnce(
       new Response(JSON.stringify({ error: 'Unsupported image type — allowed: image/png' }), { status: 415 }),
@@ -114,7 +122,7 @@ describe('ProductImageUpload — uploading', () => {
 
   it('sends the description with the file', async () => {
     const user = userEvent.setup()
-    render(<ProductImageUpload productId={7} />)
+    renderUpload()
     await describeIt(user, 'Dashboard with traffic graphs')
 
     await user.upload(fileInput(), file('p.png', 'image/png'))
@@ -128,7 +136,7 @@ describe('ProductImageUpload — uploading', () => {
     // WCAG 1.1.1: an empty alt claims the picture carries no information, and only
     // the person uploading it can make that claim.
     const user = userEvent.setup()
-    render(<ProductImageUpload productId={7} />)
+    renderUpload()
 
     await user.upload(fileInput(), file('p.png', 'image/png'))
 
@@ -140,7 +148,7 @@ describe('ProductImageUpload — uploading', () => {
     // The next picture is a different picture; reusing the text is how a gallery
     // ends up with the same alt on every image.
     const user = userEvent.setup()
-    render(<ProductImageUpload productId={7} />)
+    renderUpload()
     await describeIt(user, 'The front of it')
 
     await user.upload(fileInput(), file('p.png', 'image/png'))
@@ -150,7 +158,7 @@ describe('ProductImageUpload — uploading', () => {
 
   it('reports a network failure instead of looking successful', async () => {
     const user = userEvent.setup()
-    render(<ProductImageUpload productId={7} />)
+    renderUpload()
     await describeIt(user)
     vi.mocked(fetch).mockRejectedValueOnce(new Error('offline'))
 
@@ -162,7 +170,7 @@ describe('ProductImageUpload — uploading', () => {
   it('notifies the parent only after a successful change', async () => {
     const user = userEvent.setup()
     const onChanged = vi.fn()
-    render(<ProductImageUpload productId={7} onChanged={onChanged} />)
+    renderUpload({ onChanged })
     await describeIt(user)
 
     await user.upload(fileInput(), file('p.png', 'image/png'))
@@ -184,7 +192,7 @@ describe('ProductImageUpload — an existing gallery', () => {
 
   it('lists the pictures it already has, with their descriptions', async () => {
     stubFetch(two)
-    render(<ProductImageUpload productId={9} />)
+    renderUpload({ productId: 9 })
 
     expect(await screen.findByDisplayValue('The front of it')).toBeInTheDocument()
     expect(screen.getByDisplayValue('The back of it')).toBeInTheDocument()
@@ -193,7 +201,7 @@ describe('ProductImageUpload — an existing gallery', () => {
   it('saves a changed description without re-uploading the file', async () => {
     stubFetch(two)
     const user = userEvent.setup()
-    render(<ProductImageUpload productId={9} />)
+    renderUpload({ productId: 9 })
 
     const field = await screen.findByDisplayValue('The front of it')
     await user.clear(field)
@@ -210,7 +218,7 @@ describe('ProductImageUpload — an existing gallery', () => {
   it('refuses to save an empty description', async () => {
     stubFetch(two)
     const user = userEvent.setup()
-    render(<ProductImageUpload productId={9} />)
+    renderUpload({ productId: 9 })
 
     const field = await screen.findByDisplayValue('The front of it')
     await user.clear(field)
@@ -223,7 +231,7 @@ describe('ProductImageUpload — an existing gallery', () => {
   it('removes one picture with a DELETE naming it', async () => {
     stubFetch(two)
     const user = userEvent.setup()
-    render(<ProductImageUpload productId={12} />)
+    renderUpload({ productId: 12 })
 
     await user.click(await screen.findByRole('button', { name: /remove: the back of it/i }))
 
@@ -238,7 +246,7 @@ describe('ProductImageUpload — an existing gallery', () => {
     // which is also what keeps a reorder from half-applying.
     stubFetch(two)
     const user = userEvent.setup()
-    render(<ProductImageUpload productId={4} />)
+    renderUpload({ productId: 4 })
 
     await user.click(await screen.findByRole('button', { name: /move down: the front of it/i }))
 
@@ -251,15 +259,38 @@ describe('ProductImageUpload — an existing gallery', () => {
 
   it('cannot move the first picture up or the last one down', async () => {
     stubFetch(two)
-    render(<ProductImageUpload productId={4} />)
+    renderUpload({ productId: 4 })
 
     expect(await screen.findByRole('button', { name: /move up: the front of it/i })).toBeDisabled()
     expect(screen.getByRole('button', { name: /move down: the back of it/i })).toBeDisabled()
   })
 
   it('says so, rather than showing an empty list, when the gallery cannot be loaded', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 500 })))
-    render(<ProductImageUpload productId={9} />)
+    // The reason comes from the server now (#462) — an empty gallery and one
+    // that could not be read are different facts, and only the first is
+    // something to act on by uploading.
+    render(<ProductImageUpload productId={9} initial={[]} initialError="HTTP 500: Bad Gateway" />)
+
+    expect(screen.getByRole('alert')).toHaveTextContent('HTTP 500: Bad Gateway')
+  })
+
+  it('shows no alert when the gallery is simply empty', async () => {
+    renderUpload({ productId: 9 })
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('still reports a gallery re-read that fails after a change', async () => {
+    // `load()` stays for the reload after an upload or a delete, and its failure
+    // is still the component's to report.
+    const user = userEvent.setup()
+    stubFetch([{ id: 11, alt: 'The front of it' }])
+    renderUpload({ productId: 9 })
+
+    vi.stubGlobal('fetch', vi.fn(async (_u: string, init?: RequestInit) =>
+      !init?.method || init.method === 'GET'
+        ? new Response(null, { status: 500 })
+        : new Response(JSON.stringify({}), { status: 200 })))
+    await user.click(screen.getAllByRole('button', { name: /remove/i })[0])
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/could not load the gallery/i)
   })

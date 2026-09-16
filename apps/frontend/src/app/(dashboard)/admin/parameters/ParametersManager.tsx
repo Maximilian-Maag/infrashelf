@@ -229,7 +229,7 @@ export function ParametersManager({
                     )}
                   </div>
                   <p className="text-xs font-mono text-slate-600">{p.name}</p>
-                  {p.description && <p className="text-xs text-slate-500">{p.description}</p>}
+                  {p.description && <p className="text-xs text-slate-600">{p.description}</p>}
                 </div>
                 <div className="flex gap-2">
                   <Button size="sm" variant="secondary" onClick={() => openEdit(p)}>{t('edit', lang)}</Button>
@@ -263,7 +263,7 @@ export function ParametersManager({
           {projects.length > 0 && (
             <fieldset className="rounded-lg border border-slate-200 p-3">
               <legend className="px-1 text-sm font-medium text-slate-700">{t('projects', lang)}</legend>
-              <p className="mb-2 text-xs text-slate-500">{t('parameterProjectsHint', lang)}</p>
+              <p className="mb-2 text-xs text-slate-600">{t('parameterProjectsHint', lang)}</p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-1">
                 {projects.map((project) => (
                   <label key={project.id} className="flex min-h-11 items-center gap-2 text-sm text-slate-700">
@@ -306,7 +306,7 @@ export function ParametersManager({
               <label htmlFor={`add-size-values`} className="text-sm font-medium text-slate-700">
                 {t('valuePerSize', lang)}
               </label>
-              <p className="text-xs text-slate-500">{t('valuePerSizeHint', lang)}</p>
+              <p className="text-xs text-slate-600">{t('valuePerSizeHint', lang)}</p>
               <textarea
                 id={`add-size-values`}
                 rows={4}
@@ -357,7 +357,7 @@ export function ParametersManager({
           {projects.length > 0 && (
             <fieldset className="rounded-lg border border-slate-200 p-3">
               <legend className="px-1 text-sm font-medium text-slate-700">{t('projects', lang)}</legend>
-              <p className="mb-2 text-xs text-slate-500">{t('parameterProjectsHint', lang)}</p>
+              <p className="mb-2 text-xs text-slate-600">{t('parameterProjectsHint', lang)}</p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-1">
                 {projects.map((project) => (
                   <label key={project.id} className="flex min-h-11 items-center gap-2 text-sm text-slate-700">
@@ -400,7 +400,7 @@ export function ParametersManager({
               <label htmlFor={`edit-size-values`} className="text-sm font-medium text-slate-700">
                 {t('valuePerSize', lang)}
               </label>
-              <p className="text-xs text-slate-500">{t('valuePerSizeHint', lang)}</p>
+              <p className="text-xs text-slate-600">{t('valuePerSizeHint', lang)}</p>
               <textarea
                 id={`edit-size-values`}
                 rows={4}

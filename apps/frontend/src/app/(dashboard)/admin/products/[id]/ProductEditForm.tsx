@@ -609,7 +609,7 @@ export function ProductEditForm({ product, categories, environments, translation
               maxLength={2000}
               placeholder={t('changelogHint', lang)}
               className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-            <p className="text-xs text-slate-500">{t('changelogHint', lang)}</p>
+            <p className="text-xs text-slate-600">{t('changelogHint', lang)}</p>
           </div>
           <div className="flex justify-end">
             <Button type="submit" disabled={saving}>{saving ? t('saving', lang) : t('save', lang)}</Button>
@@ -646,7 +646,7 @@ export function ProductEditForm({ product, categories, environments, translation
               <div key={tr.languageCode} className="rounded-lg border border-slate-100 p-3">
                 <span className="text-xs font-mono text-slate-600 uppercase">{tr.languageCode}</span>
                 <p className="font-medium text-slate-900">{tr.name}</p>
-                <p className="text-sm text-slate-500 line-clamp-2">{tr.description}</p>
+                <p className="text-sm text-slate-600 line-clamp-2">{tr.description}</p>
                 {tr.longDescription && (
                   // slate-600, not slate-400: 2.63:1 on white, which fails AA
                   // outright and is the one real violation the accessibility
@@ -745,7 +745,7 @@ export function ProductEditForm({ product, categories, environments, translation
                     {p.required && <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs text-red-700">{t('requiredBadge', lang)}</span>}
                     {p.sensitive && <span className="rounded-full bg-yellow-100 px-2 py-0.5 text-xs text-yellow-700">{t('sensitiveBadge', lang)}</span>}
                   </div>
-                  {p.description && <p className="text-xs text-slate-500">{p.description}</p>}
+                  {p.description && <p className="text-xs text-slate-600">{p.description}</p>}
                   {p.defaultValue && <p className="text-xs text-slate-600 font-mono">{t('defaultPrefix', lang)}: {p.defaultValue}</p>}
                 </div>
                 <div className="flex gap-2">
@@ -762,7 +762,7 @@ export function ProductEditForm({ product, categories, environments, translation
       <Card title={t('orderCallbacks', lang)} action={
         <Button size="sm" onClick={() => { setWhError(null); setWebhookModal(true) }}>{t('addWebhook', lang)}</Button>
       }>
-        <p className="text-xs text-slate-500 mb-3">{t('orderCallbacksIntro', lang)}</p>
+        <p className="text-xs text-slate-600 mb-3">{t('orderCallbacksIntro', lang)}</p>
         {whDeleteError && <Alert className="mb-3">{whDeleteError}</Alert>}
         {webhooks.length === 0 ? (
           <p className="text-sm text-slate-600">{t('noCallbacksConfigured', lang)}</p>
@@ -772,7 +772,7 @@ export function ProductEditForm({ product, categories, environments, translation
               <div key={wh.id} className="flex flex-wrap items-center justify-between gap-y-2 rounded-lg border border-slate-100 p-3">
                 <div>
                   <p className="font-medium text-slate-900">{wh.name}</p>
-                  <p className="text-xs text-slate-500 font-mono">{wh.webhookUrl}</p>
+                  <p className="text-xs text-slate-600 font-mono">{wh.webhookUrl}</p>
                 </div>
                 <Button size="sm" variant="danger" onClick={() => handleDeleteWebhook(wh.id)}>{t('delete', lang)}</Button>
               </div>
@@ -799,7 +799,7 @@ export function ProductEditForm({ product, categories, environments, translation
                     {/* A bare count rather than an inflected "1 step / 2 steps":
                         the plural rules differ across the 25 languages and the
                         table has no placeholder syntax to carry them. */}
-                    <p className="text-xs text-slate-500">{env?.name ?? `${t('environment', lang)} #${s.environmentId}`} &middot; {s.steps.length} {t('stepsLower', lang)} &middot; {t('stateKeyShort', lang)}: <span className="font-mono">{s.stateKeyParam}</span></p>
+                    <p className="text-xs text-slate-600">{env?.name ?? `${t('environment', lang)} #${s.environmentId}`} &middot; {s.steps.length} {t('stepsLower', lang)} &middot; {t('stateKeyShort', lang)}: <span className="font-mono">{s.stateKeyParam}</span></p>
                   </div>
                   <div className="flex gap-2">
                     <Button size="sm" variant="secondary" onClick={() => openEditStackModal(s)}>{t('edit', lang)}</Button>
@@ -829,7 +829,7 @@ export function ProductEditForm({ product, categories, environments, translation
             <label htmlFor="translation-description" className="text-sm font-medium text-slate-700">{t('description', lang)}</label>
             <textarea id="translation-description" value={translationDesc} onChange={(e) => setTranslationDesc(e.target.value)} rows={3}
               className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-            <p className="text-xs text-slate-500">{t('translationDescriptionHint', lang)}</p>
+            <p className="text-xs text-slate-600">{t('translationDescriptionHint', lang)}</p>
           </div>
           <div className="flex flex-col gap-1">
             <label htmlFor="translation-long-description" className="text-sm font-medium text-slate-700">
@@ -838,7 +838,7 @@ export function ProductEditForm({ product, categories, environments, translation
             <textarea id="translation-long-description" value={translationLongDesc}
               onChange={(e) => setTranslationLongDesc(e.target.value)} rows={6} maxLength={20000}
               className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-            <p className="text-xs text-slate-500">{t('longDescriptionHint', lang)}</p>
+            <p className="text-xs text-slate-600">{t('longDescriptionHint', lang)}</p>
           </div>
           <div className="flex justify-end gap-3">
             <Button type="button" variant="secondary" onClick={() => setTransModal(false)}>{t('cancel', lang)}</Button>
@@ -876,7 +876,7 @@ export function ProductEditForm({ product, categories, environments, translation
             {psSteps.map((step, i) => (
               <div key={i} className="rounded-lg border border-slate-200 p-3 space-y-2">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-medium text-slate-500">{t('step', lang)} {i + 1}</span>
+                  <span className="text-xs font-medium text-slate-600">{t('step', lang)} {i + 1}</span>
                   <Button type="button" size="sm" variant="danger" onClick={() => removeStep(i)}>{t('remove', lang)}</Button>
                 </div>
                 {/* The placeholders here are template paths, state suffixes and an
@@ -898,7 +898,7 @@ export function ProductEditForm({ product, categories, environments, translation
                     <label className="text-sm font-medium text-slate-700">{t('upstreamStateRefs', lang)}</label>
                     <Button type="button" size="sm" variant="secondary" onClick={() => addUpstreamRef(i)}>{t('addRef', lang)}</Button>
                   </div>
-                  <p className="text-xs text-slate-500">{t('upstreamStateRefsHint', lang)}</p>
+                  <p className="text-xs text-slate-600">{t('upstreamStateRefsHint', lang)}</p>
                   {step.upstreamRefs.length === 0 && (
                     <p className="text-xs text-slate-600 italic">{t('noUpstreamRefs', lang)}</p>
                   )}
@@ -920,7 +920,7 @@ export function ProductEditForm({ product, categories, environments, translation
                   {/* Indexed id: this block is rendered once per pipeline step, so a
                       fixed one would tie every step's label to the first textarea. */}
                   <label htmlFor={`step-fixed-params-${i}`} className="text-sm font-medium text-slate-700">{t('fixedParametersOptional', lang)}</label>
-                  <p className="text-xs text-slate-500">{t('fixedParametersHint', lang)}</p>
+                  <p className="text-xs text-slate-600">{t('fixedParametersHint', lang)}</p>
                   <textarea id={`step-fixed-params-${i}`} value={step.fixedParams} onChange={(e) => updateStep(i, 'fixedParams', e.target.value)}
                     rows={2} placeholder="REGION=eu-central"
                     className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500" />
@@ -998,7 +998,7 @@ export function ProductEditForm({ product, categories, environments, translation
               <label htmlFor="product-param-size-values" className="text-sm font-medium text-slate-700">
                 {t('valuePerSize', lang)}
               </label>
-              <p className="text-xs text-slate-500">{t('valuePerSizeHint', lang)}</p>
+              <p className="text-xs text-slate-600">{t('valuePerSizeHint', lang)}</p>
               <textarea
                 id="product-param-size-values"
                 rows={4}
@@ -1430,7 +1430,7 @@ function SizeMatrixEditor({
               about to be restored, and a "retired" note beside it would describe
               the state the save is leaving. */}
           {stored && !stored.active && cell.price.trim() === '' && (
-            <p className="mt-1 text-xs text-slate-500">
+            <p className="mt-1 text-xs text-slate-600">
               {t('retiredBadge', lang)} · {stored.price} {stored.currency}
             </p>
           )}
@@ -1440,7 +1440,7 @@ function SizeMatrixEditor({
 
   return (
     <div className="space-y-3">
-      <p className="text-xs text-slate-500">
+      <p className="text-xs text-slate-600">
         {t('sizesHint', lang)} <code>SIZE</code>.
       </p>
       {error && <Alert>{error}</Alert>}
@@ -1449,7 +1449,7 @@ function SizeMatrixEditor({
       <div className="overflow-x-auto">
         <table className="min-w-full border-separate border-spacing-0 text-sm">
           <thead>
-            <tr className="text-left text-xs font-medium uppercase tracking-wide text-slate-500">
+            <tr className="text-left text-xs font-medium uppercase tracking-wide text-slate-600">
               <th scope="col" className="px-2 py-2">{t('code', lang)}</th>
               <th scope="col" className="px-2 py-2">{t('label', lang)}</th>
               {matrix.environments.map((env) => (

@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { SessionInfo, RevokeSessionsResponse } from '@infrashelf/types'
 import { del, get } from '@/lib/api'
 import { Card } from '@/components/ui/Card'
@@ -62,6 +62,9 @@ const describeDevice = (userAgent: string | null): string => {
   if (browser && os) return `${browser} · ${os}`
   return browser ?? os ?? userAgent.slice(0, 40)
 }
+
+/** Nothing can change whether the page has hydrated, so there is nothing to subscribe to. */
+const subscribeToNothing = () => () => {}
 
 export function ActiveSessions({ initialSessions, userId }: Props) {
   const lang = useLang()
@@ -138,8 +141,15 @@ export function ActiveSessions({ initialSessions, userId }: Props) {
    * the raw ISO string instead would agree across both, but it would also be
    * what a viewer with JavaScript disabled is left reading.
    */
-  const [hydrated, setHydrated] = useState(false)
-  useEffect(() => setHydrated(true), [])
+  /*
+   * `useSyncExternalStore`, not state set by an effect (#462).
+   *
+   * "Has this hydrated" is a question about the environment rather than about
+   * this component, and the hook takes a SERVER snapshot and a client one — which
+   * is the whole of it: false on the server, true in the browser, subscribing to
+   * nothing because nothing else can change the answer.
+   */
+  const hydrated = useSyncExternalStore(subscribeToNothing, () => true, () => false)
 
   const localTime = (value: string) =>
     hydrated ? new Date(value).toLocaleString(lang) : '—'

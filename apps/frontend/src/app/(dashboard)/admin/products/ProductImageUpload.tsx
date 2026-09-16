@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import {useCallback, useRef, useState } from 'react'
 import { Button } from '@/components/ui/Button'
 import { Alert } from '@/components/ui/Alert'
 import { ProductImagePlaceholder } from '@/components/ui/ProductImage'
@@ -22,7 +22,7 @@ const MAX_ALT = 300
 /** Mirrors MAX_IMAGES_PER_PRODUCT in the backend service. */
 const MAX_IMAGES = 8
 
-interface GalleryImage {
+export interface GalleryImage {
   id: number
   alt: string
   position: number
@@ -31,6 +31,17 @@ interface GalleryImage {
 
 interface Props {
   productId: number
+  /**
+   * The gallery the SERVER already fetched (#462).
+   *
+   * This asked for it on mount, so the edit page arrived with an empty gallery
+   * and filled it in afterwards. `load()` below stays — it runs after an upload,
+   * a rename, a reorder or a delete, which are responses to actions rather than
+   * to mounting.
+   */
+  initial: GalleryImage[]
+  /** Why the server could not fetch it, if it could not (#415). */
+  initialError?: string | null
   /** Called after any successful change, so the page can refetch what it shows. */
   onChanged?: () => void
 }
@@ -48,14 +59,14 @@ interface Props {
  * reads `formData()` and because a 10 MB image would grow by a third on the way
  * through JSON.
  */
-export function ProductImageUpload({ productId, onChanged }: Props) {
+export function ProductImageUpload({ productId, initial, initialError = null, onChanged }: Props) {
   const lang = useLang()
   const inputRef = useRef<HTMLInputElement>(null)
-  const [images, setImages] = useState<GalleryImage[]>([])
+  const [images, setImages] = useState<GalleryImage[]>(initial)
   const [alt, setAlt] = useState('')
   const [saved, setSaved] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(initialError)
   // Bumped after a change so the thumbnails refetch: the image endpoints set
   // max-age=3600, so a replaced picture at the same id needs a different URL.
   const [version, setVersion] = useState(0)
@@ -77,10 +88,6 @@ export function ProductImageUpload({ productId, onChanged }: Props) {
       setError(t('couldNotLoadGallery', lang))
     }
   }, [productId, lang])
-
-  useEffect(() => {
-    void load()
-  }, [load])
 
   /** Re-read the gallery and tell the page, after a change succeeded. */
   const afterChange = async (message: string) => {
@@ -315,7 +322,7 @@ export function ProductImageUpload({ productId, onChanged }: Props) {
             placeholder={t('placeholderImageAltExample', lang)}
             className="min-h-11 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-slate-600">
             {t('imageDescriptionHint', lang)} {t('requiredForEveryImage', lang)}
           </p>
         </div>
@@ -338,7 +345,7 @@ export function ProductImageUpload({ productId, onChanged }: Props) {
             }}
             className="block w-full max-w-full text-sm text-slate-700 file:mr-3 file:rounded-md file:border file:border-slate-300 file:bg-white file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-slate-700 hover:file:bg-slate-50"
           />
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-slate-600">
             {t('imageFormatHintPlain', lang)} {t('maxPicturesPerProduct', lang)}: {MAX_IMAGES}.
             {images.length >= MAX_IMAGES && ` ${t('removeOneToAddAnother', lang)}`}
           </p>

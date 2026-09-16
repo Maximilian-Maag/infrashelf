@@ -17,7 +17,7 @@ import { PageHeader } from '@/components/layout/PageHeader'
 import { Breadcrumbs } from '@/components/layout/Breadcrumbs'
 import { ButtonLink } from '@/components/ui/Button'
 import { ProductEditForm } from './ProductEditForm'
-import { ProductImageUpload } from '../ProductImageUpload'
+import { ProductImageUpload, type GalleryImage } from '../ProductImageUpload'
 import { Card } from '@/components/ui/Card'
 import { Alert } from '@/components/ui/Alert'
 
@@ -39,13 +39,15 @@ export default async function AdminProductDetailPage({ params, searchParams }: P
   if (role !== 'root') redirect('/admin')
   const lang = await getLang()
 
-  const [productRes, categoriesRes, environmentsRes, translationsRes, costCentersRes] = await Promise.allSettled([
+  const [productRes, categoriesRes, environmentsRes, translationsRes, costCentersRes, imagesRes] = await Promise.allSettled([
     get<ProductDetail>(`/api/admin/products/${id}`),
     get<Category[]>('/api/admin/categories'),
     get<DeploymentEnvironment[]>('/api/admin/environments'),
     get<ProductTranslation[]>(`/api/admin/products/${id}/translations`),
     // Needed to pick the fixed account for an `overhead` offering (FA-10.4).
     get<CostCenter[]>('/api/admin/cost-centers'),
+    // The gallery, which the upload control used to ask for on mount (#462).
+    get<GalleryImage[]>(`/api/admin/products/${id}/images`),
   ])
 
   if (productRes.status === 'rejected') {
@@ -68,6 +70,7 @@ export default async function AdminProductDetailPage({ params, searchParams }: P
   const environments = section(environmentsRes, [] as DeploymentEnvironment[], `environments for product ${id}`)
   const translations = section(translationsRes, [] as ProductTranslation[], `translations for product ${id}`)
   const costCenters = section(costCentersRes, [] as CostCenter[], `cost centers for product ${id}`)
+  const images = section(imagesRes, [] as GalleryImage[], `gallery for product ${id}`)
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
@@ -100,7 +103,7 @@ export default async function AdminProductDetailPage({ params, searchParams }: P
             <Alert>{t('productCreatedPrefix', lang)} {imageError}. {t('tryUploadingAgain', lang)}</Alert>
           </div>
         )}
-        <ProductImageUpload productId={product.id} />
+        <ProductImageUpload productId={product.id} initial={images.data} initialError={images.error} />
       </Card>
 
       {/* One line for all four: they seed different parts of the same form, and

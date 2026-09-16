@@ -168,4 +168,27 @@ describe('InfraFilters', () => {
     // Placeholder plus the two real environments.
     expect(envSelect.querySelectorAll('option')).toHaveLength(3)
   })
+
+  it('adopts a search that changed from outside, without a stale frame', async () => {
+    // Back/forward and the Clear button change the URL under the bar. As an
+    // effect the box painted the OLD text once first, which on a filter bar
+    // reads as the navigation not having happened (#462).
+    const { rerender } = renderBar('search=postgres')
+    expect(screen.getByRole('searchbox')).toHaveValue('postgres')
+
+    currentParams = new URLSearchParams('search=redis')
+    rerender(<InfraFilters facets={facets} lang="en" resultCount={3} />)
+    expect(screen.getByRole('searchbox')).toHaveValue('redis')
+  })
+
+  it('does not clobber what is being typed when nothing changed outside', async () => {
+    // The adoption is keyed on the URL value changing, not on every render —
+    // otherwise each keystroke would be undone by the next render.
+    const user = userEvent.setup()
+    const { rerender } = renderBar('search=postgres')
+
+    await user.type(screen.getByRole('searchbox'), 'ql')
+    rerender(<InfraFilters facets={facets} lang="en" resultCount={3} />)
+    expect(screen.getByRole('searchbox')).toHaveValue('postgresql')
+  })
 })

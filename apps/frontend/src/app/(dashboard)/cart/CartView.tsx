@@ -202,7 +202,7 @@ export function CartView({
         <div className="rounded-lg border border-slate-200 bg-white px-4 py-4 sm:px-6">
           <h1 className="text-2xl font-bold text-slate-900">{t('cart', lang)}</h1>
           {items.length > 0 && (
-            <p className="mt-1 text-xs text-slate-500">{t('cartCheckoutHint', lang)}</p>
+            <p className="mt-1 text-xs text-slate-600">{t('cartCheckoutHint', lang)}</p>
           )}
 
           {error && <div className="mt-4"><Alert>{error}</Alert></div>}
@@ -474,7 +474,7 @@ function CartItemRow({
             >
               {item.productName ?? `Product #${item.productId}`}
             </Link>
-            <p className="text-xs text-slate-500">
+            <p className="text-xs text-slate-600">
               {item.environmentName ?? `Environment #${item.environmentId}`}
               {/* The size is what the line is priced on (issue #98), so it belongs
                   next to the environment rather than hidden in the parameters. */}
@@ -490,7 +490,7 @@ function CartItemRow({
             <div className="text-right">
               <p className="whitespace-nowrap font-bold text-slate-900">{price.total}</p>
               {price.unit && (
-                <p className="whitespace-nowrap text-xs font-normal text-slate-500">{price.unit}</p>
+                <p className="whitespace-nowrap text-xs font-normal text-slate-600">{price.unit}</p>
               )}
             </div>
           )}

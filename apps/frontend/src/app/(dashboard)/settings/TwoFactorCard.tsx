@@ -141,14 +141,14 @@ export function TwoFactorCard() {
             <p className="text-sm text-slate-600">{t('twoFactorIntro', lang)}</p>
             <dl className="flex flex-wrap gap-x-8 gap-y-2 text-sm">
               <div>
-                <dt className="text-slate-500">{t('status', lang)}</dt>
+                <dt className="text-slate-600">{t('status', lang)}</dt>
                 <dd className="font-medium text-slate-900">
                   {status?.enabled ? t('twoFactorOn', lang) : t('twoFactorOff', lang)}
                 </dd>
               </div>
               {status?.enabled && (
                 <div>
-                  <dt className="text-slate-500">{t('twoFactorRecoveryLeft', lang)}</dt>
+                  <dt className="text-slate-600">{t('twoFactorRecoveryLeft', lang)}</dt>
                   <dd className="font-medium text-slate-900">{status.recoveryCodesRemaining}</dd>
                 </div>
               )}
@@ -211,7 +211,7 @@ export function TwoFactorCard() {
                 dangerouslySetInnerHTML={{ __html: offer.qrSvg }}
               />
               <div className="min-w-0">
-                <div className="text-sm text-slate-500">{t('twoFactorSetupKey', lang)}</div>
+                <div className="text-sm text-slate-600">{t('twoFactorSetupKey', lang)}</div>
                 <code className="mt-1 block break-all font-mono text-sm text-slate-900">
                   {offer.secretFormatted}
                 </code>

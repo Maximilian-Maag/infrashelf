@@ -107,7 +107,7 @@ export function ApprovalRow({ order, currentUserId }: Props) {
             {order.isTrial && <TrialBadge lang={lang} />}
           </div>
           <BudgetNotice budget={order.budget} lang={lang} />
-          <p className="text-sm text-slate-500">
+          <p className="text-sm text-slate-600">
             {order.environmentName}
             {/* Size and quantity change what the approver is agreeing to: one
                 decision covers all N elements (issues #98/#104), so "20 × XL" must
@@ -133,7 +133,7 @@ export function ApprovalRow({ order, currentUserId }: Props) {
              `{!rejecting && (…)}`, where `{/* … *\/}` is not valid JSX. */
           <div className="flex flex-wrap items-center gap-2">
             {ownOrder ? (
-              <span className="text-sm text-slate-500">{t('cannotApproveOwnOrder', lang)}</span>
+              <span className="text-sm text-slate-600">{t('cannotApproveOwnOrder', lang)}</span>
             ) : (
               <Button
                 size="sm"

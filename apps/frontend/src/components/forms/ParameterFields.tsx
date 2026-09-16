@@ -112,7 +112,7 @@ export function ParameterFields({ parameters, values, onChange }: ParameterField
                   {param.required && <span className="ml-1 text-red-600">*</span>}
                 </label>
                 {param.description && (
-                  <p id={descriptionId} className="text-xs text-slate-500">{param.description}</p>
+                  <p id={descriptionId} className="text-xs text-slate-600">{param.description}</p>
                 )}
               </div>
             </div>
@@ -127,7 +127,7 @@ export function ParameterFields({ parameters, values, onChange }: ParameterField
                 {displayLabel(param)}
                 {param.required && <span className="ml-1 text-red-600">*</span>}
               </label>
-              {param.description && <p id={descriptionId} className="text-xs text-slate-500">{param.description}</p>}
+              {param.description && <p id={descriptionId} className="text-xs text-slate-600">{param.description}</p>}
               <select
                 id={`param-${param.id}`}
                 value={value}

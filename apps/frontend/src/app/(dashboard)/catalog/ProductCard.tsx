@@ -91,7 +91,7 @@ export function ProductCard({
         )}
         <Heading className="font-semibold text-sm text-slate-800 leading-snug mb-1 line-clamp-2">{name}</Heading>
         {description && (
-          <p className="text-xs text-slate-500 leading-relaxed flex-1 mb-3 line-clamp-2">{description}</p>
+          <p className="text-xs text-slate-600 leading-relaxed flex-1 mb-3 line-clamp-2">{description}</p>
         )}
         {/* "Details", not "Place Order": it opens the product page, where the
             environment, the price and the parameters are chosen. Promising an order
