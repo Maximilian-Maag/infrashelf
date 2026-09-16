@@ -47,13 +47,12 @@ beforeEach(() => {
 
 describe('UsersManager', () => {
   it('lists each account with its role and address', async () => {
-    vi.mocked(get).mockResolvedValue([
+    render(<UsersManager initial={[
       user({ id: 1, name: 'Ada', role: 'root', email: 'ada@test.dev' }),
       user({ id: 2, name: 'Grace', role: 'admin', email: 'grace@test.dev' }),
-    ] as never)
-    render(<UsersManager />)
+    ]} />)
 
-    expect(await screen.findByText('ada@test.dev')).toBeInTheDocument()
+    expect(screen.getByText('ada@test.dev')).toBeInTheDocument()
     const list = listCard()
     expect(within(list).getByText('Ada')).toBeInTheDocument()
     expect(within(list).getByText('Root')).toBeInTheDocument()
@@ -63,10 +62,11 @@ describe('UsersManager', () => {
   it('says the list could not be loaded rather than showing no accounts', async () => {
     // An installation always has at least a root account, so an empty list here
     // is never the truth — it is a failed fetch wearing the empty state.
-    vi.mocked(get).mockRejectedValue(new Error('backend unreachable'))
-    render(<UsersManager />)
+    // The server carries the reason over rather than the manager discovering it
+    // for itself (#452).
+    render(<UsersManager initial={[]} initialError="backend unreachable" />)
 
-    expect(await within(listCard()).findByText('backend unreachable')).toBeInTheDocument()
+    expect(within(listCard()).getByText('backend unreachable')).toBeInTheDocument()
     // And not "there are none" beside it: two claims on one screen, one of them
     // false and the one a person acts on (#415).
     expect(within(listCard()).queryByText('No users yet.')).not.toBeInTheDocument()
@@ -74,7 +74,7 @@ describe('UsersManager', () => {
 
   it('creates an account with the form’s values, trimmed', async () => {
     const u = userEvent.setup()
-    render(<UsersManager />)
+    render(<UsersManager initial={[user()]} />)
     await screen.findByText('Ada')
 
     await u.click(screen.getByRole('button', { name: 'Add User' }))
@@ -98,7 +98,7 @@ describe('UsersManager', () => {
 
   it('defaults a new account to the least privilege, not the most', async () => {
     const u = userEvent.setup()
-    render(<UsersManager />)
+    render(<UsersManager initial={[user()]} />)
     await screen.findByText('Ada')
 
     await u.click(screen.getByRole('button', { name: 'Add User' }))
@@ -108,7 +108,7 @@ describe('UsersManager', () => {
 
   it('reloads the list after a create, so the new account appears', async () => {
     const u = userEvent.setup()
-    render(<UsersManager />)
+    render(<UsersManager initial={[user()]} />)
     await screen.findByText('Ada')
     vi.mocked(get).mockClear()
 
@@ -126,7 +126,7 @@ describe('UsersManager', () => {
   it('keeps the form open and says why when a create is refused', async () => {
     vi.mocked(post).mockRejectedValue(new Error('email already registered'))
     const u = userEvent.setup()
-    render(<UsersManager />)
+    render(<UsersManager initial={[user()]} />)
     await screen.findByText('Ada')
 
     await u.click(screen.getByRole('button', { name: 'Add User' }))
@@ -144,7 +144,7 @@ describe('UsersManager', () => {
     // Not the email: it identifies the account and is how a person signs in, so
     // changing it here would be a different and much larger operation.
     const u = userEvent.setup()
-    render(<UsersManager />)
+    render(<UsersManager initial={[user()]} />)
     await screen.findByText('Ada')
 
     await u.click(within(rowOf('Ada')).getByRole('button', { name: 'Edit' }))
@@ -168,7 +168,7 @@ describe('UsersManager', () => {
     // Two code paths build two request bodies, and only one of them was covered
     // — a trailing space on a rename is as easy to paste as on a new account.
     const u = userEvent.setup()
-    render(<UsersManager />)
+    render(<UsersManager initial={[user()]} />)
     await screen.findByText('Ada')
 
     await u.click(within(rowOf('Ada')).getByRole('button', { name: 'Edit' }))
@@ -188,7 +188,7 @@ describe('UsersManager', () => {
     let release: () => void = () => {}
     vi.mocked(put).mockImplementation((() => new Promise<void>((r) => { release = r })) as never)
     const u = userEvent.setup()
-    render(<UsersManager />)
+    render(<UsersManager initial={[user()]} />)
     await screen.findByText('Ada')
 
     await u.click(within(rowOf('Ada')).getByRole('button', { name: 'Edit' }))
@@ -204,7 +204,7 @@ describe('UsersManager', () => {
     // The label and the value it sends have to move together, or the button says
     // one thing and does the other.
     const u = userEvent.setup()
-    render(<UsersManager />)
+    render(<UsersManager initial={[user()]} />)
     await screen.findByText('Ada')
 
     // The reload's answer is staged BEFORE the click: `toggleActive` fires the
@@ -222,7 +222,7 @@ describe('UsersManager', () => {
 
   it('asks before deleting an account, naming which one', async () => {
     const u = userEvent.setup()
-    render(<UsersManager />)
+    render(<UsersManager initial={[user()]} />)
     await screen.findByText('Ada')
 
     await u.click(within(rowOf('Ada')).getByRole('button', { name: 'Delete' }))
@@ -240,10 +240,9 @@ describe('UsersManager', () => {
 
   it('clears a load error once the list comes back', async () => {
     // A stale error over a list that is now correct is its own lie.
-    vi.mocked(get).mockRejectedValueOnce(new Error('backend unreachable'))
     const u = userEvent.setup()
-    render(<UsersManager />)
-    await within(listCard()).findByText('backend unreachable')
+    render(<UsersManager initial={[]} initialError="backend unreachable" />)
+    expect(within(listCard()).getByText('backend unreachable')).toBeInTheDocument()
 
     // Any action reloads; adding is the cheapest.
     await u.click(screen.getByRole('button', { name: 'Add User' }))
@@ -258,7 +257,7 @@ describe('UsersManager', () => {
 
   it('starts a new account from an empty form, not the last one edited', async () => {
     const u = userEvent.setup()
-    render(<UsersManager />)
+    render(<UsersManager initial={[user()]} />)
     await screen.findByText('Ada')
 
     await u.click(within(rowOf('Ada')).getByRole('button', { name: 'Edit' }))
@@ -275,7 +274,7 @@ describe('UsersManager', () => {
     // person most needs to read.
     vi.mocked(del).mockRejectedValue(new Error('cannot delete the last root account'))
     const u = userEvent.setup()
-    render(<UsersManager />)
+    render(<UsersManager initial={[user()]} />)
     await screen.findByText('Ada')
 
     await u.click(within(rowOf('Ada')).getByRole('button', { name: 'Delete' }))
@@ -288,25 +287,21 @@ describe('UsersManager', () => {
   it('names the row in each Sessions button, since the label is one word', async () => {
     // Five identical "Sessions" buttons tell a screen-reader user nothing about
     // whose sessions they are about to open.
-    vi.mocked(get).mockResolvedValue([
+    render(<UsersManager initial={[
       user({ id: 1, name: 'Ada', email: 'ada@test.dev' }),
       user({ id: 2, name: 'Grace', email: 'grace@test.dev' }),
-    ] as never)
-    render(<UsersManager />)
-    await screen.findByText('Ada')
+    ]} />)
 
     expect(screen.getByRole('button', { name: 'Active sessions: Ada (ada@test.dev)' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Active sessions: Grace (grace@test.dev)' })).toBeInTheDocument()
   })
 
   it('opens the sessions of the row that was clicked', async () => {
-    vi.mocked(get).mockResolvedValue([
+    const u = userEvent.setup()
+    render(<UsersManager initial={[
       user({ id: 1, name: 'Ada' }),
       user({ id: 2, name: 'Grace', email: 'grace@test.dev' }),
-    ] as never)
-    const u = userEvent.setup()
-    render(<UsersManager />)
-    await screen.findByText('Grace')
+    ]} />)
 
     await u.click(screen.getByRole('button', { name: 'Active sessions: Grace (grace@test.dev)' }))
     expect(await screen.findByText('sessions for 2')).toBeInTheDocument()

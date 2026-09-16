@@ -36,10 +36,11 @@ beforeEach(() => {
  */
 describe('CiSourcesManager', () => {
   it('lists each source with its provider and URL', async () => {
-    render(<CiSourcesManager />)
-    const list = await waitFor(() => listCard())
+    render(<CiSourcesManager initial={[source()]} />)
+    const list = listCard()
 
-    expect(get).toHaveBeenCalledWith('/api/admin/ci-sources')
+    // No fetch on mount any more: the server handed the rows over (#452).
+    expect(get).not.toHaveBeenCalled()
 
     expect(within(list).getByText('House GitLab')).toBeInTheDocument()
     expect(within(list).getByText('https://gitlab.example.com')).toBeInTheDocument()
@@ -47,23 +48,23 @@ describe('CiSourcesManager', () => {
   })
 
   it('says the list could not be loaded rather than showing none', async () => {
-    vi.mocked(get).mockRejectedValue(new Error('backend unreachable'))
-    render(<CiSourcesManager />)
+    // The server carries the reason over rather than the manager discovering it
+    // for itself (#452).
+    render(<CiSourcesManager initial={[]} initialError="backend unreachable" />)
 
-    expect(await within(listCard()).findByText('backend unreachable')).toBeInTheDocument()
+    expect(within(listCard()).getByText('backend unreachable')).toBeInTheDocument()
     expect(within(listCard()).queryByText('No CI sources yet.')).not.toBeInTheDocument()
   })
 
   it('says so when there really are none', async () => {
-    vi.mocked(get).mockResolvedValue([] as never)
-    render(<CiSourcesManager />)
+    render(<CiSourcesManager initial={[]} />)
 
-    expect(await screen.findByText('No CI sources yet.')).toBeInTheDocument()
+    expect(screen.getByText('No CI sources yet.')).toBeInTheDocument()
   })
 
   it('creates a source with trimmed values', async () => {
     const u = userEvent.setup()
-    render(<CiSourcesManager />)
+    render(<CiSourcesManager initial={[source()]} />)
     await screen.findByText('House GitLab')
 
     await u.click(screen.getByRole('button', { name: 'Add CI Source' }))
@@ -90,7 +91,7 @@ describe('CiSourcesManager', () => {
     // There is nothing to put there — the API does not return it, and a field
     // that looked pre-filled would tell an operator the token is readable.
     const u = userEvent.setup()
-    render(<CiSourcesManager />)
+    render(<CiSourcesManager initial={[source()]} />)
     await screen.findByText('House GitLab')
 
     await u.click(within(listCard()).getByRole('button', { name: 'Edit' }))
@@ -105,7 +106,7 @@ describe('CiSourcesManager', () => {
     // `accessToken: ''` here would overwrite a working credential with nothing,
     // and the source would stop provisioning with no sign of why.
     const u = userEvent.setup()
-    render(<CiSourcesManager />)
+    render(<CiSourcesManager initial={[source()]} />)
     await screen.findByText('House GitLab')
 
     await u.click(within(listCard()).getByRole('button', { name: 'Edit' }))
@@ -130,7 +131,7 @@ describe('CiSourcesManager', () => {
     // `.trim()` from the browser's. A pasted URL with a trailing newline is the
     // usual way this field arrives wrong.
     const u = userEvent.setup()
-    render(<CiSourcesManager />)
+    render(<CiSourcesManager initial={[source()]} />)
     await screen.findByText('House GitLab')
 
     await u.click(within(listCard()).getByRole('button', { name: 'Edit' }))
@@ -150,7 +151,7 @@ describe('CiSourcesManager', () => {
 
   it('trims the token too', async () => {
     const u = userEvent.setup()
-    render(<CiSourcesManager />)
+    render(<CiSourcesManager initial={[source()]} />)
     await screen.findByText('House GitLab')
 
     await u.click(within(listCard()).getByRole('button', { name: 'Edit' }))
@@ -171,7 +172,7 @@ describe('CiSourcesManager', () => {
     let release: () => void = () => {}
     vi.mocked(put).mockImplementation((() => new Promise<void>((r) => { release = r })) as never)
     const u = userEvent.setup()
-    render(<CiSourcesManager />)
+    render(<CiSourcesManager initial={[source()]} />)
     await screen.findByText('House GitLab')
 
     await u.click(within(listCard()).getByRole('button', { name: 'Edit' }))
@@ -185,9 +186,8 @@ describe('CiSourcesManager', () => {
 
   it('clears a load error once the list comes back', async () => {
     // A stale error over a list that is now correct is its own lie.
-    vi.mocked(get).mockRejectedValueOnce(new Error('backend unreachable'))
-    render(<CiSourcesManager />)
-    await within(listCard()).findByText('backend unreachable')
+    render(<CiSourcesManager initial={[]} initialError="backend unreachable" />)
+    expect(within(listCard()).getByText('backend unreachable')).toBeInTheDocument()
 
     // The empty state must not appear beside it — that is the #415 shape: two
     // claims on one screen, one of them false.
@@ -196,7 +196,7 @@ describe('CiSourcesManager', () => {
 
   it('replaces the token when one is typed', async () => {
     const u = userEvent.setup()
-    render(<CiSourcesManager />)
+    render(<CiSourcesManager initial={[source()]} />)
     await screen.findByText('House GitLab')
 
     await u.click(within(listCard()).getByRole('button', { name: 'Edit' }))
@@ -215,7 +215,7 @@ describe('CiSourcesManager', () => {
     // type="password", so a shoulder-surfer or a screenshot in a ticket does not
     // carry the credential.
     const u = userEvent.setup()
-    render(<CiSourcesManager />)
+    render(<CiSourcesManager initial={[source()]} />)
     await screen.findByText('House GitLab')
 
     await u.click(screen.getByRole('button', { name: 'Add CI Source' }))
@@ -226,7 +226,7 @@ describe('CiSourcesManager', () => {
   it('keeps the form open and says why when a save is refused', async () => {
     vi.mocked(post).mockRejectedValue(new Error('the token was rejected by GitLab'))
     const u = userEvent.setup()
-    render(<CiSourcesManager />)
+    render(<CiSourcesManager initial={[source()]} />)
     await screen.findByText('House GitLab')
 
     await u.click(screen.getByRole('button', { name: 'Add CI Source' }))
@@ -241,7 +241,7 @@ describe('CiSourcesManager', () => {
 
   it('asks before deleting, naming the source', async () => {
     const u = userEvent.setup()
-    render(<CiSourcesManager />)
+    render(<CiSourcesManager initial={[source()]} />)
     await screen.findByText('House GitLab')
 
     await u.click(within(listCard()).getByRole('button', { name: 'Delete' }))
@@ -259,7 +259,7 @@ describe('CiSourcesManager', () => {
     // person most needs to read.
     vi.mocked(del).mockRejectedValue(new Error('still used by 2 products'))
     const u = userEvent.setup()
-    render(<CiSourcesManager />)
+    render(<CiSourcesManager initial={[source()]} />)
     await screen.findByText('House GitLab')
 
     await u.click(within(listCard()).getByRole('button', { name: 'Delete' }))
@@ -274,7 +274,7 @@ describe('CiSourcesManager', () => {
 
   it('starts a new source from an empty form, not the last one edited', async () => {
     const u = userEvent.setup()
-    render(<CiSourcesManager />)
+    render(<CiSourcesManager initial={[source()]} />)
     await screen.findByText('House GitLab')
 
     await u.click(within(listCard()).getByRole('button', { name: 'Edit' }))
