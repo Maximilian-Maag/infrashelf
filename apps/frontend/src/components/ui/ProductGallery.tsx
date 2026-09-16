@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import {useState } from 'react'
 import type { ProductImageMeta } from '@infrashelf/types'
 import { Modal } from '@/components/ui/Modal'
 import { ProductImagePlaceholder } from '@/components/ui/ProductImage'
@@ -52,11 +52,18 @@ export function ProductGallery({ productId, images, lang }: Props) {
   const markFailed = (id: number) =>
     setFailed((ids) => (ids.includes(id) ? ids : [...ids, id]))
 
-  // A reordered or shortened gallery must not leave the selection pointing past
-  // the end — the page re-renders with new props, the component does not remount.
-  useEffect(() => {
-    setIndex((current) => (current < images.length ? current : 0))
-  }, [images])
+  /*
+   * A reordered or shortened gallery must not leave the selection pointing past
+   * the end — the page re-renders with new props, the component does not
+   * remount. Clamped during render rather than in an effect (#450): as an effect
+   * the out-of-range index reached the render below once before being corrected,
+   * and `images[Math.min(...)]` was carrying that frame.
+   */
+  const [shownImages, setShownImages] = useState(images)
+  if (images !== shownImages) {
+    setShownImages(images)
+    if (index >= images.length) setIndex(0)
+  }
 
   if (images.length === 0) {
     return (

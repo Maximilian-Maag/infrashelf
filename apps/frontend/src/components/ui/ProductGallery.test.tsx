@@ -151,4 +151,27 @@ describe('ProductGallery', () => {
     expect(document.querySelector('img')).toBeNull()
     expect(document.querySelector('svg')).toBeInTheDocument()
   })
+
+  it('does not leave the selection pointing past a shortened gallery', () => {
+    // The page re-renders with new props and this component does not remount, so
+    // an index chosen against the old list survives into the new one (#450).
+    const { rerender } = render(<ProductGallery productId={1} images={images} lang="en" />)
+    fireEvent.click(screen.getByRole('button', { name: /next/i }))
+    fireEvent.click(screen.getByRole('button', { name: /next/i }))
+    expect(shown()?.getAttribute('alt')).toBe('The rack it lives in')
+
+    rerender(<ProductGallery productId={1} images={images.slice(0, 2)} lang="en" />)
+    expect(shown()?.getAttribute('alt')).toBe('The front of the gateway')
+  })
+
+  it('keeps the selection when the gallery is replaced by one just as long', () => {
+    // Only an out-of-range index is corrected: resetting on every change would
+    // throw away the picture the reader had chosen.
+    const { rerender } = render(<ProductGallery productId={1} images={images} lang="en" />)
+    fireEvent.click(screen.getByRole('button', { name: /next/i }))
+    expect(shown()?.getAttribute('alt')).toBe('The gateway dashboard')
+
+    rerender(<ProductGallery productId={1} images={[...images]} lang="en" />)
+    expect(shown()?.getAttribute('alt')).toBe('The gateway dashboard')
+  })
 })
