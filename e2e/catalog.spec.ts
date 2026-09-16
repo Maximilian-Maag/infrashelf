@@ -132,17 +132,45 @@ test.describe('Catalog favorites', () => {
     requireSeeded(!(await noProducts.isVisible()), 'no product card on /catalog to star')
 
     await expect(page.getByRole('region', { name: /my favorites/i })).toBeHidden()
+
+    /*
+     * Wait for the WRITE, not just for the shelf (#488).
+     *
+     * The star is optimistic — that is deliberate, because a round trip before
+     * the star fills in reads as a dead button — so the shelf appearing proves
+     * only that the click was seen. Since the catalogue became a server
+     * component (#472) the reload's favourites read happens at the very start of
+     * the request, which is earlier than the client fetch it replaced, so a
+     * reload can now overtake its own PUT and render a shelf that is correctly
+     * empty. Waiting on the response makes the test assert what it is named
+     * after: that a star which the SERVER has recorded survives a reload.
+     */
+    const starred = page.waitForResponse(
+      (res) => /\/api\/favorites\/\d+$/.test(new URL(res.url()).pathname)
+        && res.request().method() === 'PUT'
+        && res.ok(),
+      { timeout: 10000 },
+    )
     await addStar.click()
 
     const favorites = page.getByRole('region', { name: /my favorites/i })
     await expect(favorites).toBeVisible({ timeout: 8000 })
+    await starred
 
     await page.reload()
     await expect(page.getByRole('region', { name: /my favorites/i })).toBeVisible({ timeout: 10000 })
 
-    // Clean up so the run is repeatable.
+    // Clean up so the run is repeatable — and wait for that write too, or the
+    // next run of this spec starts with a star it did not put there.
+    const unstarred = page.waitForResponse(
+      (res) => /\/api\/favorites\/\d+$/.test(new URL(res.url()).pathname)
+        && res.request().method() === 'DELETE'
+        && res.ok(),
+      { timeout: 10000 },
+    )
     await page.getByRole('button', { name: /remove from favorites/i }).first().click()
     await expect(page.getByRole('region', { name: /my favorites/i })).toBeHidden({ timeout: 8000 })
+    await unstarred
   })
 })
 
