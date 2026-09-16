@@ -24,10 +24,12 @@ const project = (over: Partial<Project> = {}): Project => ({
   id: 4,
   name: 'Webshop Platform',
   description: 'The shop',
+  ownerId: 3,
   ownerName: 'Ada',
+  costCenterId: null,
   createdAt: '2026-01-01T00:00:00.000Z',
   ...over,
-} as Project)
+})
 
 const answer = (value: unknown = [project()]) => {
   get.mockImplementation(() => (value instanceof Error ? Promise.reject(value) : Promise.resolve(value)))

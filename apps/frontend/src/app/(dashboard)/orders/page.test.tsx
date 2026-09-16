@@ -23,16 +23,29 @@ vi.mock('@/components/ui/AutoRefresh', () => ({
 const get = vi.fn()
 vi.mock('@/lib/serverApi', () => ({ get: (path: string) => get(path) }))
 
+/*
+ * Typed rather than cast. `as Order` on the literal is what let `status: 'active'`
+ * through here — 'active' is an InfraStatus, not an OrderStatus, and vitest does
+ * not type-check, so it reached CI as a build failure rather than a test failure.
+ */
 const order = (over: Partial<Order> = {}): Order => ({
   id: 7,
+  userId: 3,
   productId: 1,
   productName: 'Managed Postgres',
+  environmentId: 1,
   environmentName: 'prod',
+  projectId: 4,
   projectName: 'Platform',
-  status: 'active',
+  status: 'completed',
+  parameters: {},
+  costCenterId: null,
+  rejectionNote: null,
+  pipelineId: [],
   createdAt: '2026-01-01T00:00:00.000Z',
+  updatedAt: '2026-01-01T00:00:00.000Z',
   ...over,
-} as Order)
+})
 
 const answer = (value: unknown = { items: [order()], total: 1, limit: 20, offset: 0 }) => {
   get.mockImplementation(() => (value instanceof Error ? Promise.reject(value) : Promise.resolve(value)))
@@ -113,7 +126,7 @@ describe('OrdersPage', () => {
     expect(screen.getByTestId('autorefresh')).toHaveAttribute('data-active', 'true')
     settling.unmount()
 
-    answer({ items: [order({ status: 'active' })], total: 1, limit: 20, offset: 0 })
+    answer({ items: [order({ status: 'completed' })], total: 1, limit: 20, offset: 0 })
     render(await OrdersPage({ searchParams: params() }))
     expect(screen.getByTestId('autorefresh')).toHaveAttribute('data-active', 'false')
   })

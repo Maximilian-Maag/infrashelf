@@ -27,9 +27,24 @@ vi.mock('./DelegationPanel', () => ({
 const get = vi.fn()
 vi.mock('@/lib/serverApi', () => ({ get: (path: string) => get(path) }))
 
+/*
+ * Typed rather than cast: `as Order` on the literal is what let an InfraStatus
+ * through in the orders page test, where vitest passed and the build did not.
+ */
 const order = (id: number): Order => ({
-  id, productId: 1, status: 'pending', createdAt: '2026-01-01T00:00:00.000Z',
-} as Order)
+  id,
+  projectId: 4,
+  productId: 1,
+  environmentId: 1,
+  userId: 3,
+  status: 'pending',
+  parameters: {},
+  costCenterId: null,
+  rejectionNote: null,
+  pipelineId: [],
+  createdAt: '2026-01-01T00:00:00.000Z',
+  updatedAt: '2026-01-01T00:00:00.000Z',
+})
 
 const answer = (over: { queue?: unknown; delegations?: unknown } = {}) => {
   get.mockImplementation((path: string) => {
