@@ -14,6 +14,7 @@ import {
   createProduct,
   createCiSource,
   createEnvironment,
+  createProject,
   linkProductEnvironment,
 } from '@/test/helpers'
 
@@ -323,5 +324,127 @@ describe('parameter changes record a product version', () => {
 
     const rows = await versionsFor(product.id)
     expect(rows.map((r) => r.environmentId)).toEqual([env.id])
+  })
+})
+
+/**
+ * One definition per name, per place (#477, part of #404).
+ *
+ * `resolveParameterDefs` collapses the applicable rows to one definition per
+ * name, and two rows alike on scope, environment AND narrowing hit none of its
+ * precedence rules — so #402's tie-break decides, most recently created wins.
+ * That is repeatable but nobody chose it, and `sensitive` disagreeing between
+ * the two makes "is this secret redacted?" a question about write order (#131).
+ */
+describe('a duplicate parameter definition', () => {
+  const global = (over: Record<string, unknown> = {}) =>
+    createParameter({ scope: 'global', name: 'region', type: 'string', ...over } as never)
+
+  it('is refused, naming the definition that already exists', async () => {
+    const first = await global()
+    expect(first.ok).toBe(true)
+
+    const second = await global()
+    expect(second.ok).toBe(false)
+    if (!second.ok) {
+      expect(second.status).toBe(409)
+      expect(second.message).toContain('region')
+      if (first.ok) expect(second.message).toContain(`#${first.data.id}`)
+    }
+    // And nothing was written: a refused create must not leave half a parameter.
+    const rows = await db.select().from(parameters).where(eq(parameters.name, 'region'))
+    expect(rows.length).toBe(1)
+  })
+
+  it('does not count a different scope, scopeId or environment as the same place', async () => {
+    const ci = await createCiSource()
+    const env = await createEnvironment(ci.id)
+    await global()
+
+    for (const over of [
+      { scope: 'product', scopeId: 1 },
+      { scope: 'category', scopeId: 1 },
+      { environmentId: env.id },
+    ]) {
+      const result = await createParameter({ scope: 'global', name: 'region', type: 'string', ...over } as never)
+      expect(result.ok, JSON.stringify(over)).toBe(true)
+    }
+  })
+
+  /*
+   * The #275 property, and the reason the key cannot be a plain unique index:
+   * narrowing lives in `parameter_projects`, and narrowing one definition to a
+   * project while another applies everywhere is the whole feature.
+   */
+  it('is not what a project-narrowed definition beside an unnarrowed one is', async () => {
+    const pm = await createUser({ role: 'project_manager' })
+    const project = await createProject(pm.id, 'Webshop')
+
+    expect((await global()).ok).toBe(true)
+    expect((await global({ projectIds: [project.id] })).ok).toBe(true)
+  })
+
+  it('compares the whole set of projects, not merely whether there is one', async () => {
+    const pm = await createUser({ role: 'project_manager' })
+    const one = await createProject(pm.id, 'Webshop')
+    const two = await createProject(pm.id, 'Billing')
+
+    expect((await global({ projectIds: [one.id] })).ok).toBe(true)
+    expect((await global({ projectIds: [one.id, two.id] })).ok).toBe(true)
+    // Same set, written in the other order — which is the order a form
+    // serialised it in, not something anybody meant.
+    const same = await global({ projectIds: [two.id, one.id] })
+    expect(same.ok).toBe(false)
+    if (!same.ok) expect(same.status).toBe(409)
+  })
+
+  it('refuses a rename onto a definition that already exists', async () => {
+    const taken = await global({ name: 'region' })
+    const moving = await global({ name: 'zone' })
+    expect(taken.ok && moving.ok).toBe(true)
+    if (!moving.ok) return
+
+    const result = await updateParameter(moving.data.id, { name: 'region' })
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.status).toBe(409)
+  })
+
+  it('refuses a move into an environment where the name is taken', async () => {
+    const ci = await createCiSource()
+    const env = await createEnvironment(ci.id)
+    const there = await global({ environmentId: env.id })
+    const here = await global()
+    expect(there.ok && here.ok).toBe(true)
+    if (!here.ok) return
+
+    const result = await updateParameter(here.data.id, { environmentId: env.id })
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.status).toBe(409)
+  })
+
+  it('lets a parameter keep its own name', async () => {
+    // A row is not its own duplicate — otherwise every edit that touches nothing
+    // in the key would refuse itself.
+    const only = await global()
+    if (!only.ok) throw new Error('setup failed')
+
+    expect((await updateParameter(only.data.id, { name: 'region', defaultValue: 'eu' })).ok).toBe(true)
+    expect((await updateParameter(only.data.id, { defaultValue: 'us' })).ok).toBe(true)
+  })
+
+  it('lets an update narrow a parameter that is otherwise a twin', async () => {
+    // Narrowing is what MAKES it a different definition, so the edit that
+    // introduces the difference has to be allowed.
+    const pm = await createUser({ role: 'project_manager' })
+    const project = await createProject(pm.id, 'Webshop')
+    const unnarrowed = await global()
+    const other = await global({ projectIds: [project.id] })
+    expect(unnarrowed.ok && other.ok).toBe(true)
+    if (!other.ok) return
+
+    // Clearing the narrowing WOULD make it a twin of the first, so that is refused.
+    const cleared = await updateParameter(other.data.id, { projectIds: [] })
+    expect(cleared.ok).toBe(false)
+    if (!cleared.ok) expect(cleared.status).toBe(409)
   })
 })

@@ -1,6 +1,6 @@
 import { db } from '@/lib/db/client'
 import { parameters, parameterProjects, products, productEnvironments, projects, type Parameter } from '@/lib/db/schema'
-import { and, eq, inArray } from 'drizzle-orm'
+import { and, eq, inArray, isNull } from 'drizzle-orm'
 import { ok, err, type Result } from '@/lib/services/result'
 import { recordProductVersion } from '@/lib/services/versions'
 import { logAudit, changedFields } from '@/lib/audit'
@@ -124,6 +124,90 @@ const unknownProjectIds = async (projectIds?: number[]): Promise<Result<never> |
   return err(400, `No such project: ${missing.join(', ')}`)
 }
 
+/**
+ * What makes two definitions the same definition (#477, part of #404).
+ *
+ * Scope, scope id, name and environment — plus the SET OF PROJECTS the parameter
+ * is narrowed to, which is the part a plain unique index cannot express because
+ * it lives in `parameter_projects` (#275). Leaving it out of the key is not a
+ * simplification: narrowing one definition to a project while another applies
+ * everywhere is the whole feature, and treating those two as duplicates would
+ * forbid it.
+ *
+ * Sorted and de-duplicated so `[7, 4]`, `[4, 7]` and `[4, 4, 7]` are one key —
+ * the order the ids arrive in is the order a form serialised them, and nobody
+ * meant it.
+ */
+const narrowingKey = (projectIds: number[]): string =>
+  [...new Set(projectIds)].sort((a, b) => a - b).join(',')
+
+/**
+ * Refuse a second definition of the same name in the same place (#477).
+ *
+ * `resolveParameterDefs` collapses the applicable rows to one effective
+ * definition per name, by scope, then environment-specific over
+ * all-environments, then project-narrowed over unnarrowed. Two rows alike on all
+ * of those hit none of the rules, so #402's last-resort tie-break decides —
+ * most recently created wins. That is repeatable, but nobody chose it, and
+ * `sensitive` is the sharp edge: it decides whether the value is redacted
+ * everywhere downstream (#131), so a disagreeing pair makes "is this secret
+ * redacted?" a question about which row was written last.
+ *
+ * A check-then-insert, and honestly so: two simultaneous creates can still race
+ * past it. The alternative is a unique index, which cannot be written while the
+ * key contains a set from a child table — see the note on #404. What the race
+ * produces is a duplicate somebody can then delete, with #402 deciding which of
+ * the two applies meanwhile; what this stops is the ordinary case, an admin
+ * defining the same thing twice and one of them silently doing nothing.
+ */
+const duplicateParameterError = async (
+  key: {
+    scope: 'global' | 'category' | 'product'
+    scopeId: number
+    name: string
+    environmentId: number | null
+    projectIds: number[]
+  },
+  excludeId?: number,
+): Promise<Result<never> | null> => {
+  const rivals = await db
+    .select({ id: parameters.id })
+    .from(parameters)
+    .where(and(
+      eq(parameters.scope, key.scope),
+      eq(parameters.scopeId, key.scopeId),
+      eq(parameters.name, key.name),
+      // `= NULL` is never true in SQL, so an all-environments parameter has to be
+      // matched with IS NULL or every one of them would look unique.
+      key.environmentId === null
+        ? isNull(parameters.environmentId)
+        : eq(parameters.environmentId, key.environmentId),
+    ))
+
+  // A row is not its own duplicate: an update that leaves the key alone must not
+  // refuse itself.
+  const others = rivals.filter((row) => row.id !== excludeId)
+  if (others.length === 0) return null
+
+  const links = await db
+    .select()
+    .from(parameterProjects)
+    .where(inArray(parameterProjects.parameterId, others.map((row) => row.id)))
+  const narrowing = new Map<number, number[]>()
+  for (const link of links) {
+    narrowing.set(link.parameterId, [...(narrowing.get(link.parameterId) ?? []), link.projectId])
+  }
+
+  const wanted = narrowingKey(key.projectIds)
+  const clash = others.find((row) => narrowingKey(narrowing.get(row.id) ?? []) === wanted)
+  if (!clash) return null
+
+  return err(
+    409,
+    `A ${key.scope} parameter named "${key.name}" already exists for the same environment and projects (#${clash.id})`,
+  )
+}
+
 export const listParameters = async (filters: ParameterFilters): Promise<Result<Parameter[]>> => {
   const conditions = []
   if (filters.scope) conditions.push(eq(parameters.scope, filters.scope))
@@ -183,6 +267,14 @@ export const createParameter = async (
   if (badSizes) return badSizes
   const unknown = await unknownProjectIds(input.projectIds)
   if (unknown) return unknown
+  const duplicate = await duplicateParameterError({
+    scope: input.scope,
+    scopeId: input.scopeId ?? 0,
+    name: input.name,
+    environmentId: input.environmentId ?? null,
+    projectIds: input.projectIds ?? [],
+  })
+  if (duplicate) return duplicate
 
   // One transaction: a parameter that exists but whose narrowing did not get
   // written applies to EVERY project, which is the opposite of what was asked
@@ -246,6 +338,33 @@ export const updateParameter = async (
 
   const unknown = await unknownProjectIds(projectIds)
   if (unknown) return unknown
+
+  /*
+   * Checked against the row as it will be AFTER the edit (#477).
+   *
+   * A rename or a move to another environment lands the parameter somewhere
+   * else, and the definition it could collide with is at the destination — so
+   * the key is the merge of what is stored and what is being sent, with the
+   * narrowing read from the child table when the update does not mention it
+   * (absent means "leave it alone").
+   *
+   * Skipped when the row does not exist: that is the 404 below, and answering
+   * 409 for a parameter that is not there would be a worse answer.
+   */
+  if (before) {
+    const narrowedTo = projectIds ?? (await db
+      .select({ projectId: parameterProjects.projectId })
+      .from(parameterProjects)
+      .where(eq(parameterProjects.parameterId, id))).map((row) => row.projectId)
+    const duplicate = await duplicateParameterError({
+      scope: before.scope,
+      scopeId: before.scopeId,
+      name: input.name ?? before.name,
+      environmentId: input.environmentId !== undefined ? input.environmentId : before.environmentId,
+      projectIds: narrowedTo,
+    }, id)
+    if (duplicate) return duplicate
+  }
 
   const updated = await db.transaction(async (tx) => {
     /*
