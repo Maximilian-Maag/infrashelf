@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import {useState, useCallback } from 'react'
 import type { Category, CreateCategoryRequest, UpdateCategoryRequest } from '@infrashelf/types'
 import { get, post, put, del } from '@/lib/api'
 import { Card } from '@/components/ui/Card'
@@ -28,12 +28,37 @@ function parseDisplayOrder(raw: string, fallback: number): number {
   return Number.isFinite(parsed) ? parsed : fallback
 }
 
-export function CategoriesManager() {
+interface Props {
+  /**
+   * The categories the SERVER already fetched (#456).
+   *
+   * This asked for them on mount, so the page arrived with a spinner and then
+   * asked — a waterfall the server was in a position to resolve before it sent
+   * anything. `load()` below stays: a reload after a create, a rename or a
+   * delete is a response to an action, not to mounting.
+   */
+  initial: Category[]
+  /** Why the server could not fetch them, if it could not (#415). */
+  initialError?: string | null
+}
+
+export function CategoriesManager({ initial, initialError = null }: Props) {
   const lang = useLang()
   const { toast } = useToast()
-  const [categories, setCategories] = useState<Category[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const [categories, setCategories] = useState<Category[]>(initial)
+  // The server already has them, so nothing is pending on arrival.
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(initialError)
+  /*
+   * Whether the LAST load failed, kept apart from `error` (#415, #456).
+   *
+   * Without it an outage rendered the error and "no categories yet" together:
+   * two claims on one screen, one of them false — and the false one is the one
+   * an operator acts on, by creating a duplicate of a category that already
+   * exists. `error` cannot answer this alone; it also carries a failed delete,
+   * where the list really is what it says.
+   */
+  const [loadFailed, setLoadFailed] = useState(initialError !== null)
   const [addOpen, setAddOpen] = useState(false)
   const [editTarget, setEditTarget] = useState<Category | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<Category | null>(null)
@@ -46,17 +71,17 @@ export function CategoriesManager() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
+      setLoadFailed(false)
       const data = await get<Category[]>('/api/admin/categories')
       setCategories(data ?? [])
       setError(null)
     } catch (e) {
+      setLoadFailed(true)
       setError(e instanceof Error ? e.message : t('failedToLoadCategories', lang))
     } finally {
       setLoading(false)
     }
   }, [lang])
-
-  useEffect(() => { void load() }, [load])
 
   function openAdd() {
     setFormName('')
@@ -142,7 +167,7 @@ export function CategoriesManager() {
               {Array.from({ length: 4 }).map((_, i) => <SkeletonListItem key={i} />)}
             </div>
           </LoadingRegion>
-        ) : categories.length === 0 ? (
+        ) : categories.length === 0 && !loadFailed ? (
           <p className="text-center py-6 text-slate-600">{t('noCategoriesYet', lang)}</p>
         ) : (
           <div className="space-y-2">
