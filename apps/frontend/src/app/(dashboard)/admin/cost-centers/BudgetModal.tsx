@@ -62,14 +62,13 @@ export function BudgetModal({ target, onClose, onSaved, lang }: Props) {
    * substitute — a badge may be a minute stale without consequence; a limit
    * being set may not.
    *
-   * So this one keeps its effect, and will need an `eslint-disable` naming that
-   * reason when `react-hooks/set-state-in-effect` is switched back on (#418).
-   * The directive is not here yet because the rule is still off, and a disable
-   * for a rule that is off is itself a lint warning.
+   * So this one keeps its effect, with the directive below naming that reason
+   * now that `react-hooks/set-state-in-effect` is back on (#418).
    */
   useEffect(() => {
     if (id === null) return
     let cancelled = false
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- opening the dialog must read the live figure; see above
     setLoading(true)
     setError(null)
     setConfirmingRemove(false)

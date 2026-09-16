@@ -51,7 +51,14 @@ record_handling_prefixes := {
 # an Error is a non-literal argument and it is the argument that is always there.
 # The rule reported almost nothing as a result. An Error says what went wrong; it
 # does not say which order it went wrong for.
-warn contains v if {
+#
+# A deny since #482, on the same argument that made `silent_catch_is_documented`
+# one: it warned on 16 call sites for as long as it existed, all 16 now name the
+# record, and a warn at zero does not keep it there. The scope above is what it
+# can afford to be denied on — these four directories act on a specific order,
+# element or user, so there is always a record to name. A log line in them that
+# genuinely has none belongs somewhere else.
+deny contains v if {
 	some c in input.consoleCalls
 	not c.messageNamesAValue
 	some prefix in record_handling_prefixes

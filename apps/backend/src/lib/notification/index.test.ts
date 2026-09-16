@@ -159,3 +159,66 @@ describe('notification functions', () => {
     }
   })
 })
+
+/**
+ * A dropped notification is invisible by design (#482).
+ *
+ * Failing to send must not fail the approval that triggered it, so this
+ * `console.error` is the only record that it happened — and "an email failed"
+ * cannot be matched to the order whose approval never arrived.
+ */
+describe('a notification that could not be sent', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  const failToSend = () => {
+    getMockSendMail().mockRejectedValueOnce(new Error('ECONNREFUSED smtp.test.dev:587'))
+    return vi.spyOn(console, 'error').mockImplementation(() => {})
+  }
+
+  it('says which message, so the failure can be matched to the order', async () => {
+    const logged = failToSend()
+
+    await sendOrderCreated('ada.lovelace@example.org', 'Managed Postgres', 4812)
+
+    expect(logged).toHaveBeenCalledTimes(1)
+    const line = String(logged.mock.calls[0][0])
+    expect(line).toContain('4812')
+    expect(line).toContain('Managed Postgres')
+    logged.mockRestore()
+  })
+
+  it('does not write the recipient into the log in full', async () => {
+    // Enough to tell two failures apart and to see a whole domain refusing mail,
+    // without turning a log that is shipped elsewhere into an address book.
+    const logged = failToSend()
+
+    await sendOrderCreated('ada.lovelace@example.org', 'Managed Postgres', 4812)
+
+    const line = String(logged.mock.calls[0][0])
+    expect(line).not.toContain('ada.lovelace@example.org')
+    expect(line).toContain('@example.org')
+    expect(line).toContain('a***e@example.org')
+    logged.mockRestore()
+  })
+
+  it('masks a local part too short to mask partially', async () => {
+    const logged = failToSend()
+
+    await sendOrderCreated('al@example.org', 'Managed Postgres', 4812)
+
+    const line = String(logged.mock.calls[0][0])
+    expect(line).toContain('***@example.org')
+    expect(line).not.toContain('al@')
+    logged.mockRestore()
+  })
+
+  it('swallows the failure rather than letting it reach the caller', async () => {
+    // The property the log line exists BECAUSE of: an order must not fail
+    // because the mail server is down.
+    const logged = failToSend()
+    await expect(sendOrderCreated('ada@example.org', 'Managed Postgres', 4812)).resolves.toBeUndefined()
+    logged.mockRestore()
+  })
+})

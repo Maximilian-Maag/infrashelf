@@ -78,6 +78,20 @@ const getTransporter = async (): Promise<nodemailer.Transporter | null> => {
   return transporterCache
 }
 
+/**
+ * `ada.lovelace@example.org` as `a***e@example.org`.
+ *
+ * Enough to tell two failures apart and to see a domain refusing everything,
+ * without writing addresses into a log that is shipped somewhere else (#482).
+ */
+const maskRecipient = (address: string): string => {
+  const at = address.lastIndexOf('@')
+  if (at <= 0) return '***'
+  const local = address.slice(0, at)
+  const masked = local.length <= 2 ? '***' : `${local[0]}***${local[local.length - 1]}`
+  return `${masked}${address.slice(at)}`
+}
+
 const escapeHtml = (s: string): string =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;')
 
@@ -89,7 +103,18 @@ const send = async (to: string, subject: string, html: string): Promise<void> =>
     if (!settings) return
     await transporter.sendMail({ from: settings.from, to, subject, html })
   } catch (err) {
-    console.error('[notification] Failed to send email:', err)
+    /*
+     * Which message, to whom (#482). Silently dropping a notification is the
+     * design here — an approval must not fail because the mail server is down —
+     * so this line is the only record that it happened at all, and "an email
+     * failed" cannot be matched to the order whose approval never arrived.
+     *
+     * The recipient is logged as its domain plus a masked local part rather than
+     * in full: it is enough to tell one failure from another and to see that a
+     * whole domain is refusing mail, without turning the pod log into an address
+     * book. The subject already names the order.
+     */
+    console.error(`[notification] Failed to send "${subject}" to ${maskRecipient(to)}:`, err)
   }
 }
 

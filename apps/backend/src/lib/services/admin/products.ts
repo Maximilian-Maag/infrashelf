@@ -557,7 +557,10 @@ export const deleteProduct = async (id: number, actorId?: number): Promise<Resul
       const outcome = await fireDestroyTriggers(infra, destroyVars)
       triggerFailures.push(...outcome.failures.map((f) => `infra #${infra.id}: ${f}`))
     } catch (e) {
-      console.error(e)
+      // The id was already on the next line, pushed into `triggerFailures`, and
+      // missing from the log (#482). A destroy that could not be STARTED is how a
+      // machine outlives the product it belonged to, so the line has to say which one.
+      console.error(`[destroy] Could not start the destroy for element #${infra.id}:`, e)
       triggerFailures.push(`infra #${infra.id}: ${e instanceof Error ? e.message : String(e)}`)
     }
   }
