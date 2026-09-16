@@ -258,4 +258,21 @@ describe('TwoFactorCard — enrollment is required', () => {
     render(<TwoFactorCard />)
     await waitFor(() => expect(get).toHaveBeenCalledWith('/api/users/me/2fa'))
   })
+
+  it('does not say two-factor is off while the status is unknown', async () => {
+    // The worst thing this card can say wrongly. `null` means neither the server
+    // nor this card has been able to read it — not that no second factor is
+    // enrolled (#466).
+    vi.mocked(get).mockRejectedValue(new Error('backend unreachable'))
+    render(<TwoFactorCard />)
+
+    await waitFor(() => expect(get).toHaveBeenCalled())
+    expect(screen.queryByText(/two-factor is off|not enabled/i)).not.toBeInTheDocument()
+    expect(screen.getByText('—')).toBeInTheDocument()
+  })
+
+  it('says it is off once that is actually known', async () => {
+    render(<TwoFactorCard initialStatus={{ enabled: false, recoveryCodesRemaining: 0 } as never} />)
+    expect(screen.queryByText('—')).not.toBeInTheDocument()
+  })
 })

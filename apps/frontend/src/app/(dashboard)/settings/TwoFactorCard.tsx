@@ -176,7 +176,17 @@ export function TwoFactorCard({ initialStatus }: Props) {
               <div>
                 <dt className="text-slate-600">{t('status', lang)}</dt>
                 <dd className="font-medium text-slate-900">
-                  {status?.enabled ? t('twoFactorOn', lang) : t('twoFactorOff', lang)}
+                  {/* A dash while the status is UNKNOWN, not "off" (#466).
+                      `null` here means nobody has been able to read it — the
+                      server's attempt failed and this card's retry has not
+                      answered yet, or failed too. "Two-factor is off" is the most
+                      reassuring thing this card can say and the worst to say
+                      without knowing, so it says nothing, which is what the
+                      card's own contract promises: it "shows nothing until it
+                      can". The keys card beside it has always done this — its
+                      "no security keys" line is gated on `credentials !== null`
+                      for the same reason. */}
+                  {status === null ? '—' : status.enabled ? t('twoFactorOn', lang) : t('twoFactorOff', lang)}
                 </dd>
               </div>
               {status?.enabled && (
