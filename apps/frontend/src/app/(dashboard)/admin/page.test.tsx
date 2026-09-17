@@ -28,13 +28,13 @@ beforeEach(() => { lang = 'en' })
  *
  * The count is asserted so that adding a destination without translating it
  * fails here rather than on somebody's German portal. Deployment windows (#330)
- * made it twelve.
+ * made it twelve; the integration registry (#111) made it thirteen.
  */
 describe('AdminPage', () => {
-  it('offers twelve destinations, each with a title and a description', async () => {
+  it('offers thirteen destinations, each with a title and a description', async () => {
     render(await AdminPage())
-    expect(screen.getAllByRole('link')).toHaveLength(12)
-    expect(await cardTexts('en')).toHaveLength(24)
+    expect(screen.getAllByRole('link')).toHaveLength(13)
+    expect(await cardTexts('en')).toHaveLength(26)
   })
 
   it('leaves no card written in English on a German page', async () => {
