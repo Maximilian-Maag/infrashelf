@@ -1,12 +1,17 @@
 import { describe, it, expect } from 'vitest'
+import { createHash } from 'node:crypto'
 import {
   listParameters,
   createParameter,
   updateParameter,
   deleteParameter,
+  narrowingFingerprint,
+  duplicateIndexError,
 } from './parameters'
+import { deleteProject } from '@/lib/services/projects'
+import { pgErrorCode, pgConstraintName, UNIQUE_VIOLATION } from '@/lib/db/pgError'
 import { db } from '@/lib/db/client'
-import { parameters, productVersions } from '@/lib/db/schema'
+import { parameters, productVersions, projects } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
 import {
   createUser,
@@ -446,5 +451,272 @@ describe('a duplicate parameter definition', () => {
     const cleared = await updateParameter(other.data.id, { projectIds: [] })
     expect(cleared.ok).toBe(false)
     if (!cleared.ok) expect(cleared.status).toBe(409)
+  })
+})
+
+/*
+ * The database half of the rule (#404).
+ *
+ * `duplicateParameterError` is a check-then-insert and races with itself, so
+ * everything above is about the ordinary case: an admin defining the same thing
+ * twice. What follows is about the case the guard cannot reach, and it is
+ * asserted against the INDEX rather than the service — a test that only ever
+ * calls `createParameter` cannot tell the two apart, which is the point #404
+ * makes about step 4.
+ */
+describe('the narrowing fingerprint', () => {
+  const global = (over: Record<string, unknown> = {}) =>
+    createParameter({ scope: 'global', name: 'region', type: 'string', ...over } as never)
+
+  /**
+   * Insert straight into the table, bypassing every service-level check, and
+   * report which constraint refused it.
+   *
+   * The constraint name rather than the message: drizzle wraps the driver's
+   * error and its `message` is "Failed query: insert into …", so asserting on
+   * the text would pass for any failure at all.
+   */
+  const insertRaw = async (values: Record<string, unknown>): Promise<string | null> => {
+    try {
+      await db.insert(parameters).values({
+        scope: 'global',
+        scopeId: 0,
+        environmentId: null,
+        name: 'region',
+        type: 'string',
+        ...values,
+      } as never)
+      return null
+    } catch (e) {
+      expect(pgErrorCode(e)).toBe(UNIQUE_VIOLATION)
+      return pgConstraintName(e)
+    }
+  }
+
+  it('is sha256 of the sorted, de-duplicated ids', async () => {
+    const pm = await createUser({ role: 'project_manager' })
+    const one = await createProject(pm.id, 'Webshop')
+    const two = await createProject(pm.id, 'Billing')
+
+    const created = await global({ projectIds: [two.id, one.id, one.id] })
+    if (!created.ok) throw new Error('setup failed')
+
+    const expected = createHash('sha256')
+      .update([one.id, two.id].sort((a, b) => a - b).join(','))
+      .digest('hex')
+    expect(created.data.narrowingKey).toBe(expected)
+    expect(narrowingFingerprint([two.id, one.id])).toBe(expected)
+  })
+
+  it('is sha256 of the empty string for a parameter narrowed to nothing', async () => {
+    // Also the column's DEFAULT, so a row written without narrowing is already
+    // right before anything updates it. The two have to agree or the index
+    // would let one unnarrowed duplicate through per write path.
+    const created = await global()
+    if (!created.ok) throw new Error('setup failed')
+    expect(created.data.narrowingKey).toBe(createHash('sha256').update('').digest('hex'))
+    expect(created.data.narrowingKey).toBe(narrowingFingerprint([]))
+  })
+
+  it('follows a narrowing that an update changes', async () => {
+    const pm = await createUser({ role: 'project_manager' })
+    const one = await createProject(pm.id, 'Webshop')
+    const two = await createProject(pm.id, 'Billing')
+    const created = await global({ projectIds: [one.id] })
+    if (!created.ok) throw new Error('setup failed')
+
+    const widened = await updateParameter(created.data.id, { projectIds: [one.id, two.id] })
+    if (!widened.ok) throw new Error(widened.message)
+    expect(widened.data.narrowingKey).toBe(narrowingFingerprint([one.id, two.id]))
+
+    const cleared = await updateParameter(created.data.id, { projectIds: [] })
+    if (!cleared.ok) throw new Error(cleared.message)
+    expect(cleared.data.narrowingKey).toBe(narrowingFingerprint([]))
+  })
+
+  it('is refused by the index, not only by the service', async () => {
+    // The race the guard cannot close: two simultaneous creates both read no
+    // rival. Asserted by writing the second row directly, which is what the
+    // losing transaction effectively does.
+    expect((await global()).ok).toBe(true)
+    expect(await insertRaw({})).toBe('parameters_definition_all_envs_key')
+  })
+
+  it('is refused by the index for an environment-specific definition too', async () => {
+    // The pair exists because `environment_id` is nullable and NULL is distinct
+    // from every other NULL in a unique index. One index over all five columns
+    // would catch this case and let every all-environments duplicate through.
+    const ci = await createCiSource()
+    const env = await createEnvironment(ci.id)
+    expect((await global({ environmentId: env.id })).ok).toBe(true)
+
+    expect(await insertRaw({ environmentId: env.id })).toBe('parameters_definition_env_key')
+  })
+
+  it('lets the index through for a definition narrowed to something else', async () => {
+    // The #275 property, asserted against the constraint this time: the index
+    // must not be the thing that forbids a project-narrowed override.
+    const pm = await createUser({ role: 'project_manager' })
+    const project = await createProject(pm.id, 'Webshop')
+    expect((await global()).ok).toBe(true)
+
+    expect(await insertRaw({ narrowingKey: narrowingFingerprint([project.id]) })).toBeNull()
+  })
+
+  it('leaves exactly one row when three creates are issued together', async () => {
+    /*
+     * What this proves and what it does not.
+     *
+     * It proves the outcome: one definition survives and the losers get a 409
+     * they can act on. It does NOT prove WHICH layer refused them — on this
+     * machine the guard's SELECT wins the interleave and answers first, and
+     * making `duplicateIndexError` rethrow everything does not fail this test.
+     * That is why the mapper is also tested directly below, against a real
+     * driver error; a test that cannot tell the two layers apart must not be
+     * described as covering the one it happens not to reach.
+     */
+    const results = await Promise.all([global(), global(), global()])
+
+    expect(results.filter((r) => r.ok)).toHaveLength(1)
+    for (const failure of results) {
+      if (failure.ok) continue
+      expect(failure.status).toBe(409)
+      expect(failure.message).toContain('region')
+    }
+    expect(await db.select().from(parameters).where(eq(parameters.name, 'region'))).toHaveLength(1)
+  })
+
+  describe('the 409 a lost race gets', () => {
+    /**
+     * A real 23505 from this index, rather than an object shaped like one.
+     *
+     * Straight from the driver, so the test cannot drift from what drizzle
+     * actually wraps — which is the part `pgErrorCode` exists for and the part
+     * that would silently stop working if the wrapper changed shape.
+     */
+    const realViolation = async (): Promise<unknown> => {
+      expect((await global()).ok).toBe(true)
+      try {
+        await db.insert(parameters).values({
+          scope: 'global',
+          scopeId: 0,
+          environmentId: null,
+          name: 'region',
+          type: 'string',
+        } as never)
+      } catch (e) {
+        return e
+      }
+      throw new Error('expected the index to refuse this insert')
+    }
+
+    it('turns the index violation into a 409 naming the parameter', async () => {
+      // Without this the losing transaction escapes as an unhandled 23505 and
+      // the route answers 500 for a request the caller could act on.
+      const result = duplicateIndexError(await realViolation(), 'global', 'region')
+      expect(result.ok).toBe(false)
+      if (result.ok) return
+      expect(result.status).toBe(409)
+      expect(result.message).toContain('region')
+      expect(result.message).toContain('re-read')
+    })
+
+    it('rethrows anything that is not this index', async () => {
+      // A mapper that answered 409 for every error would turn a genuine failure
+      // — a dead connection, a constraint added later — into "already exists",
+      // which is the one answer that stops anybody looking.
+      const other = new Error('connection terminated')
+      expect(() => duplicateIndexError(other, 'global', 'region')).toThrow(other)
+
+      const otherConstraint = { code: '23505', constraint_name: 'users_email_unique' }
+      expect(() => duplicateIndexError(otherConstraint, 'global', 'region')).toThrow()
+    })
+  })
+})
+
+describe('deleting a project that a parameter is narrowed to', () => {
+  const global = (over: Record<string, unknown> = {}) =>
+    createParameter({ scope: 'global', name: 'region', type: 'string', ...over } as never)
+
+  it('re-fingerprints the parameters it leaves behind', async () => {
+    // `parameter_projects.project_id` cascades, so the delete changes what the
+    // parameter is narrowed to. A fingerprint left describing the old narrowing
+    // is a column the index is enforcing against a value nothing reproduces.
+    const pm = await createUser({ role: 'project_manager' })
+    const doomed = await createProject(pm.id, 'Doomed')
+    const kept = await createProject(pm.id, 'Kept')
+    const param = await global({ projectIds: [doomed.id, kept.id] })
+    if (!param.ok) throw new Error('setup failed')
+
+    const deleted = await deleteProject({ id: pm.id, email: pm.email, name: pm.name, role: 'project_manager' }, doomed.id)
+    expect(deleted.ok).toBe(true)
+
+    const [row] = await db.select().from(parameters).where(eq(parameters.id, param.data.id))
+    expect(row.narrowingKey).toBe(narrowingFingerprint([kept.id]))
+  })
+
+  it('leaves every fingerprint alone when any one of them would collide', async () => {
+    /*
+     * CodeRabbit on PR #495, and it was right.
+     *
+     * The first implementation updated each fingerprint as it went and stopped
+     * at the first collision. `deleteProject` then RETURNS an error from inside
+     * `db.transaction`, and drizzle commits a callback that returns — it rolls
+     * back only when the callback throws. So the parameters checked before the
+     * colliding one were left holding a `narrowing_key` describing a narrowing
+     * they still had, which is the exact inconsistency this column exists to
+     * prevent.
+     *
+     * Two parameters narrowed to the doomed project: one that would be fine
+     * afterwards and one that collides. The refused delete must move neither.
+     */
+    const pm = await createUser({ role: 'project_manager' })
+    const doomed = await createProject(pm.id, 'Doomed')
+    const kept = await createProject(pm.id, 'Kept')
+
+    const survivor = await createParameter({
+      scope: 'global',
+      name: 'zone',
+      type: 'string',
+      projectIds: [doomed.id, kept.id],
+    } as never)
+    expect((await global()).ok).toBe(true)
+    const willCollide = await global({ projectIds: [doomed.id] })
+    if (!survivor.ok || !willCollide.ok) throw new Error('setup failed')
+
+    const before = survivor.data.narrowingKey
+    const result = await deleteProject(
+      { id: pm.id, email: pm.email, name: pm.name, role: 'project_manager' },
+      doomed.id,
+    )
+    expect(result.ok).toBe(false)
+
+    const [after] = await db.select().from(parameters).where(eq(parameters.id, survivor.data.id))
+    expect(after.narrowingKey).toBe(before)
+    expect(after.narrowingKey).toBe(narrowingFingerprint([doomed.id, kept.id]))
+  })
+
+  it('refuses the delete when losing the narrowing would create a duplicate', async () => {
+    // A definition narrowed to this project and an identical one narrowed to
+    // nothing are two definitions today and one of them tomorrow. Resolving that
+    // by deleting one of them is not something deleting a PROJECT should do.
+    const pm = await createUser({ role: 'project_manager' })
+    const doomed = await createProject(pm.id, 'Doomed')
+    expect((await global()).ok).toBe(true)
+    const narrowed = await global({ projectIds: [doomed.id] })
+    if (!narrowed.ok) throw new Error('setup failed')
+
+    const result = await deleteProject(
+      { id: pm.id, email: pm.email, name: pm.name, role: 'project_manager' },
+      doomed.id,
+    )
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.status).toBe(409)
+    expect(result.message).toContain('region')
+
+    // And the project is still there: the refusal rolled the whole thing back.
+    const [stillThere] = await db.select().from(projects).where(eq(projects.id, doomed.id))
+    expect(stillThere).toBeDefined()
   })
 })
