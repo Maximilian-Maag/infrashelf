@@ -126,7 +126,9 @@ describe('reportConfigProblems', () => {
     expect(spy).toHaveBeenCalledWith(expect.stringContaining('[config] JWT_SECRET'))
   })
 
-  it('writes a warning to stdout, not stderr, so it pages nobody', () => {
+  it('reports a warning at warn level, so an alert on errors does not fire', () => {
+    // Both land on stderr — node sends `console.warn` there too — so the level
+    // is the whole of the distinction a log collector has to work with.
     const err = vi.spyOn(console, 'error').mockImplementation(() => {})
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
 

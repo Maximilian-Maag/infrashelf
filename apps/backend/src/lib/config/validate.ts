@@ -140,11 +140,12 @@ const isValidTotpKey = (value: string): boolean => {
 }
 
 /**
- * Report problems at startup, once — errors on stderr, warnings on stdout.
+ * Report problems at startup, once.
  *
- * Split by stream rather than by prefix alone so a log pipeline that alerts on
- * stderr does not page somebody about a key they have chosen not to set, while
- * an operator reading the boot log still sees both.
+ * `console.warn` for a warning and `console.error` for an error. Note that node
+ * writes BOTH to stderr — the split is the log LEVEL a collector reads off the
+ * call, not the stream, and a first draft of this claimed otherwise. Anything
+ * that wants warnings kept off an alert has to filter on the level.
  *
  * Deliberately does NOT throw: a running server that refuses logins is easier to
  * diagnose than one that will not start, and the same code path runs during
