@@ -2,6 +2,14 @@
 # The Next.js apps run locally via `pnpm dev`, not in Docker.
 # Start with: docker compose -f infra/docker-compose.dev.yml up -d
 
+# Named explicitly. Compose otherwise derives the project name from the
+# directory holding this file — `infra` — so any other checkout on the machine
+# with its own `infra/` compose file lands in the SAME project: one set of
+# containers, one network, one set of volumes. Starting either stack then
+# recreates the other's containers, and `down -v` in either destroys both
+# products' data.
+name: infrashelf
+
 services:
 
   # ── Database ──────────────────────────────────────────────────────────────────
