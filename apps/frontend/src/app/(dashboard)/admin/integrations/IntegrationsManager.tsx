@@ -75,9 +75,25 @@ interface Props {
    * load, the id is still shown rather than nothing.
    */
   environments: DeploymentEnvironment[]
+  /**
+   * Why the environments could not be fetched, if they could not (#415).
+   *
+   * Not decoration. Without the list the binding select holds one option —
+   * portal-wide — and saving an integration bound to environment 4 would move it
+   * to portal-wide because that is all the form could offer. An outage in a list
+   * used for LABELS must not rewrite a binding, so when this is set the select
+   * is disabled, says why, and `environmentId` is left out of the request
+   * entirely. CodeRabbit found this on PR #498.
+   */
+  environmentsError?: string | null
 }
 
-export function IntegrationsManager({ initial, initialError = null, environments }: Props) {
+export function IntegrationsManager({
+  initial,
+  initialError = null,
+  environments,
+  environmentsError = null,
+}: Props) {
   const lang = useLang()
   const [items, setItems] = useState<Integration[]>(initial)
   const [loading, setLoading] = useState(false)
@@ -157,11 +173,19 @@ export function IntegrationsManager({ initial, initialError = null, environments
         name: form.name.trim(),
         baseUrl: form.baseUrl.trim(),
         authType: form.authType,
-        environmentId: toEnvironmentId(form.environmentId),
+        // Omitted, not guessed, when the environments could not be read: the API
+        // treats an absent binding as portal-wide on create, which is the only
+        // answer available, and on edit leaves the stored one alone.
+        ...(environmentsError === null ? { environmentId: toEnvironmentId(form.environmentId) } : {}),
         enabled: form.enabled,
         failureMode: form.failureMode as IntegrationFailureMode,
         ...(form.username ? { username: form.username.trim() } : {}),
-        ...(form.credential ? { credential: form.credential.trim() } : {}),
+        // NOT trimmed, unlike every other field here. The API stores what it is
+        // given and the probe sends it back verbatim, so trimming is the portal
+        // silently altering a secret — and a password whose trailing space was
+        // part of it then fails to authenticate with nothing on screen to
+        // explain why. CodeRabbit, on PR #498.
+        ...(form.credential ? { credential: form.credential } : {}),
       }
       await post('/api/admin/integrations', body)
       setAddOpen(false)
@@ -186,12 +210,26 @@ export function IntegrationsManager({ initial, initialError = null, environments
         baseUrl: form.baseUrl.trim(),
         authType: form.authType,
         username: form.username.trim(),
-        environmentId: toEnvironmentId(form.environmentId),
+        ...(environmentsError === null ? { environmentId: toEnvironmentId(form.environmentId) } : {}),
         enabled: form.enabled,
         failureMode: form.failureMode as IntegrationFailureMode,
-        ...(form.credential ? { credential: form.credential.trim() } : {}),
+        // Verbatim, for the reason given on the create above.
+        ...(form.credential ? { credential: form.credential } : {}),
       }
       await put(`/api/admin/integrations/${editTarget.id}`, body)
+      /*
+       * The verdict was about the OLD configuration (CodeRabbit, PR #498).
+       *
+       * `load()` refreshes the rows, and `last_contacted_at` / `last_error` come
+       * with them — but the probe verdict is held beside the row, and nothing
+       * re-ran it. An integration whose URL has just been corrected would go on
+       * showing "not reachable" for the address it no longer has, which is the
+       * one thing a health display must never do.
+       */
+      setProbeResult((r) => {
+        const { [editTarget.id]: _gone, ...rest } = r
+        return rest
+      })
       setEditTarget(null)
       void load()
     } catch (err) {
@@ -253,10 +291,24 @@ export function IntegrationsManager({ initial, initialError = null, environments
     return match ? match.name : `#${environmentId}`
   }
 
-  const environmentOptions = [
-    { value: PORTAL_WIDE, label: t('portalWide', lang) },
-    ...environments.map((env) => ({ value: String(env.id), label: env.name })),
-  ]
+  /*
+   * The bound environment is always among the options, even when it is not in
+   * the list — an environments outage, or a binding to a row this admin cannot
+   * see. A select whose current value is absent silently reports the first
+   * option instead, which here is "portal-wide": the binding would be changed by
+   * opening the form.
+   */
+  const environmentOptions = () => {
+    const options = [
+      { value: PORTAL_WIDE, label: t('portalWide', lang) },
+      ...environments.map((env) => ({ value: String(env.id), label: env.name })),
+    ]
+    const bound = form.environmentId
+    if (bound !== PORTAL_WIDE && !options.some((o) => o.value === bound)) {
+      options.push({ value: bound, label: `#${bound}` })
+    }
+    return options
+  }
 
   const failureModes: { value: IntegrationFailureMode | ''; label: string }[] = [
     { value: 'blocking', label: t('failureBlocking', lang) },
@@ -281,7 +333,12 @@ export function IntegrationsManager({ initial, initialError = null, environments
         label={t('environment', lang)}
         value={form.environmentId}
         onChange={(e) => setField('environmentId', e.target.value)}
-        options={environmentOptions}
+        options={environmentOptions()}
+        // Disabled rather than hidden: the binding is part of what this form
+        // says, and a field that has quietly disappeared is how somebody
+        // concludes there was never one.
+        disabled={environmentsError !== null}
+        hint={environmentsError !== null ? t('failedToLoadEnvironments', lang) : undefined}
       />
       <Select
         label={t('authentication', lang)}

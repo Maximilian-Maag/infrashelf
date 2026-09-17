@@ -26,6 +26,11 @@ export default async function IntegrationsPage() {
    * binding it does not know about. But an environments outage must not make
    * the page claim there are no integrations — so they are two sections with
    * two reasons, not one await that fails together.
+   *
+   * Both reasons are carried, not just the data. A manager handed an empty list
+   * and no reason would offer "portal-wide" as the only binding and rewrite one
+   * on save (CodeRabbit, PR #498); with the reason it disables the field and
+   * leaves the stored binding alone.
    */
   const [integrationsResult, environmentsResult] = await Promise.allSettled([
     get<Integration[]>('/api/admin/integrations'),
@@ -42,6 +47,7 @@ export default async function IntegrationsPage() {
         initial={integrations.data}
         initialError={integrations.error}
         environments={environments.data}
+        environmentsError={environments.error}
       />
     </div>
   )

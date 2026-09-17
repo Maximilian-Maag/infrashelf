@@ -114,7 +114,9 @@ describe('IntegrationsManager', () => {
     await u.type(within(dialog).getByLabelText(/^Name/), '  Artefacts  ')
     await u.type(within(dialog).getByLabelText(/^URL/), '  https://nexus.example.com  ')
     await u.selectOptions(within(dialog).getByLabelText(/^Environment/), '5')
-    await u.type(within(dialog).getByLabelText(/^Credential/), '  nx-secret  ')
+    // Unpadded: the name and URL above carry the trimming assertion, and the
+    // credential is deliberately NOT trimmed — that has its own test below.
+    await u.type(within(dialog).getByLabelText(/^Credential/), 'nx-secret')
     await u.selectOptions(within(dialog).getByLabelText(/^On failure/), 'blocking')
     await u.click(within(dialog).getByRole('button', { name: 'Save' }))
 
@@ -146,6 +148,33 @@ describe('IntegrationsManager', () => {
 
     await waitFor(() => expect(post).toHaveBeenCalled())
     expect(vi.mocked(post).mock.calls[0][1]).toMatchObject({ environmentId: null })
+  })
+
+  it('sends the credential exactly as it was typed', async () => {
+    /*
+     * CodeRabbit on PR #498, and it was right.
+     *
+     * Every other field here is trimmed. The credential is not: the API stores
+     * what it is given and the probe sends it back verbatim, so trimming is the
+     * portal quietly altering a secret. A password whose trailing space is part
+     * of it would then fail to authenticate with nothing on screen saying why.
+     */
+    const u = userEvent.setup()
+    render(<IntegrationsManager initial={[]} environments={environments} />)
+
+    await u.click(screen.getByRole('button', { name: 'Add integration' }))
+    const dialog = screen.getByRole('dialog', { name: 'Add integration' })
+    await u.type(within(dialog).getByLabelText(/^Name/), 'Padded')
+    await u.type(within(dialog).getByLabelText(/^URL/), 'https://foreman.example.com')
+    await u.type(within(dialog).getByLabelText(/^Credential/), ' secret ')
+    await u.selectOptions(within(dialog).getByLabelText(/^On failure/), 'best_effort')
+    await u.click(within(dialog).getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(post).toHaveBeenCalled())
+    expect(vi.mocked(post).mock.calls[0][1]).toMatchObject({ credential: ' secret ' })
+    // The name beside it still is trimmed — this is about secrets, not about
+    // abandoning the cleanup everywhere.
+    expect(vi.mocked(post).mock.calls[0][1]).toMatchObject({ name: 'Padded' })
   })
 
   it('asks for a username only for basic authentication', async () => {
@@ -269,6 +298,114 @@ describe('IntegrationsManager', () => {
     // as the state the probe just established, not the one before it.
     expect(within(listCard()).queryByText('Never reached')).not.toBeInTheDocument()
     expect(within(listCard()).queryByText('connect ECONNREFUSED')).not.toBeInTheDocument()
+  })
+
+  it('drops the probe verdict of an integration that was just edited', async () => {
+    /*
+     * CodeRabbit on PR #498, and it was right.
+     *
+     * The verdict describes the configuration it was made against. `load()`
+     * refreshes the rows but nothing re-probes, so an integration whose URL has
+     * just been corrected would go on showing "not reachable" for the address it
+     * no longer has — a health display asserting something that is not true any
+     * more, which is worse than showing nothing.
+     */
+    const u = userEvent.setup()
+    vi.mocked(post).mockResolvedValue({
+      ok: false,
+      status: null,
+      error: 'connect ECONNREFUSED',
+      lastContactedAt: null,
+      lastError: 'connect ECONNREFUSED',
+    } as never)
+    vi.mocked(get).mockResolvedValue([integration({ lastError: null })] as never)
+    render(<IntegrationsManager initial={[integration()]} environments={environments} />)
+
+    await u.click(screen.getByRole('button', { name: 'Test connection' }))
+    expect(await within(listCard()).findByText(/Not reachable/)).toBeInTheDocument()
+
+    await u.click(screen.getByRole('button', { name: 'Edit' }))
+    const dialog = screen.getByRole('dialog', { name: 'Edit integration' })
+    await u.clear(within(dialog).getByLabelText(/^URL/))
+    await u.type(within(dialog).getByLabelText(/^URL/), 'https://foreman.corrected.example.com')
+    await u.click(within(dialog).getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(put).toHaveBeenCalled())
+    await waitFor(() =>
+      expect(within(listCard()).queryByText(/Not reachable/)).not.toBeInTheDocument(),
+    )
+  })
+
+  describe('when the environments could not be loaded', () => {
+    /*
+     * CodeRabbit on PR #498, and it was the one that mattered.
+     *
+     * The two sections settle independently, so this state is reachable: the
+     * integrations arrived, the environments did not. With an empty list the
+     * binding select holds exactly one option — portal-wide — and saving an
+     * integration bound to environment 4 would MOVE it there, because that is
+     * all the form could offer. An outage in a list used for labels must not
+     * rewrite a binding.
+     */
+    it('disables the binding and says why', async () => {
+      const u = userEvent.setup()
+      render(
+        <IntegrationsManager
+          initial={[integration({ environmentId: 4 })]}
+          environments={[]}
+          environmentsError="HTTP 500: Internal Server Error"
+        />,
+      )
+
+      await u.click(screen.getByRole('button', { name: 'Edit' }))
+      const dialog = screen.getByRole('dialog', { name: 'Edit integration' })
+      const select = within(dialog).getByLabelText(/^Environment/) as HTMLSelectElement
+
+      expect(select.disabled).toBe(true)
+      expect(within(dialog).getByText('Failed to load environments.')).toBeInTheDocument()
+      // And it still shows the binding it has, rather than reporting the first
+      // option it happens to hold.
+      expect(select.value).toBe('4')
+    })
+
+    it('leaves the stored binding out of the update entirely', async () => {
+      const u = userEvent.setup()
+      render(
+        <IntegrationsManager
+          initial={[integration({ environmentId: 4 })]}
+          environments={[]}
+          environmentsError="HTTP 500: Internal Server Error"
+        />,
+      )
+
+      await u.click(screen.getByRole('button', { name: 'Edit' }))
+      const dialog = screen.getByRole('dialog', { name: 'Edit integration' })
+      await u.clear(within(dialog).getByLabelText(/^Name/))
+      await u.type(within(dialog).getByLabelText(/^Name/), 'Renamed')
+      await u.click(within(dialog).getByRole('button', { name: 'Save' }))
+
+      await waitFor(() => expect(put).toHaveBeenCalled())
+      const body = vi.mocked(put).mock.calls[0][1] as Record<string, unknown>
+      expect(body.name).toBe('Renamed')
+      // Absent, not null: null is a binding — the portal-wide one — and sending
+      // it would be the rebinding this whole case exists to prevent.
+      expect('environmentId' in body).toBe(false)
+    })
+  })
+
+  it('keeps a binding selectable when the environment is not in the list', async () => {
+    // Same failure in miniature: a select whose current value is absent reports
+    // the FIRST option instead, and here that is portal-wide.
+    const u = userEvent.setup()
+    render(<IntegrationsManager initial={[integration({ environmentId: 9 })]} environments={environments} />)
+
+    await u.click(screen.getByRole('button', { name: 'Edit' }))
+    const select = within(screen.getByRole('dialog', { name: 'Edit integration' })).getByLabelText(
+      /^Environment/,
+    ) as HTMLSelectElement
+
+    expect(select.value).toBe('9')
+    expect(within(select).getByRole('option', { name: '#9' })).toBeInTheDocument()
   })
 
   it('marks a disabled integration as such', () => {
