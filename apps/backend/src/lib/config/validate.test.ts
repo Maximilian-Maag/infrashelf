@@ -4,7 +4,13 @@ import { configProblems, reportConfigProblems, MIN_JWT_SECRET_LENGTH, type Confi
 const validEnv = {
   JWT_SECRET: 'x'.repeat(MIN_JWT_SECRET_LENGTH),
   DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/db',
+  // Part of a complete configuration since #413 made this key encrypt CI source
+  // tokens and not only integration credentials (#414).
+  SECRET_ENCRYPTION_KEY: 'a'.repeat(64),
 } satisfies ConfigEnv
+
+/** The variables reported, so a test does not have to care about severity. */
+const named = (problems: { variable: string }[]) => problems.map((p) => p.variable)
 
 afterEach(() => vi.restoreAllMocks())
 
@@ -37,29 +43,62 @@ describe('configProblems', () => {
   })
 
   it('reports every problem at once rather than the first', () => {
-    expect(configProblems({} satisfies ConfigEnv).map((p) => p.variable)).toEqual([
+    expect(named(configProblems({} satisfies ConfigEnv))).toEqual([
       'JWT_SECRET',
       'DATABASE_URL',
+      'SECRET_ENCRYPTION_KEY',
     ])
   })
 
-  describe('SECRET_ENCRYPTION_KEY (issue #111)', () => {
-    const key = 'a'.repeat(64)
-
-    it('says nothing when it is absent', () => {
-      // Absence disables the integration registry; it is not a misconfiguration.
-      // Warning about it on every boot of every deployment that does not use
-      // integrations is the noise that trains people to ignore this block.
-      expect(configProblems(validEnv)).toEqual([])
+  it('marks what is broken as an error and what is merely missing as a warning', () => {
+    const bySeverity = Object.fromEntries(
+      configProblems({} satisfies ConfigEnv).map((p) => [p.variable, p.severity]),
+    )
+    expect(bySeverity).toEqual({
+      JWT_SECRET: 'error',
+      DATABASE_URL: 'error',
+      SECRET_ENCRYPTION_KEY: 'warning',
     })
+  })
+
+  describe('SECRET_ENCRYPTION_KEY (issues #111, #414)', () => {
+    const key = 'a'.repeat(64)
 
     it('says nothing when it is a valid key', () => {
       expect(configProblems({ ...validEnv, SECRET_ENCRYPTION_KEY: key })).toEqual([])
     })
 
-    it('reports a key that is set but the wrong length', () => {
+    it('warns when it is absent, because a CI source token can no longer be stored', () => {
+      // Before #413 absence bought nothing but the integration registry, and
+      // reporting it was noise. #413 made the key encrypt CI source access
+      // tokens too, so a deployment without one now refuses a token rotation
+      // with a 503 — months later, and with no boot line connecting the two.
+      const problems = configProblems({ ...validEnv, SECRET_ENCRYPTION_KEY: undefined })
+      expect(named(problems)).toEqual(['SECRET_ENCRYPTION_KEY'])
+      expect(problems[0].severity).toBe('warning')
+      expect(problems[0].message).toContain('503')
+    })
+
+    it('treats an empty string the same as absent, and reports it once', () => {
+      // How a compose file with `SECRET_ENCRYPTION_KEY: "${SECRET_ENCRYPTION_KEY:-}"`
+      // presents an unset variable — see infra/docker-host/docker-compose.yml.
+      // Reported once and not twice: an empty string is also not valid hex, so
+      // the two branches have to stay exclusive or the same variable arrives
+      // with both severities at boot.
+      const problems = configProblems({ ...validEnv, SECRET_ENCRYPTION_KEY: '' })
+      expect(named(problems)).toEqual(['SECRET_ENCRYPTION_KEY'])
+      expect(problems[0].severity).toBe('warning')
+    })
+
+    it('says a missing key is not rotatable, so it is set once per environment', () => {
+      const problems = configProblems({ ...validEnv, SECRET_ENCRYPTION_KEY: '' })
+      expect(problems[0].message).toContain('own key')
+    })
+
+    it('reports a key that is set but the wrong length, as an error', () => {
       const problems = configProblems({ ...validEnv, SECRET_ENCRYPTION_KEY: 'a'.repeat(32) })
-      expect(problems.map((p) => p.variable)).toEqual(['SECRET_ENCRYPTION_KEY'])
+      expect(named(problems)).toEqual(['SECRET_ENCRYPTION_KEY'])
+      expect(problems[0].severity).toBe('error')
       expect(problems[0].message).toContain('64 hex characters')
     })
 
@@ -67,7 +106,8 @@ describe('configProblems', () => {
       // A base64 key is the likely mistake — 44 characters, or 64 if someone
       // pads it — and it would otherwise be accepted as bytes it is not.
       const problems = configProblems({ ...validEnv, SECRET_ENCRYPTION_KEY: 'z'.repeat(64) })
-      expect(problems.map((p) => p.variable)).toEqual(['SECRET_ENCRYPTION_KEY'])
+      expect(named(problems)).toEqual(['SECRET_ENCRYPTION_KEY'])
+      expect(problems[0].severity).toBe('error')
     })
 
     it('warns that a changed key cannot decrypt existing credentials', () => {
@@ -78,7 +118,7 @@ describe('configProblems', () => {
 })
 
 describe('reportConfigProblems', () => {
-  it('writes each problem to stderr and returns them', () => {
+  it('writes each error to stderr and returns them', () => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
     const problems = reportConfigProblems({ ...validEnv, JWT_SECRET: 'too-short' })
 
@@ -86,9 +126,23 @@ describe('reportConfigProblems', () => {
     expect(spy).toHaveBeenCalledWith(expect.stringContaining('[config] JWT_SECRET'))
   })
 
+  it('reports a warning at warn level, so an alert on errors does not fire', () => {
+    // Both land on stderr — node sends `console.warn` there too — so the level
+    // is the whole of the distinction a log collector has to work with.
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    reportConfigProblems({ ...validEnv, SECRET_ENCRYPTION_KEY: '' })
+
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('[config] SECRET_ENCRYPTION_KEY'))
+    expect(err).not.toHaveBeenCalled()
+  })
+
   it('says nothing when the configuration is fine', () => {
-    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     reportConfigProblems(validEnv)
-    expect(spy).not.toHaveBeenCalled()
+    expect(err).not.toHaveBeenCalled()
+    expect(warn).not.toHaveBeenCalled()
   })
 })
