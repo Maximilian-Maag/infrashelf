@@ -519,6 +519,40 @@ export interface UpdateCiSourceRequest {
   provider?: CiProvider
 }
 
+/**
+ * What Foreman has, against what this environment ordered (#111).
+ *
+ * Four buckets, and three of them are easy to read as each other: a ghost is not
+ * proof a machine is gone, an orphan is not a fault, and an element with no host
+ * name recorded is neither.
+ */
+export interface ForemanHostSummary {
+  id: number
+  name: string
+  status: string | null
+  lastReportAt: string | null
+}
+
+export interface ForemanOrderedHost {
+  elementId: number
+  orderId: number
+  productId: number
+  hostName: string
+}
+
+export interface ForemanReconciliation {
+  integration: { id: number; name: string; baseUrl: string }
+  environmentId: number
+  checkedAt: string
+  matched: { elementId: number; hostName: string; foremanHostId: number; status: string | null }[]
+  /** Ordered, and Foreman has never heard of it. */
+  ghosts: ForemanOrderedHost[]
+  /** Present in Foreman, matching nothing the portal ordered. */
+  orphans: ForemanHostSummary[]
+  /** Active elements carrying no host name, so no comparison was possible. */
+  unidentified: { elementId: number; orderId: number; productId: number }[]
+}
+
 // Deployment Environments
 export interface DeploymentEnvironment {
   id: number

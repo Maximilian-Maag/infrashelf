@@ -1,4 +1,11 @@
-import type { IntegrationAuthType, IntegrationKind } from '@/lib/db/schema'
+import type { IntegrationKind } from '@/lib/db/schema'
+import {
+  type IntegrationTarget,
+  integrationUrl,
+  authHeaders,
+  describeFailure,
+  insecureCredentialTransport,
+} from '@/lib/integrations/http'
 
 /**
  * Reachability probe for a registered integration (issue #111).
@@ -11,15 +18,8 @@ import type { IntegrationAuthType, IntegrationKind } from '@/lib/db/schema'
  * how a health result is stored or reported.
  */
 
-/** What the probe needs; a subset of the row, so a caller can pass a fixture. */
-export interface ProbeTarget {
-  kind: IntegrationKind
-  baseUrl: string
-  authType: IntegrationAuthType
-  username: string
-  /** Decrypted. The probe never sees the envelope. */
-  credential: string | null
-}
+/** What the probe needs. The same subset every integration client takes. */
+export type ProbeTarget = IntegrationTarget
 
 export interface ProbeResult {
   ok: boolean
@@ -60,45 +60,6 @@ const HEALTH_PATHS: Record<IntegrationKind, string> = {
 const PROBE_TIMEOUT_MS = 5_000
 
 /**
- * Reject anything that is not plain HTTP(S) before it reaches `fetch`.
- *
- * The base URL is operator-supplied, and `fetch` would happily accept `file:` or
- * a `data:` URL. Mirrors the same guard in lib/ci/gitlab.ts.
- */
-const probeUrl = (baseUrl: string, path: string): URL => {
-  // Concatenated, not `new URL(path, base)`: the health paths are absolute, and
-  // the two-argument form would discard the base's own path — so a Foreman
-  // mounted at https://gw.example.com/foreman would be probed at the gateway
-  // root. Trailing slashes are stripped first, because `//api/v2/status` is a
-  // 404 on Nexus and Pulp.
-  const url = new URL(`${baseUrl.replace(/\/+$/, '')}${path}`)
-  if (url.protocol !== 'https:' && url.protocol !== 'http:') {
-    throw new Error(`Disallowed URL protocol: ${url.protocol}`)
-  }
-  return url
-}
-
-const authHeaders = (target: ProbeTarget): Record<string, string> => {
-  const credential = target.credential ?? ''
-  switch (target.authType) {
-    case 'none':
-      return {}
-    case 'bearer':
-      return { Authorization: `Bearer ${credential}` }
-    case 'basic':
-      return {
-        Authorization: `Basic ${Buffer.from(`${target.username}:${credential}`).toString('base64')}`,
-      }
-    case 'token_header':
-      // Nexus and Pulp deployments behind a gateway commonly want a bare token
-      // header rather than a scheme. Kept distinct from `bearer` so the stored
-      // configuration says which one, instead of the operator smuggling
-      // "Bearer x" into the credential itself.
-      return { 'X-Auth-Token': credential }
-  }
-}
-
-/**
  * Probe one integration.
  *
  * Never throws: a probe's job is to turn an unreachable system into a recorded
@@ -109,10 +70,13 @@ const authHeaders = (target: ProbeTarget): Record<string, string> => {
 export const probeIntegration = async (target: ProbeTarget): Promise<ProbeResult> => {
   let url: URL
   try {
-    url = probeUrl(target.baseUrl, HEALTH_PATHS[target.kind])
+    url = integrationUrl(target.baseUrl, HEALTH_PATHS[target.kind])
   } catch (e) {
     return { ok: false, status: null, error: e instanceof Error ? e.message : String(e) }
   }
+
+  const insecure = insecureCredentialTransport(target, url)
+  if (insecure) return { ok: false, status: null, error: insecure }
 
   let res: Response
   try {
@@ -136,17 +100,10 @@ export const probeIntegration = async (target: ProbeTarget): Promise<ProbeResult
   }
 
   if (!res.ok) {
-    return {
-      ok: false,
-      status: res.status,
-      // 401/403 is the single most common probe failure and means the stored
-      // credential, not the system, so name it rather than leaving the operator
-      // to look up the code.
-      error:
-        res.status === 401 || res.status === 403
-          ? `Rejected the stored credential (HTTP ${res.status})`
-          : `HTTP ${res.status} from ${url.pathname}`,
-    }
+    // 401/403 is the single most common probe failure and means the stored
+    // credential rather than the system, which `describeFailure` says for every
+    // client instead of leaving the operator to look up the code.
+    return { ok: false, status: res.status, error: describeFailure(res.status, url.pathname) }
   }
 
   return { ok: true, status: res.status, detail: await describe(target.kind, res) }
