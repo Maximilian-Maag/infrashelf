@@ -6,6 +6,7 @@ import { ok, err, type Result } from '@/lib/services/result'
 import { fireDestroyTriggers, destroyVariables } from '@/lib/services/teardown'
 import { isEmptyUpdate, EMPTY_UPDATE_MESSAGE } from '@/lib/services/updates'
 import { logAudit, logAuditWith, changedFields } from '@/lib/audit'
+import { refingerprintAfterProjectDelete } from '@/lib/services/admin/parameters'
 
 export interface ProjectRow {
   id: number
@@ -251,6 +252,31 @@ export const deleteProject = async (
       )
 
       return ok(undefined)
+    }
+
+    /*
+     * A parameter narrowed to this project is about to be narrowed to one fewer
+     * (#404). `parameter_projects.project_id` cascades, and `narrowing_key` is
+     * derived from those rows, so the fingerprint has to be recomputed here —
+     * before the delete, while the narrowing being removed is still readable,
+     * and on this transaction so it rolls back with everything else.
+     *
+     * A collision is possible and it is refused rather than resolved: losing the
+     * narrowing can make a parameter identical to one that already exists, and
+     * the two were distinct definitions right up until this request. Deleting
+     * one of them as a side effect of deleting a PROJECT is not something an
+     * operator asked for, and #402 decides which applies meanwhile, so nothing
+     * is broken by saying so and stopping.
+     */
+    const { collisions } = await refingerprintAfterProjectDelete(tx, projectId)
+    if (collisions.length > 0) {
+      return err(
+        409,
+        `Cannot delete project ${locked.name}: ${collisions.length} parameter definition(s) ` +
+          'are narrowed to it and would become duplicates of definitions that already exist — ' +
+          `${collisions.map((c) => `"${c.name}" (#${c.id})`).join(', ')}. ` +
+          'Delete or re-narrow those first.',
+      )
     }
 
     await tx.delete(projects).where(eq(projects.id, projectId))

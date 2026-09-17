@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { loadApplicableParameters, resolveParameterDefs, getProduct } from './catalog'
-import { createParameter, updateParameter } from './admin/parameters'
+import { createParameter, updateParameter, narrowingFingerprint } from './admin/parameters'
 import { db } from '@/lib/db/client'
 import { parameters, parameterProjects } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
@@ -32,23 +32,43 @@ const setup = async () => {
   return { cat, product, env, mine, other }
 }
 
-const addParameter = async (over: Record<string, unknown>) => {
+/**
+ * A parameter row written directly, narrowed in the same statement.
+ *
+ * These tests build states `createParameter` would not build in one call, so
+ * they write the table themselves. Since #404 the row carries a fingerprint of
+ * its narrowing and a unique index is on it, which means the narrowing has to
+ * be known at INSERT — exactly as it is in `createParameter`. Fingerprinting
+ * afterwards is too late: two rows that will end up narrowed differently both
+ * claim "narrowed to nothing" for the length of one statement, and the second
+ * insert is refused as a duplicate of a definition it is not.
+ */
+const addParameter = async (over: Record<string, unknown>, narrowedTo: number[] = []) => {
   const [row] = await db
     .insert(parameters)
-    .values({ scope: 'global', scopeId: 0, name: 'region', type: 'string', ...over })
+    .values({
+      scope: 'global',
+      scopeId: 0,
+      name: 'region',
+      type: 'string',
+      narrowingKey: narrowingFingerprint(narrowedTo),
+      ...over,
+    })
     .returning()
+  if (narrowedTo.length > 0) {
+    await db
+      .insert(parameterProjects)
+      .values(narrowedTo.map((projectId) => ({ parameterId: row.id, projectId })))
+  }
   return row
 }
 
-const narrowTo = async (parameterId: number, projectIds: number[]) => {
-  await db.insert(parameterProjects).values(projectIds.map((projectId) => ({ parameterId, projectId })))
-}
+
 
 describe('parameters narrowed to projects (#275)', () => {
   it('applies to a project it names', async () => {
     const { cat, product, env, mine } = await setup()
-    const param = await addParameter({ name: 'region' })
-    await narrowTo(param.id, [mine.id])
+    await addParameter({ name: 'region' }, [mine.id])
 
     const rows = await loadApplicableParameters(product.id, cat.id, env.id, mine.id)
 
@@ -61,8 +81,7 @@ describe('parameters narrowed to projects (#275)', () => {
    */
   it('does not apply to a project it does not name', async () => {
     const { cat, product, env, other, mine } = await setup()
-    const param = await addParameter({ name: 'region' })
-    await narrowTo(param.id, [mine.id])
+    await addParameter({ name: 'region' }, [mine.id])
 
     const rows = await loadApplicableParameters(product.id, cat.id, env.id, other.id)
 
@@ -85,8 +104,7 @@ describe('parameters narrowed to projects (#275)', () => {
    */
   it('hides nothing while the project is still unknown', async () => {
     const { cat, product, env, mine } = await setup()
-    const param = await addParameter({ name: 'region' })
-    await narrowTo(param.id, [mine.id])
+    await addParameter({ name: 'region' }, [mine.id])
 
     const rows = await loadApplicableParameters(product.id, cat.id, env.id)
 
@@ -95,8 +113,7 @@ describe('parameters narrowed to projects (#275)', () => {
 
   it('applies to every project it names, not just the first', async () => {
     const { cat, product, env, mine, other } = await setup()
-    const param = await addParameter({ name: 'region' })
-    await narrowTo(param.id, [mine.id, other.id])
+    await addParameter({ name: 'region' }, [mine.id, other.id])
 
     for (const project of [mine, other]) {
       const rows = await loadApplicableParameters(product.id, cat.id, env.id, project.id)
@@ -113,8 +130,7 @@ describe('parameters narrowed to projects (#275)', () => {
     it('prefers the narrowed row over the one that applies everywhere', async () => {
       const { cat, product, env, mine } = await setup()
       await addParameter({ name: 'region', defaultValue: 'everywhere' })
-      const narrow = await addParameter({ name: 'region', defaultValue: 'for-this-project' })
-      await narrowTo(narrow.id, [mine.id])
+      await addParameter({ name: 'region', defaultValue: 'for-this-project' }, [mine.id])
 
       const defs = resolveParameterDefs(
         await loadApplicableParameters(product.id, cat.id, env.id, mine.id),
@@ -130,8 +146,7 @@ describe('parameters narrowed to projects (#275)', () => {
      */
     it('lets the product win over a project-narrowed global', async () => {
       const { cat, product, env, mine } = await setup()
-      const narrow = await addParameter({ name: 'region', defaultValue: 'from-project' })
-      await narrowTo(narrow.id, [mine.id])
+      await addParameter({ name: 'region', defaultValue: 'from-project' }, [mine.id])
       await addParameter({
         scope: 'product', scopeId: product.id, name: 'region', defaultValue: 'from-product',
       })
@@ -145,8 +160,7 @@ describe('parameters narrowed to projects (#275)', () => {
 
     it('lets the category win over a project-narrowed global too', async () => {
       const { cat, product, env, mine } = await setup()
-      const narrow = await addParameter({ name: 'region', defaultValue: 'from-project' })
-      await narrowTo(narrow.id, [mine.id])
+      await addParameter({ name: 'region', defaultValue: 'from-project' }, [mine.id])
       await addParameter({
         scope: 'category', scopeId: cat.id, name: 'region', defaultValue: 'from-category',
       })
@@ -217,8 +231,7 @@ describe('parameters narrowed to projects (#275)', () => {
    */
   it('stops being narrowed when the project it named is deleted', async () => {
     const { cat, product, env, mine, other } = await setup()
-    const param = await addParameter({ name: 'region' })
-    await narrowTo(param.id, [mine.id])
+    await addParameter({ name: 'region' }, [mine.id])
 
     await db.execute(`DELETE FROM projects WHERE id = ${mine.id}`)
 
@@ -368,10 +381,8 @@ describe('resolving parameters for the project that is actually asking (#406)', 
 
   it('gives each project the definition narrowed to it, not the other one', async () => {
     const { product, env, mine, other } = await setup()
-    const forMine = await addParameter({ name: 'region', defaultValue: 'westeurope' })
-    await narrowTo(forMine.id, [mine.id])
-    const forOther = await addParameter({ name: 'region', defaultValue: 'northeurope' })
-    await narrowTo(forOther.id, [other.id])
+    await addParameter({ name: 'region', defaultValue: 'westeurope' }, [mine.id])
+    await addParameter({ name: 'region', defaultValue: 'northeurope' }, [other.id])
 
     // Both rows are `projectScoped`, so before the fix nothing separated them
     // and #402's tie-break — highest id — handed `northeurope` to both projects.
@@ -386,10 +397,8 @@ describe('resolving parameters for the project that is actually asking (#406)', 
    */
   it('does not let another project decide whether a value is secret', async () => {
     const { product, env, mine, other } = await setup()
-    const secretForMine = await addParameter({ name: 'region', sensitive: true })
-    await narrowTo(secretForMine.id, [mine.id])
-    const plainForOther = await addParameter({ name: 'region', sensitive: false })
-    await narrowTo(plainForOther.id, [other.id])
+    await addParameter({ name: 'region', sensitive: true }, [mine.id])
+    await addParameter({ name: 'region', sensitive: false }, [other.id])
 
     expect(region(await getProduct(product.id, 'en', env.id, mine.id))?.sensitive).toBe(true)
     expect(region(await getProduct(product.id, 'en', env.id, other.id))?.sensitive).toBe(false)
@@ -410,8 +419,7 @@ describe('resolving parameters for the project that is actually asking (#406)', 
      * arriving first and this asserts nothing — which is the order-dependence
      * #402 was about, so the guard has to be the awkward order.
      */
-    const narrow = await addParameter({ name: 'region', defaultValue: 'for-one-project' })
-    await narrowTo(narrow.id, [mine.id])
+    await addParameter({ name: 'region', defaultValue: 'for-one-project' }, [mine.id])
     await addParameter({ name: 'region', defaultValue: 'everywhere' })
 
     expect(region(await getProduct(product.id, 'en', env.id))?.defaultValue).toBe('everywhere')
@@ -421,8 +429,7 @@ describe('resolving parameters for the project that is actually asking (#406)', 
 
   it('still hides a parameter narrowed away from the project that is asking', async () => {
     const { product, env, mine, other } = await setup()
-    const param = await addParameter({ name: 'region' })
-    await narrowTo(param.id, [mine.id])
+    await addParameter({ name: 'region' }, [mine.id])
 
     expect(region(await getProduct(product.id, 'en', env.id, other.id))).toBeUndefined()
   })
@@ -431,10 +438,8 @@ describe('resolving parameters for the project that is actually asking (#406)', 
     // The catalogue page loads with no environment and resolves per environment
     // instead; that path has to carry the project as well.
     const { product, mine, other } = await setup()
-    const forMine = await addParameter({ name: 'region', defaultValue: 'westeurope' })
-    await narrowTo(forMine.id, [mine.id])
-    const forOther = await addParameter({ name: 'region', defaultValue: 'northeurope' })
-    await narrowTo(forOther.id, [other.id])
+    await addParameter({ name: 'region', defaultValue: 'westeurope' }, [mine.id])
+    await addParameter({ name: 'region', defaultValue: 'northeurope' }, [other.id])
 
     expect(region(await getProduct(product.id, 'en', undefined, mine.id))?.defaultValue).toBe('westeurope')
     expect(region(await getProduct(product.id, 'en', undefined, other.id))?.defaultValue).toBe('northeurope')

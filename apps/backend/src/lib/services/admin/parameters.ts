@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { db } from '@/lib/db/client'
 import { parameters, parameterProjects, products, productEnvironments, projects, type Parameter } from '@/lib/db/schema'
 import { and, eq, inArray, isNull } from 'drizzle-orm'
@@ -6,6 +7,7 @@ import { recordProductVersion } from '@/lib/services/versions'
 import { logAudit, changedFields } from '@/lib/audit'
 import { isEmptyUpdate, EMPTY_UPDATE_MESSAGE } from '@/lib/services/updates'
 import { isReservedCiVariable } from '@/lib/ci/reserved'
+import { pgErrorCode, pgConstraintName, UNIQUE_VIOLATION } from '@/lib/db/pgError'
 import { SIZE_CODE_MAX_LENGTH } from '@/lib/services/sizes'
 
 /**
@@ -138,8 +140,22 @@ const unknownProjectIds = async (projectIds?: number[]): Promise<Result<never> |
  * the order the ids arrive in is the order a form serialised them, and nobody
  * meant it.
  */
-const narrowingKey = (projectIds: number[]): string =>
+export const narrowingKey = (projectIds: number[]): string =>
   [...new Set(projectIds)].sort((a, b) => a - b).join(',')
+
+/**
+ * The same key as a fingerprint, for the column the unique index is on (#404).
+ *
+ * sha256 of `narrowingKey`, so the value is a fixed 64 characters however many
+ * projects a parameter names — a btree tuple has 2704 bytes to spend and a few
+ * hundred ids would not fit. Nothing reads it back for meaning:
+ * `parameter_projects` is the truth and this is derived from it.
+ *
+ * The empty set is sha256(''), which is also the column's DEFAULT, so a row
+ * written without narrowing is already correct before this is called.
+ */
+export const narrowingFingerprint = (projectIds: number[]): string =>
+  createHash('sha256').update(narrowingKey(projectIds)).digest('hex')
 
 /**
  * Refuse a second definition of the same name in the same place (#477).
@@ -169,8 +185,11 @@ const duplicateParameterError = async (
     projectIds: number[]
   },
   excludeId?: number,
+  // The transaction to read on, when this is asked inside one — a project
+  // delete has to see its own uncommitted state (#404).
+  executor: Pick<typeof db, 'select'> = db,
 ): Promise<Result<never> | null> => {
-  const rivals = await db
+  const rivals = await executor
     .select({ id: parameters.id })
     .from(parameters)
     .where(and(
@@ -189,7 +208,7 @@ const duplicateParameterError = async (
   const others = rivals.filter((row) => row.id !== excludeId)
   if (others.length === 0) return null
 
-  const links = await db
+  const links = await executor
     .select()
     .from(parameterProjects)
     .where(inArray(parameterProjects.parameterId, others.map((row) => row.id)))
@@ -205,6 +224,36 @@ const duplicateParameterError = async (
   return err(
     409,
     `A ${key.scope} parameter named "${key.name}" already exists for the same environment and projects (#${clash.id})`,
+  )
+}
+
+/**
+ * The 409 the unique index gives, when the guard above was raced past (#404).
+ *
+ * `duplicateParameterError` is a check-then-insert: two simultaneous creates
+ * both read no rival and both proceed. The index is what actually stops the
+ * second one, and it stops it with a 23505 that would otherwise leave the route
+ * answering 500 for a request the caller could fix.
+ *
+ * Exported so it can be tested against a REAL driver error rather than only
+ * through a race whose timing no test controls — see the note in
+ * `parameters.test.ts` on what the concurrent-create test does and does not
+ * prove.
+ *
+ * The message deliberately does NOT name the winning definition the way the
+ * guard's does. At this point the winner is a row this transaction never read,
+ * and inventing a lookup for it would be a second query on a path that exists
+ * only for a race — a re-read tells the caller to look, which is the same
+ * instruction with one fewer way to be wrong.
+ */
+export const duplicateIndexError = (e: unknown, scope: string, name: string): Result<never> => {
+  if (pgErrorCode(e) !== UNIQUE_VIOLATION) throw e
+  const constraint = pgConstraintName(e) ?? ''
+  if (!constraint.startsWith('parameters_definition_')) throw e
+  return err(
+    409,
+    `A ${scope} parameter named "${name}" already exists for the same environment and projects. ` +
+      'It was created at the same moment as this request; re-read the list to see it.',
   )
 }
 
@@ -255,6 +304,86 @@ const setProjectNarrowing = async (
   if (unique.length > 0) {
     await tx.insert(parameterProjects).values(unique.map((projectId) => ({ parameterId, projectId })))
   }
+  // The fingerprint the unique index is on, written on the same connection as
+  // the rows it describes (#404). Derived state, so it has exactly one place it
+  // is allowed to be written from, and this is it.
+  await tx
+    .update(parameters)
+    .set({ narrowingKey: narrowingFingerprint(unique) })
+    .where(eq(parameters.id, parameterId))
+}
+
+/**
+ * Re-fingerprint every parameter narrowed to a project that is about to go (#404).
+ *
+ * `parameter_projects.project_id` is ON DELETE CASCADE, so deleting a project
+ * silently changes what its parameters are narrowed to — and `narrowing_key` is
+ * derived from exactly that. Left alone, the column would describe a narrowing
+ * the row no longer has, and the unique index would be enforcing against a
+ * fingerprint nothing can reproduce.
+ *
+ * A trigger on `parameter_projects` would cover this without anybody
+ * remembering to call it. It is not used, for the reason given on the column:
+ * drizzle cannot see a trigger, so `db:push` would build a local database
+ * without one and the divergence would only show up in production (#141).
+ *
+ * Called INSIDE the transaction that deletes the project, and before the delete,
+ * so the narrowing it reads is the one the cascade is about to remove.
+ *
+ * Returns the parameters whose new fingerprint would collide with a definition
+ * that already exists — which is a real outcome, not a theoretical one: a
+ * parameter narrowed to project 7 and an identical one narrowed to nothing are
+ * two definitions today and one of them tomorrow. The caller decides what to
+ * say about that; this function refuses to be the thing that guesses.
+ */
+export const refingerprintAfterProjectDelete = async (
+  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  projectId: number,
+): Promise<{ collisions: { id: number; name: string }[] }> => {
+  const affected = await tx
+    .select({ id: parameterProjects.parameterId })
+    .from(parameterProjects)
+    .where(eq(parameterProjects.projectId, projectId))
+  if (affected.length === 0) return { collisions: [] }
+
+  const ids = affected.map((row) => row.id)
+  const rows = await tx.select().from(parameters).where(inArray(parameters.id, ids))
+  const links = await tx
+    .select()
+    .from(parameterProjects)
+    .where(inArray(parameterProjects.parameterId, ids))
+
+  const remaining = new Map<number, number[]>()
+  for (const link of links) {
+    if (link.projectId === projectId) continue
+    remaining.set(link.parameterId, [...(remaining.get(link.parameterId) ?? []), link.projectId])
+  }
+
+  const collisions: { id: number; name: string }[] = []
+  for (const row of rows) {
+    const fingerprint = narrowingFingerprint(remaining.get(row.id) ?? [])
+    const rival = await duplicateParameterError(
+      {
+        scope: row.scope,
+        scopeId: row.scopeId,
+        name: row.name,
+        environmentId: row.environmentId,
+        projectIds: remaining.get(row.id) ?? [],
+      },
+      row.id,
+      tx,
+    )
+    if (rival) {
+      collisions.push({ id: row.id, name: row.name })
+      continue
+    }
+    await tx
+      .update(parameters)
+      .set({ narrowingKey: fingerprint })
+      .where(eq(parameters.id, row.id))
+  }
+
+  return { collisions }
 }
 
 export const createParameter = async (
@@ -279,28 +408,47 @@ export const createParameter = async (
   // One transaction: a parameter that exists but whose narrowing did not get
   // written applies to EVERY project, which is the opposite of what was asked
   // for and the more dangerous of the two ways to fail (#275).
-  const param = await db.transaction(async (tx) => {
-    const [created] = await tx
-      .insert(parameters)
-      .values({
-        scope: input.scope,
-        scopeId: input.scopeId ?? 0,
-        environmentId: input.environmentId ?? null,
-        name: input.name,
-        label: input.label ?? '',
-        type: input.type,
-        description: input.description ?? '',
-        defaultValue: input.defaultValue ?? '',
-        required: input.required ?? false,
-        sensitive: input.sensitive ?? false,
-        sizeValues: input.sizeValues ?? {},
-      })
-      .returning()
-    if (input.projectIds && input.projectIds.length > 0) {
-      await setProjectNarrowing(tx, created.id, input.projectIds)
-    }
-    return created
-  })
+  let param: Parameter
+  try {
+    param = await db.transaction(async (tx) => {
+      const [created] = await tx
+        .insert(parameters)
+        .values({
+          scope: input.scope,
+          scopeId: input.scopeId ?? 0,
+          environmentId: input.environmentId ?? null,
+          name: input.name,
+          label: input.label ?? '',
+          type: input.type,
+          description: input.description ?? '',
+          defaultValue: input.defaultValue ?? '',
+          required: input.required ?? false,
+          sensitive: input.sensitive ?? false,
+          sizeValues: input.sizeValues ?? {},
+          /*
+           * Written here and not left to `setProjectNarrowing` below (#404).
+           *
+           * The unique index is checked by the INSERT, so a row that arrives
+           * with the DEFAULT fingerprint and is corrected a statement later has
+           * already been compared against every other definition AS IF it were
+           * narrowed to nothing. That refuses exactly the case #275 exists for:
+           * a definition narrowed to one project, created beside one that
+           * applies everywhere.
+           *
+           * Found by the tests for that property, which went red the first time
+           * this migration ran.
+           */
+          narrowingKey: narrowingFingerprint(input.projectIds ?? []),
+        })
+        .returning()
+      if (input.projectIds && input.projectIds.length > 0) {
+        await setProjectNarrowing(tx, created.id, input.projectIds)
+      }
+      return created
+    })
+  } catch (e) {
+    return duplicateIndexError(e, input.scope, input.name)
+  }
 
   await recordParameterChange(param, 'added', userId ?? null)
   // `sensitive` is called out by name: it decides whether the value this parameter
@@ -366,25 +514,35 @@ export const updateParameter = async (
     if (duplicate) return duplicate
   }
 
-  const updated = await db.transaction(async (tx) => {
-    /*
-     * An update that changes ONLY the narrowing leaves `columns` empty, and
-     * drizzle throws "No values to set" on `.set({})` — so the one edit this
-     * feature exists for would have answered 500. Read the row instead: it is
-     * needed for the 404 either way, and there is nothing to write to it.
-     */
-    const [row] = Object.keys(columns).length === 0
-      ? await tx.select().from(parameters).where(eq(parameters.id, id)).limit(1)
-      : await tx
-          .update(parameters)
-          .set(columns)
-          .where(eq(parameters.id, id))
-          .returning()
-    // Absent leaves the narrowing alone; `[]` clears it. An update that omitted
-    // the field must not silently widen a parameter to every project.
-    if (row && projectIds !== undefined) await setProjectNarrowing(tx, id, projectIds)
-    return row
-  })
+  let updated: Parameter | undefined
+  try {
+    updated = await db.transaction(async (tx) => {
+      /*
+       * An update that changes ONLY the narrowing leaves `columns` empty, and
+       * drizzle throws "No values to set" on `.set({})` — so the one edit this
+       * feature exists for would have answered 500. Read the row instead: it is
+       * needed for the 404 either way, and there is nothing to write to it.
+       */
+      const [row] = Object.keys(columns).length === 0
+        ? await tx.select().from(parameters).where(eq(parameters.id, id)).limit(1)
+        : await tx
+            .update(parameters)
+            .set(columns)
+            .where(eq(parameters.id, id))
+            .returning()
+      // Absent leaves the narrowing alone; `[]` clears it. An update that omitted
+      // the field must not silently widen a parameter to every project.
+      if (row && projectIds !== undefined) {
+        await setProjectNarrowing(tx, id, projectIds)
+        // Re-read for the fingerprint `setProjectNarrowing` just wrote (#404).
+        const [withKey] = await tx.select().from(parameters).where(eq(parameters.id, id))
+        return withKey
+      }
+      return row
+    })
+  } catch (e) {
+    return duplicateIndexError(e, before?.scope ?? 'global', input.name ?? before?.name ?? '')
+  }
 
   if (!updated) return err(404, 'Not found')
 
