@@ -56,6 +56,19 @@ export function ForemanReconcile({ environments, environmentsError = null }: Pro
 
   const options = environments.map((env) => ({ value: String(env.id), label: env.name }))
 
+  /*
+   * The report says which environment it is about, and the selector cannot
+   * silently relabel it (CodeRabbit, PR #499).
+   *
+   * Changing the selection while a run was in flight — or after it finished —
+   * left production's report on screen under staging's name. Two answers: the
+   * report is captioned with the environment the SERVER says it is for, and
+   * changing the selection clears it, because the one thing a stale report must
+   * not do is look like the answer to the question now on screen.
+   */
+  const reportEnvironment = (id: number) =>
+    environments.find((env) => env.id === id)?.name ?? `#${id}`
+
   const counts: { key: string; label: string; value: number; hint?: string }[] = report
     ? [
         { key: 'matched', label: t('matchedHosts', lang), value: report.matched.length },
@@ -89,7 +102,15 @@ export function ForemanReconcile({ environments, environmentsError = null }: Pro
             <Select
               label={t('environment', lang)}
               value={environmentId}
-              onChange={(e) => setEnvironmentId(e.target.value)}
+              onChange={(e) => {
+                setEnvironmentId(e.target.value)
+                setReport(null)
+                setError(null)
+              }}
+              // A run in flight owns the selection until it answers: the report
+              // that arrives belongs to what was asked, not to what is on screen
+              // by the time it lands.
+              disabled={running}
               options={options}
               placeholder={t('selectPlaceholder', lang)}
               required
@@ -109,8 +130,8 @@ export function ForemanReconcile({ environments, environmentsError = null }: Pro
         {report && (
           <div className="mt-4 space-y-4">
             <p className="text-xs text-slate-600">
-              {report.integration.name} · {t('checkedAt', lang)}{' '}
-              {new Date(report.checkedAt).toLocaleString(lang)}
+              {reportEnvironment(report.environmentId)} · {report.integration.name} ·{' '}
+              {t('checkedAt', lang)} {new Date(report.checkedAt).toLocaleString(lang)}
             </p>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
               {counts.map((count) => (

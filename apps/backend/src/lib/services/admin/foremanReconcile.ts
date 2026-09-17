@@ -3,9 +3,10 @@ import {
   infrastructureElements,
   pipelineStacks,
   deploymentEnvironments,
+  integrations,
   orders,
 } from '@/lib/db/schema'
-import { and, eq } from 'drizzle-orm'
+import { and, eq, inArray, isNotNull } from 'drizzle-orm'
 import { ok, err, type Result } from '@/lib/services/result'
 import { resolveIntegration } from '@/lib/services/admin/integrations'
 import { listForemanHosts, type ForemanHost } from '@/lib/integrations/foreman'
@@ -53,6 +54,11 @@ export interface ForemanReconciliation {
    * Present in Foreman, matching nothing the portal ordered — the issue's
    * "orphans". Reported as "unmanaged, known" rather than as a fault: an estate
    * predating the portal is full of them, and that list is itself useful (#109).
+   *
+   * Claimed across every environment this Foreman serves, not just the one asked
+   * about (CodeRabbit, PR #499): one portal-wide Foreman answers for several
+   * environments, and a host ordered in staging is not unmanaged merely because
+   * the question was asked about production.
    */
   orphans: ForemanHost[]
   /**
@@ -75,19 +81,27 @@ export interface ForemanReconciliation {
  * (product, environment), because two products in one environment may name it
  * differently and a single global guess would mismatch one of them silently.
  */
-const hostParamByProduct = async (environmentId: number): Promise<Map<number, string>> => {
+const hostParamByProduct = async (environmentIds: number[]): Promise<Map<string, string>> => {
   const stacks = await db
-    .select({ productId: pipelineStacks.productId, param: pipelineStacks.stateKeyParam })
+    .select({
+      productId: pipelineStacks.productId,
+      environmentId: pipelineStacks.environmentId,
+      param: pipelineStacks.stateKeyParam,
+    })
     .from(pipelineStacks)
-    .where(eq(pipelineStacks.environmentId, environmentId))
+    .where(inArray(pipelineStacks.environmentId, environmentIds))
 
-  const byProduct = new Map<number, string>()
+  // Keyed by product AND environment: the same product deployed to two
+  // environments may name the parameter differently, and one map keyed by
+  // product alone would let whichever row was read first answer for both.
+  const byProduct = new Map<string, string>()
   for (const stack of stacks) {
+    const key = `${stack.productId}:${stack.environmentId}`
     // First stack wins, and a product with several is the reason this is not an
     // error: they share a state key parameter in every configuration seen so
     // far, and refusing to reconcile because a product has two stacks would
     // trade a whole report for a case that may not exist.
-    if (!byProduct.has(stack.productId)) byProduct.set(stack.productId, stack.param)
+    if (!byProduct.has(key)) byProduct.set(key, stack.param)
   }
   return byProduct
 }
@@ -101,6 +115,44 @@ const hostParamByProduct = async (environmentId: number): Promise<Map<number, st
  * nobody reads.
  */
 export const hostKey = (name: string): string => name.trim().toLowerCase().split('.')[0]
+
+/**
+ * Which environments this Foreman answers for.
+ *
+ * An environment-bound integration serves exactly one. A portal-wide one serves
+ * every environment that does not have its own — which is precisely what
+ * `resolveIntegration` decides per request, expressed here as one query instead
+ * of one per environment.
+ *
+ * It matters only to the orphan list: a host ordered in staging, listed by the
+ * one Foreman both environments share, must not be reported as unmanaged
+ * because the question happened to be asked about production. Ghosts stay
+ * environment-scoped, because "this environment ordered it and Foreman has not
+ * got it" is the question that was asked.
+ */
+const servedEnvironmentIds = async (integration: {
+  id: number
+  environmentId: number | null
+}): Promise<number[]> => {
+  if (integration.environmentId !== null) return [integration.environmentId]
+
+  const [all, bound] = await Promise.all([
+    db.select({ id: deploymentEnvironments.id }).from(deploymentEnvironments),
+    db
+      .select({ environmentId: integrations.environmentId })
+      .from(integrations)
+      .where(
+        and(
+          eq(integrations.kind, 'foreman'),
+          eq(integrations.enabled, true),
+          isNotNull(integrations.environmentId),
+        ),
+      ),
+  ])
+
+  const hasOwn = new Set(bound.map((row) => row.environmentId))
+  return all.map((row) => row.id).filter((id) => !hasOwn.has(id))
+}
 
 export const reconcileForemanHosts = async (
   environmentId: number,
@@ -124,18 +176,21 @@ export const reconcileForemanHosts = async (
     )
   }
 
+  const servedEnvironments = await servedEnvironmentIds(integration)
+
   const elements = await db
     .select({
       elementId: infrastructureElements.id,
       orderId: infrastructureElements.orderId,
       productId: infrastructureElements.productId,
+      environmentId: infrastructureElements.environmentId,
       parameters: infrastructureElements.parameters,
     })
     .from(infrastructureElements)
     .innerJoin(orders, eq(infrastructureElements.orderId, orders.id))
     .where(
       and(
-        eq(infrastructureElements.environmentId, environmentId),
+        inArray(infrastructureElements.environmentId, servedEnvironments),
         // Active only. An element mid-teardown SHOULD be missing from Foreman
         // shortly, and one already decommissioned is supposed to be gone — both
         // would report as ghosts for ever.
@@ -143,27 +198,40 @@ export const reconcileForemanHosts = async (
       ),
     )
 
-  const hostParam = await hostParamByProduct(environmentId)
+  const hostParam = await hostParamByProduct(servedEnvironments)
 
+  // Two lists out of one query: what THIS environment ordered, which is what the
+  // report is about, and every host name any served environment claims, which is
+  // what keeps another environment's machine off the orphan list.
   const ordered: OrderedHost[] = []
   const unidentified: ForemanReconciliation['unidentified'] = []
+  const claimedElsewhere = new Set<string>()
   for (const element of elements) {
-    const param = hostParam.get(element.productId) ?? 'hostname'
+    const param = hostParam.get(`${element.productId}:${element.environmentId}`) ?? 'hostname'
     const value = (element.parameters ?? {})[param]
+    const mine = element.environmentId === environmentId
+
     if (typeof value !== 'string' || value.trim() === '') {
-      unidentified.push({
+      if (mine) {
+        unidentified.push({
+          elementId: element.elementId,
+          orderId: element.orderId,
+          productId: element.productId,
+        })
+      }
+      continue
+    }
+
+    if (mine) {
+      ordered.push({
         elementId: element.elementId,
         orderId: element.orderId,
         productId: element.productId,
+        hostName: value.trim(),
       })
-      continue
+    } else {
+      claimedElsewhere.add(hostKey(value.trim()))
     }
-    ordered.push({
-      elementId: element.elementId,
-      orderId: element.orderId,
-      productId: element.productId,
-      hostName: value.trim(),
-    })
   }
 
   const listed = await listForemanHosts(integration)
@@ -207,7 +275,9 @@ export const reconcileForemanHosts = async (
     checkedAt: new Date(),
     matched,
     ghosts,
-    orphans: listed.hosts.filter((host) => !claimed.has(host.id)),
+    orphans: listed.hosts.filter(
+      (host) => !claimed.has(host.id) && !claimedElsewhere.has(hostKey(host.name)),
+    ),
     unidentified,
   })
 }

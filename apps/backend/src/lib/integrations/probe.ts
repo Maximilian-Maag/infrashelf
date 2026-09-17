@@ -4,6 +4,7 @@ import {
   integrationUrl,
   authHeaders,
   describeFailure,
+  insecureCredentialTransport,
 } from '@/lib/integrations/http'
 
 /**
@@ -73,6 +74,9 @@ export const probeIntegration = async (target: ProbeTarget): Promise<ProbeResult
   } catch (e) {
     return { ok: false, status: null, error: e instanceof Error ? e.message : String(e) }
   }
+
+  const insecure = insecureCredentialTransport(target, url)
+  if (insecure) return { ok: false, status: null, error: insecure }
 
   let res: Response
   try {

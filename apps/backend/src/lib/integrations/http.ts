@@ -40,6 +40,36 @@ export const integrationUrl = (baseUrl: string, path: string): URL => {
   return url
 }
 
+/**
+ * Refuse to put a stored credential on the wire in cleartext.
+ *
+ * CodeRabbit, PR #499 (CWE-319). `integrationBaseUrl` accepts `http:` — and
+ * should, for an unauthenticated Loki or a status endpoint behind a gateway —
+ * but nothing tied the scheme to `auth_type`, so an `http://` integration with a
+ * bearer token sent that token in the clear on every probe and every host
+ * listing. The credential is encrypted at rest precisely so that it is not
+ * readable; sending it unencrypted undoes that for anyone on the path.
+ *
+ * Checked here rather than at creation time on purpose: a row created before
+ * this rule existed is the case that matters, and it must fail at the call
+ * rather than leak. The message says both ways out, because "use HTTPS" is not
+ * always available on an internal network and `auth_type = 'none'` genuinely is
+ * the right answer for some systems.
+ *
+ * Returns the reason, or null when the call may go ahead.
+ */
+export const insecureCredentialTransport = (
+  target: IntegrationTarget,
+  url: URL,
+): string | null => {
+  if (target.authType === 'none') return null
+  if (url.protocol === 'https:') return null
+  return (
+    'Refusing to send the stored credential over plain HTTP. ' +
+    'Use an https:// base URL, or set authentication to "none" if this system needs no credential.'
+  )
+}
+
 export const authHeaders = (target: IntegrationTarget): Record<string, string> => {
   const credential = target.credential ?? ''
   switch (target.authType) {

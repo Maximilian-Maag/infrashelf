@@ -168,6 +168,66 @@ describe('listForemanHosts', () => {
     expect((fetchMock.mock.calls[0][1] as RequestInit).redirect).toBe('manual')
   })
 
+  it('accepts an inventory that is exactly the cap', async () => {
+    /*
+     * CodeRabbit on PR #499, and it was right.
+     *
+     * 50 full pages is 5,000 hosts, every one of them read successfully — and
+     * the old loop refused the listing because it had run out of iterations
+     * rather than out of hosts. The extra page is a lookahead: empty, so this is
+     * the whole estate.
+     */
+    const pages = Array.from({ length: 50 }, (_, i) => fullPage(i * 100 + 1))
+    const fetchMock = vi.spyOn(global, 'fetch')
+    for (const page of pages) fetchMock.mockResolvedValueOnce(page)
+    fetchMock.mockResolvedValueOnce(jsonRes({ results: [] }))
+
+    const result = await listForemanHosts(target())
+
+    expect(result.ok).toBe(true)
+    expect(result.ok && result.hosts).toHaveLength(5000)
+    // 50 pages plus the one that established there were no more.
+    expect(fetchMock).toHaveBeenCalledTimes(51)
+  })
+
+  it('refuses one host past the cap rather than dropping it', async () => {
+    // Silently returning 5,000 of 5,001 would make every extra host an orphan
+    // in the comparison downstream — a report that is wrong rather than absent.
+    const fetchMock = vi.spyOn(global, 'fetch')
+    for (let i = 0; i < 50; i++) fetchMock.mockResolvedValueOnce(fullPage(i * 100 + 1))
+    fetchMock.mockResolvedValueOnce(jsonRes({ results: [host(5001, 'one-too-many')] }))
+
+    const result = await listForemanHosts(target())
+
+    expect(result.ok).toBe(false)
+    expect(result.ok === false && result.error).toMatch(/More than 5000 hosts/)
+  })
+
+  it('refuses to send a credential over plain HTTP', async () => {
+    // The credential is encrypted at rest so that it is not readable; sending it
+    // in the clear undoes that for anyone on the path (CWE-319).
+    const fetchMock = vi.spyOn(global, 'fetch')
+
+    const result = await listForemanHosts(target({ baseUrl: 'http://foreman.internal' }))
+
+    expect(result.ok).toBe(false)
+    expect(result.ok === false && result.error).toMatch(/Refusing to send the stored credential/)
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('allows plain HTTP for a system that needs no credential', async () => {
+    // `auth_type = 'none'` is the case the rule must not break: an internal
+    // status endpoint with nothing to leak.
+    const fetchMock = vi.spyOn(global, 'fetch').mockResolvedValue(jsonRes({ results: [] }))
+
+    const result = await listForemanHosts(
+      target({ baseUrl: 'http://foreman.internal', authType: 'none', credential: null }),
+    )
+
+    expect(result.ok).toBe(true)
+    expect(fetchMock).toHaveBeenCalled()
+  })
+
   it('stops rather than paging for ever', async () => {
     // A paginated API that answers the same full page every time is a hang, and
     // this runs while an admin waits.
@@ -177,6 +237,7 @@ describe('listForemanHosts', () => {
 
     expect(result.ok).toBe(false)
     expect(result.ok === false && result.error).toMatch(/refusing to page further/)
-    expect(fetchMock.mock.calls.length).toBeLessThanOrEqual(50)
+    // The lookahead is the 51st and last request; nothing walks past it.
+    expect(fetchMock.mock.calls.length).toBeLessThanOrEqual(51)
   })
 })

@@ -3,6 +3,7 @@ import {
   integrationUrl,
   authHeaders,
   describeFailure,
+  insecureCredentialTransport,
 } from '@/lib/integrations/http'
 
 /**
@@ -44,6 +45,8 @@ export type ForemanHostsResult =
  */
 const PER_PAGE = 100
 const MAX_PAGES = 50
+/** The cap in hosts, which is what the refusal has to talk about. */
+const MAX_HOSTS = PER_PAGE * MAX_PAGES
 const REQUEST_TIMEOUT_MS = 15_000
 
 /** Foreman's paginated envelope, as much of it as matters here. */
@@ -81,13 +84,25 @@ export const listForemanHosts = async (target: IntegrationTarget): Promise<Forem
   const hosts: ForemanHost[] = []
   const seen = new Set<number>()
 
-  for (let page = 1; page <= MAX_PAGES; page++) {
+  /*
+   * One page past the cap, deliberately (CodeRabbit, PR #499).
+   *
+   * The loop used to stop AT `MAX_PAGES`, which refused an inventory of exactly
+   * 5,000 hosts — every one of which had been read successfully. The extra
+   * iteration is a lookahead and nothing else: it is inspected before anything
+   * is mapped or appended, so a 5,001st host refuses the whole listing rather
+   * than being silently dropped from it.
+   */
+  for (let page = 1; page <= MAX_PAGES + 1; page++) {
     let url: URL
     try {
       url = integrationUrl(target.baseUrl, `/api/v2/hosts?per_page=${PER_PAGE}&page=${page}`)
     } catch (e) {
       return { ok: false, error: e instanceof Error ? e.message : String(e) }
     }
+
+    const insecure = insecureCredentialTransport(target, url)
+    if (insecure) return { ok: false, error: insecure }
 
     let res: Response
     try {
@@ -117,6 +132,13 @@ export const listForemanHosts = async (target: IntegrationTarget): Promise<Forem
       return { ok: false, error: `Unexpected response from ${url.pathname}` }
     }
 
+    // The lookahead page: anything at all on it means the estate is over the
+    // cap, and it is refused before a single row of it is counted.
+    if (page > MAX_PAGES) {
+      if (body.results.length === 0) return { ok: true, hosts }
+      return { ok: false, error: `More than ${MAX_HOSTS} hosts; refusing to page further` }
+    }
+
     const batch = body.results.map(toHost).filter((h): h is ForemanHost => h !== null)
     for (const host of batch) {
       // Foreman pages by offset, so a host created while this walks can shift a
@@ -133,8 +155,7 @@ export const listForemanHosts = async (target: IntegrationTarget): Promise<Forem
     if (body.results.length < PER_PAGE) return { ok: true, hosts }
   }
 
-  return {
-    ok: false,
-    error: `More than ${MAX_PAGES * PER_PAGE} hosts; refusing to page further`,
-  }
+  // Unreachable: the lookahead above returns on both of its outcomes. Kept so
+  // the function has one exit shape rather than an implicit undefined.
+  return { ok: false, error: `More than ${MAX_HOSTS} hosts; refusing to page further` }
 }

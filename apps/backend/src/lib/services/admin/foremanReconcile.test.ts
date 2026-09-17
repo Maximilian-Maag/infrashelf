@@ -36,6 +36,10 @@ const scaffold = async (opts: {
   stateKeyParam?: string
   withForeman?: boolean
   paramName?: string
+  /** Bind the Foreman to the environment, or leave it portal-wide. */
+  portalWide?: boolean
+  /** Host names ordered in a SECOND environment the same Foreman serves. */
+  otherEnvironmentHostnames?: string[]
 }) => {
   const pm = await createUser({ role: 'project_manager' })
   const root = await createUser({ role: 'root' })
@@ -63,6 +67,17 @@ const scaffold = async (opts: {
     elements.push(element.id)
   }
 
+  let otherEnv: { id: number } | null = null
+  if (opts.otherEnvironmentHostnames?.length) {
+    otherEnv = await createEnvironment(ci.id, undefined, `other-${Date.now()}`)
+    for (const hostname of opts.otherEnvironmentHostnames) {
+      const order = await createOrder(project.id, product.id, otherEnv.id, pm.id)
+      await createInfraElement(order.id, project.id, otherEnv.id, product.id, {
+        parameters: { [opts.paramName ?? opts.stateKeyParam ?? 'hostname']: hostname },
+      })
+    }
+  }
+
   if (opts.withForeman !== false) {
     const created = await createIntegration(root.id, {
       kind: 'foreman',
@@ -70,13 +85,13 @@ const scaffold = async (opts: {
       baseUrl: 'https://foreman.example.com',
       authType: 'bearer',
       credential: 'a-token',
-      environmentId: env.id,
+      environmentId: opts.portalWide ? null : env.id,
       failureMode: 'best_effort',
     })
     if (!created.ok) throw new Error('setup failed')
   }
 
-  return { env, product, project, pm, root, elements }
+  return { env, otherEnv, product, project, pm, root, elements }
 }
 
 /**
@@ -187,9 +202,16 @@ describe('reconcileForemanHosts', () => {
     expect(result.ok && result.data.ghosts).toEqual([])
   })
 
-  it('counts one Foreman host for at most one element', async () => {
-    // Two orders naming the same hostname is a real mistake, and reporting the
-    // host as matched twice would hide the duplicate rather than expose it.
+  it('matches both elements when two orders name the same host', async () => {
+    /*
+     * Named for what it asserts (CodeRabbit, PR #499): `matched` is "ordered and
+     * present", not a one-to-one pairing, so two elements naming one hostname
+     * both match the one host. The title used to claim the opposite rule.
+     *
+     * What `claimed` is for is the orphan list — the host must not also be
+     * reported as unmanaged — and the duplicate stays visible as two matched
+     * rows carrying the same `foremanHostId`, which is how somebody notices it.
+     */
     const { env } = await scaffold({ hostnames: ['web-01', 'web-01'] })
     answerWith('web-01')
 
@@ -200,6 +222,51 @@ describe('reconcileForemanHosts', () => {
     expect(result.data.matched).toHaveLength(2)
     expect(new Set(result.data.matched.map((m) => m.foremanHostId)).size).toBe(1)
     expect(result.data.orphans).toEqual([])
+  })
+
+  describe('a portal-wide Foreman serving several environments', () => {
+    /*
+     * CodeRabbit on PR #499, and it was right.
+     *
+     * `resolveIntegration` falls back to a portal-wide row, so one Foreman can
+     * answer for every environment. Its host list therefore covers all of them,
+     * while the elements being compared came from the one environment asked
+     * about — and every host another environment had ordered fell out as an
+     * orphan. "Unmanaged" was the one thing those hosts were not.
+     */
+    it('does not call another environment’s host unmanaged', async () => {
+      const { env } = await scaffold({
+        hostnames: ['web-01'],
+        otherEnvironmentHostnames: ['staging-01'],
+        portalWide: true,
+      })
+      answerWith('web-01', 'staging-01')
+
+      const result = await reconcileForemanHosts(env.id)
+
+      expect(result.ok).toBe(true)
+      if (!result.ok) return
+      expect(result.data.matched.map((m) => m.hostName)).toEqual(['web-01'])
+      // Claimed by the other environment, so it is neither an orphan here...
+      expect(result.data.orphans).toEqual([])
+      // ...nor a ghost: this environment never ordered it.
+      expect(result.data.ghosts).toEqual([])
+    })
+
+    it('still reports a host nobody ordered anywhere', async () => {
+      // The scoping must not turn the orphan list off; it only removes hosts
+      // that some environment this Foreman serves does account for.
+      const { env } = await scaffold({
+        hostnames: ['web-01'],
+        otherEnvironmentHostnames: ['staging-01'],
+        portalWide: true,
+      })
+      answerWith('web-01', 'staging-01', 'legacy-01')
+
+      const result = await reconcileForemanHosts(env.id)
+
+      expect(result.ok && result.data.orphans.map((o) => o.name)).toEqual(['legacy-01'])
+    })
   })
 
   it('answers 409 when no Foreman is configured for the environment', async () => {

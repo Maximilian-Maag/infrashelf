@@ -124,6 +124,40 @@ describe('ForemanReconcile', () => {
     expect(within(card).getByText('#9')).toBeInTheDocument()
   })
 
+  it('names the environment the report is about, not the one now selected', async () => {
+    /*
+     * CodeRabbit on PR #499, and it was right.
+     *
+     * The caption used to carry only the integration and the timestamp, so
+     * production's report sat under staging's name as soon as the selector
+     * moved. The environment comes from the report itself — what the SERVER says
+     * it answered — rather than from the control that happens to be on screen.
+     */
+    vi.mocked(get).mockResolvedValue(report({ environmentId: 4 }) as never)
+    render(<ForemanReconcile environments={environments} />)
+
+    await runFor('4')
+
+    // Matched on the caption as a whole: "Production" on its own is also the
+    // text of an <option>, and asserting that would pass without the caption
+    // saying anything at all.
+    expect(await screen.findByText(/Production · House Foreman/)).toBeInTheDocument()
+  })
+
+  it('clears the report when the selection changes', async () => {
+    // The other half of the same problem: a report that survives the change
+    // reads as the answer to the question now on screen.
+    const u = userEvent.setup()
+    render(<ForemanReconcile environments={environments} />)
+    await runFor('4')
+    await screen.findByRole('heading', { name: /Not ordered here/ })
+
+    await u.selectOptions(screen.getByLabelText(/^Environment/), '5')
+
+    expect(screen.queryByRole('heading', { name: /Not ordered here/ })).not.toBeInTheDocument()
+    expect(screen.getByText('Choose an environment and run the comparison.')).toBeInTheDocument()
+  })
+
   it('says why a run failed, and does not leave the old report under it', async () => {
     // 409 (no Foreman configured) and 502 (Foreman unreachable) both arrive as
     // errors that already say which they are. A stale report beside one of them
