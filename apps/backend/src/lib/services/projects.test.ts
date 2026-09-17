@@ -11,6 +11,7 @@ vi.mock('@/lib/ci/webhooks', () => ({
 }))
 
 import { listProjects, getProjectById, createProject, updateProject, deleteProject } from './projects'
+import { createParameter } from './admin/parameters'
 import { triggerProductWebhooksTracked, triggerPipelineStacksTracked } from '@/lib/ci/webhooks'
 import { db } from '@/lib/db/client'
 import { projects, infrastructureElements, orders, orderComments, auditLog } from '@/lib/db/schema'
@@ -481,5 +482,86 @@ describe('project audit trail (issue #187)', () => {
 
     const entry = await lastEntry('project.deleted')
     expect(entry.entityId).toBe(project.id)
+  })
+})
+
+describe('a delete that #404 refuses (CodeRabbit on PR #495)', () => {
+  /*
+   * The question CodeRabbit asked was the right one: `deleteProject` claims every
+   * active element (active → decommissioning) and AWAITS `fireDestroyTriggers`
+   * BEFORE it opens its transaction, so a refusal returned from inside that
+   * transaction would arrive with the infrastructure already on its way down and
+   * the project it belonged to still standing.
+   *
+   * It cannot happen, and the reason is structural rather than lucky. The #404
+   * refusal lives on the hard-delete branch, which is reached only when the
+   * project holds no orders (#187 retires the rest). `infrastructure_elements.
+   * order_id` is NOT NULL and references `orders`, and an element is created
+   * from an order in its own project — so a project with no orders has no
+   * elements, and the loop that claims rows and fires destroys never runs a
+   * single iteration.
+   *
+   * A preflight before the loop looks like the obvious belt-and-braces and is
+   * actively wrong: it would fire on the RETIRE path too, where nothing cascades
+   * and the narrowing the collision is predicted from is not going anywhere.
+   * These two tests pin both halves, because the reasoning above is invisible at
+   * the call site and the next person to read that comment will be tempted.
+   */
+
+  /** The colliding pair: one definition narrowed to `projectId`, one narrowed to nothing. */
+  const collidingPair = async (projectId: number) => {
+    expect((await createParameter({ scope: 'global', name: 'region', type: 'string' })).ok).toBe(true)
+    expect(
+      (
+        await createParameter({
+          scope: 'global',
+          name: 'region',
+          type: 'string',
+          projectIds: [projectId],
+        } as never)
+      ).ok,
+    ).toBe(true)
+  }
+
+  it('fires no destroy trigger and claims no element', async () => {
+    const admin = await createUser({ role: 'admin', email: 'admin-404@test.dev' })
+    const pm = await createUser({ role: 'project_manager', email: 'pm-404@test.dev' })
+    const project = await seedProject(pm.id)
+    await collidingPair(project.id)
+
+    const result = await deleteProject(makeSession(admin), project.id)
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.status).toBe(409)
+      expect(result.message).toContain('region')
+    }
+
+    expect(mockedWebhooks).not.toHaveBeenCalled()
+    expect(mockedStacks).not.toHaveBeenCalled()
+
+    const rows = await db.select().from(projects).where(eq(projects.id, project.id))
+    expect(rows.length).toBe(1)
+  })
+
+  it('does not stand in the way of a project that is retired rather than deleted', async () => {
+    // The retire path leaves the project row, so `parameter_projects` keeps every
+    // row it had and no fingerprint changes. Refusing here would block #187 for a
+    // conflict that the request does not create.
+    const admin = await createUser({ role: 'admin', email: 'admin-404b@test.dev' })
+    const pm = await createUser({ role: 'project_manager', email: 'pm-404b@test.dev' })
+    const cat = await createCategory()
+    const product = await createProduct(cat.id)
+    const ci = await createCiSource()
+    const env = await createEnvironment(ci.id)
+    const project = await seedProject(pm.id)
+    await seedOrder(project.id, product.id, env.id, pm.id)
+    await collidingPair(project.id)
+
+    const result = await deleteProject(makeSession(admin), project.id)
+
+    expect(result.ok).toBe(true)
+    const [row] = await db.select().from(projects).where(eq(projects.id, project.id))
+    expect(row.retiredAt).not.toBeNull()
   })
 })

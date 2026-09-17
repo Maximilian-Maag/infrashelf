@@ -314,7 +314,7 @@ const setProjectNarrowing = async (
 }
 
 /**
- * Re-fingerprint every parameter narrowed to a project that is about to go (#404).
+ * What deleting a project would do to the fingerprints of its parameters (#404).
  *
  * `parameter_projects.project_id` is ON DELETE CASCADE, so deleting a project
  * silently changes what its parameters are narrowed to — and `narrowing_key` is
@@ -327,28 +327,34 @@ const setProjectNarrowing = async (
  * drizzle cannot see a trigger, so `db:push` would build a local database
  * without one and the divergence would only show up in production (#141).
  *
- * Called INSIDE the transaction that deletes the project, and before the delete,
- * so the narrowing it reads is the one the cascade is about to remove.
+ * READ-ONLY, and deliberately separate from the write below. CodeRabbit found
+ * why on PR #495 and it was real: applying the updates as they are computed
+ * commits the ones that came before the first collision. `deleteProject`
+ * RETURNS its refusal from inside `db.transaction`, and drizzle commits a
+ * callback that returns — it rolls back only when the callback throws. Those
+ * rows would be left holding a `narrowing_key` that disagrees with
+ * `parameter_projects`, which is the one state this whole column exists to
+ * prevent.
  *
- * Returns the parameters whose new fingerprint would collide with a definition
- * that already exists — which is a real outcome, not a theoretical one: a
- * parameter narrowed to project 7 and an identical one narrowed to nothing are
- * two definitions today and one of them tomorrow. The caller decides what to
- * say about that; this function refuses to be the thing that guesses.
+ * So the plan is computed whole, and applied only when there is nothing wrong
+ * with it.
  */
-export const refingerprintAfterProjectDelete = async (
-  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+const planRefingerprintForProjectDelete = async (
+  executor: Pick<typeof db, 'select'>,
   projectId: number,
-): Promise<{ collisions: { id: number; name: string }[] }> => {
-  const affected = await tx
+): Promise<{
+  collisions: { id: number; name: string }[]
+  updates: { id: number; narrowingKey: string }[]
+}> => {
+  const affected = await executor
     .select({ id: parameterProjects.parameterId })
     .from(parameterProjects)
     .where(eq(parameterProjects.projectId, projectId))
-  if (affected.length === 0) return { collisions: [] }
+  if (affected.length === 0) return { collisions: [], updates: [] }
 
   const ids = affected.map((row) => row.id)
-  const rows = await tx.select().from(parameters).where(inArray(parameters.id, ids))
-  const links = await tx
+  const rows = await executor.select().from(parameters).where(inArray(parameters.id, ids))
+  const links = await executor
     .select()
     .from(parameterProjects)
     .where(inArray(parameterProjects.parameterId, ids))
@@ -360,30 +366,51 @@ export const refingerprintAfterProjectDelete = async (
   }
 
   const collisions: { id: number; name: string }[] = []
+  const updates: { id: number; narrowingKey: string }[] = []
   for (const row of rows) {
-    const fingerprint = narrowingFingerprint(remaining.get(row.id) ?? [])
+    const narrowedTo = remaining.get(row.id) ?? []
     const rival = await duplicateParameterError(
       {
         scope: row.scope,
         scopeId: row.scopeId,
         name: row.name,
         environmentId: row.environmentId,
-        projectIds: remaining.get(row.id) ?? [],
+        projectIds: narrowedTo,
       },
       row.id,
-      tx,
+      executor,
     )
-    if (rival) {
-      collisions.push({ id: row.id, name: row.name })
-      continue
-    }
-    await tx
-      .update(parameters)
-      .set({ narrowingKey: fingerprint })
-      .where(eq(parameters.id, row.id))
+    if (rival) collisions.push({ id: row.id, name: row.name })
+    else updates.push({ id: row.id, narrowingKey: narrowingFingerprint(narrowedTo) })
   }
 
-  return { collisions }
+  return { collisions, updates }
+}
+
+/**
+ * Apply that plan, inside the transaction that deletes the project. Called
+ * before the delete, so the narrowing it reads is the one the cascade is about
+ * to remove.
+ *
+ * Writes nothing at all when anything collides, so the refusal the caller
+ * returns — which drizzle COMMITS — leaves every fingerprint exactly as it
+ * found it. The caller decides what to say about a collision; this function
+ * refuses to be the thing that guesses.
+ */
+export const refingerprintAfterProjectDelete = async (
+  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  projectId: number,
+): Promise<{ collisions: { id: number; name: string }[] }> => {
+  const { collisions, updates } = await planRefingerprintForProjectDelete(tx, projectId)
+  if (collisions.length > 0) return { collisions }
+
+  for (const update of updates) {
+    await tx
+      .update(parameters)
+      .set({ narrowingKey: update.narrowingKey })
+      .where(eq(parameters.id, update.id))
+  }
+  return { collisions: [] }
 }
 
 export const createParameter = async (

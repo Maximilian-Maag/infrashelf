@@ -655,6 +655,47 @@ describe('deleting a project that a parameter is narrowed to', () => {
     expect(row.narrowingKey).toBe(narrowingFingerprint([kept.id]))
   })
 
+  it('leaves every fingerprint alone when any one of them would collide', async () => {
+    /*
+     * CodeRabbit on PR #495, and it was right.
+     *
+     * The first implementation updated each fingerprint as it went and stopped
+     * at the first collision. `deleteProject` then RETURNS an error from inside
+     * `db.transaction`, and drizzle commits a callback that returns — it rolls
+     * back only when the callback throws. So the parameters checked before the
+     * colliding one were left holding a `narrowing_key` describing a narrowing
+     * they still had, which is the exact inconsistency this column exists to
+     * prevent.
+     *
+     * Two parameters narrowed to the doomed project: one that would be fine
+     * afterwards and one that collides. The refused delete must move neither.
+     */
+    const pm = await createUser({ role: 'project_manager' })
+    const doomed = await createProject(pm.id, 'Doomed')
+    const kept = await createProject(pm.id, 'Kept')
+
+    const survivor = await createParameter({
+      scope: 'global',
+      name: 'zone',
+      type: 'string',
+      projectIds: [doomed.id, kept.id],
+    } as never)
+    expect((await global()).ok).toBe(true)
+    const willCollide = await global({ projectIds: [doomed.id] })
+    if (!survivor.ok || !willCollide.ok) throw new Error('setup failed')
+
+    const before = survivor.data.narrowingKey
+    const result = await deleteProject(
+      { id: pm.id, email: pm.email, name: pm.name, role: 'project_manager' },
+      doomed.id,
+    )
+    expect(result.ok).toBe(false)
+
+    const [after] = await db.select().from(parameters).where(eq(parameters.id, survivor.data.id))
+    expect(after.narrowingKey).toBe(before)
+    expect(after.narrowingKey).toBe(narrowingFingerprint([doomed.id, kept.id]))
+  })
+
   it('refuses the delete when losing the narrowing would create a duplicate', async () => {
     // A definition narrowed to this project and an identical one narrowed to
     // nothing are two definitions today and one of them tomorrow. Resolving that
