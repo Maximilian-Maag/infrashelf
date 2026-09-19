@@ -65,22 +65,36 @@ describe('the pinned toolchain agrees with itself', () => {
    * A docker build is not something this suite can run, so it checks the two
    * things that make it a pin: a version is named, and it is the version the rest
    * of the toolchain pins.
+   *
+   * Per STAGE, not per file. `ARG` is scoped to the stage that declares it, so an
+   * install in a stage whose ARG moved elsewhere expands `${PNPM_VERSION}` to
+   * nothing and runs `npm install -g pnpm@` — which is neither a version nor a
+   * loud failure. Counting the file's ARGs against the file's installs balances
+   * out in exactly that case.
    */
-  it('installs a pinned pnpm in the images', () => {
+  it('installs a pinned pnpm in every image stage that installs one', () => {
     for (const file of ['apps/frontend/Dockerfile', 'apps/backend/Dockerfile']) {
-      const text = read(file)
-      const installs = text.match(/npm install -g pnpm@\$\{PNPM_VERSION\}/g) ?? []
-      const pins = [...text.matchAll(/^ARG PNPM_VERSION=(\S+)$/gm)]
+      // Split at `FROM `: everything up to the next one is a stage.
+      const stages = read(file).split(/^FROM /m).slice(1)
+      let installs = 0
 
-      expect(installs.length, `${file} installs pnpm`).toBeGreaterThan(0)
-      // Every ARG that installs declares the version, and every declared version
-      // is the one the other three places pin.
-      expect(pins.length, `${file} declares PNPM_VERSION once per installing stage`).toBe(
-        installs.length,
-      )
-      for (const [, version] of pins) expect(version, `${file}`).toBe(miseTool('pnpm'))
-      // The regression itself: an install with no version after it.
-      expect(text, `${file} installs pnpm unpinned`).not.toMatch(/npm install -g pnpm(?!@)/)
+      for (const stage of stages) {
+        // The regression itself: an install with no version after it.
+        expect(stage, `${file} installs pnpm unpinned`).not.toMatch(/npm install -g pnpm(?!@)/)
+
+        const pinned = stage.match(/npm install -g pnpm@\$\{PNPM_VERSION\}/g) ?? []
+        if (pinned.length === 0) continue
+        installs += pinned.length
+
+        const declared = [...stage.matchAll(/^ARG PNPM_VERSION=(\S+)$/gm)]
+        expect(
+          declared.length,
+          `${file}: ${pinned.length} install(s) in a stage declaring ${declared.length} ARG(s)`,
+        ).toBeGreaterThan(0)
+        for (const [, version] of declared) expect(version, file).toBe(miseTool('pnpm'))
+      }
+
+      expect(installs, `${file} installs pnpm`).toBeGreaterThan(0)
     }
   })
 })
