@@ -319,6 +319,43 @@ describe('CartView', () => {
     expect(screen.getByTestId('cart-item-2')).toBeInTheDocument()
   })
 
+  it('names the line inside its remove control, not just "Remove" (#501)', () => {
+    // A screen-reader user listing the buttons on this page would otherwise hear
+    // "Remove, Remove, Remove" with nothing to choose between them (WCAG 2.4.9).
+    // The accessible name keeps the visible word in front of it, so the label a
+    // sighted user reads is still what the control is called (WCAG 2.5.3).
+    renderCart([item(), item({ id: 2, productName: 'Managed Postgres' })])
+
+    const first = within(screen.getByTestId('cart-item-1')).getByRole('button', {
+      name: 'Remove: Nginx Gateway',
+    })
+    expect(first).toHaveTextContent('Remove')
+    expect(
+      within(screen.getByTestId('cart-item-2')).getByRole('button', { name: 'Remove: Managed Postgres' }),
+    ).toBeInTheDocument()
+  })
+
+  it('puts the remove control with the price at the row edge, and keeps it a button (#501)', () => {
+    // Where the issue found it: mid-row under the quantity field, with its own
+    // horizontal padding zeroed so it did not read as a control at all. Every
+    // shop puts per-line removal at the row's trailing edge, and that is where
+    // the eye goes — the price block is that edge here.
+    renderCart([item()])
+    const row = screen.getByTestId('cart-item-1')
+
+    const price = within(row).getByText('10.00 EUR')
+    const remove = within(row).getByRole('button', { name: /^remove:/i })
+
+    // The same block as the price — the row's trailing edge — and not the middle
+    // of the row, which is where the quantity field and the rest of the form are.
+    expect(remove.parentElement).toContainElement(price)
+    expect(within(row).getByLabelText(/quantity/i).closest('div')).not.toContainElement(remove)
+    expect(remove.style.paddingLeft).toBe('')
+    expect(remove.style.paddingRight).toBe('')
+    // And it still only removes the line — the quantity control is untouched.
+    expect(within(row).getByLabelText(/quantity/i)).toBeInTheDocument()
+  })
+
   it('empties the cart', async () => {
     const user = userEvent.setup()
     renderCart([item(), item({ id: 2 })])

@@ -456,6 +456,8 @@ function CartItemRow({
     (d) => d.environmentId === null || d.environmentId === item.environmentId,
   )
 
+  const name = item.productName ?? `Product #${item.productId}`
+
   return (
     <div data-testid={`cart-item-${item.id}`} className="flex gap-4 py-4">
       {/* Thumbnail, so a cart of several items is scannable by sight. Deliberately
@@ -472,7 +474,7 @@ function CartItemRow({
               href={`/catalog/${item.productId}`}
               className="text-base font-medium text-slate-900 hover:underline"
             >
-              {item.productName ?? `Product #${item.productId}`}
+              {name}
             </Link>
             <p className="text-xs text-slate-600">
               {item.environmentName ?? `Environment #${item.environmentId}`}
@@ -486,14 +488,57 @@ function CartItemRow({
               <p className="mt-1 text-xs font-medium text-red-600">{t('itemUnavailable', lang)}</p>
             )}
           </div>
-          {price && (
-            <div className="text-right">
-              <p className="whitespace-nowrap font-bold text-slate-900">{price.total}</p>
-              {price.unit && (
-                <p className="whitespace-nowrap text-xs font-normal text-slate-600">{price.unit}</p>
-              )}
-            </div>
-          )}
+
+          {/* The row's trailing edge: the price, and under it this line's own way
+              out (#501).
+
+              The remove control used to sit mid-row, below the quantity field and
+              above the parameter fields, with its horizontal padding zeroed — so
+              the only control-looking thing in the cart was "Empty cart", and
+              people emptied the whole cart to get rid of one item. Lines get
+              shorter at this edge, not taller, which is also where the eye
+              already goes for the price.
+
+              Under the price rather than on the name's line: the name is a link, and
+              putting a button beside a link in a narrow column is how the two end
+              up sharing a click target on a phone. */}
+          <div className="flex shrink-0 flex-col items-end gap-2">
+            {price && (
+              <div className="text-right">
+                <p className="whitespace-nowrap font-bold text-slate-900">{price.total}</p>
+                {price.unit && (
+                  <p className="whitespace-nowrap text-xs font-normal text-slate-600">{price.unit}</p>
+                )}
+              </div>
+            )}
+
+            {/* Icon AND the word: an icon alone would be a second unlabelled glyph
+                in a row of them. The accessible name carries the product, because
+                "Remove" repeated down a list names nothing (WCAG 2.4.9) — and it
+                leads with the visible word so the two agree (2.5.3). */}
+            <Button
+              size="sm"
+              variant="danger"
+              onClick={onRemove}
+              aria-label={`${t('remove', lang)}: ${name}`}
+            >
+              <svg
+                className="h-4 w-4"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                aria-hidden="true"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M6 7h12M9 7V5h6v2M7 7l1 12h8l1-12"
+                />
+              </svg>
+              {t('remove', lang)}
+            </Button>
+          </div>
         </div>
 
         {/* Editable here, because this is where a shopper changes their mind about
@@ -513,17 +558,6 @@ function CartItemRow({
             }}
           />
         </div>
-
-        {/* Padding zeroed through style, not a class: an important-prefixed
-            utility competing with the base px-3 resolves by stylesheet order. */}
-        <Button
-          size="sm"
-          variant="danger"
-          onClick={onRemove}
-          style={{ paddingLeft: 0, paddingRight: 0 }}
-        >
-          {t('remove', lang)}
-        </Button>
 
         {/* Kept on the row rather than hidden behind a disclosure: unlike a retail
             cart, these are required to provision and checkout validates them. */}
