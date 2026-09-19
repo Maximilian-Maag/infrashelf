@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { handlePipelineEvent } from './handler'
 import { fetchJobTraces, parseTofuOutputs, supportsJobTrace } from '@/lib/ci'
+import { sendProvisioningFailed } from '@/lib/notification/index'
 import { db } from '@/lib/db/client'
 import { orders, infrastructureElements, deploymentEnvironments } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
@@ -364,6 +365,168 @@ describe('handlePipelineEvent — infra decommission completion', () => {
       .from(infrastructureElements)
       .where(eq(infrastructureElements.id, el.id))
     expect(row.status).toBe('decommissioned')
+  })
+})
+
+/*
+ * Issue #500. An order that failed can be repaired in two places, and only one
+ * of them reached the portal: Retry here moves it back to 'provisioning' and the
+ * callbacks land, while a restart in the CI UI succeeds, POSTs the same webhook,
+ * and matches nothing — the order stays 'failed' for ever, with no record that
+ * the event ever arrived.
+ *
+ * The rule these pin: a SUCCESS for a pipeline the order already records may move
+ * it out of 'failed', and completes it only when every recorded pipeline is now a
+ * success. 'completed' and 'rejected' stay untouchable, and a second failure
+ * teaches an already-failed order nothing.
+ */
+describe('handlePipelineEvent — a restarted pipeline un-fails its order (#500)', () => {
+  it('completes a failed order when its restarted pipeline reports success', async () => {
+    const { user, product, env, project } = await buildScenario()
+    const order = await createOrder(project.id, product.id, env.id, user.id, {
+      status: 'failed',
+      pipelineId: ['pipe-restart'],
+      pipelineStatus: { 'pipe-restart': 'failed' },
+    })
+
+    await handlePipelineEvent({ provider: 'gitlab', pipelineId: 'pipe-restart', status: 'success' }, env.id)
+
+    const [done] = await db.select().from(orders).where(eq(orders.id, order.id))
+    expect(done.status).toBe('completed')
+    expect(done.pipelineStatus).toEqual({ 'pipe-restart': 'success' })
+  })
+
+  it('records the success but stays failed while a sibling is still failed', async () => {
+    // One pipeline of two was restarted. The order is not fixed by half of it.
+    const { user, product, env, project } = await buildScenario()
+    const order = await createOrder(project.id, product.id, env.id, user.id, {
+      status: 'failed',
+      pipelineId: ['pipe-A', 'pipe-B'],
+      pipelineStatus: { 'pipe-A': 'failed', 'pipe-B': 'failed' },
+    })
+
+    await handlePipelineEvent({ provider: 'gitlab', pipelineId: 'pipe-A', status: 'success' }, env.id)
+
+    const [after] = await db.select().from(orders).where(eq(orders.id, order.id))
+    expect(after.status).toBe('failed')
+    expect(after.pipelineStatus).toEqual({ 'pipe-A': 'success', 'pipe-B': 'failed' })
+  })
+
+  it('completes on the last outstanding pipeline of a failed order', async () => {
+    const { user, product, env, project } = await buildScenario()
+    const order = await createOrder(project.id, product.id, env.id, user.id, {
+      status: 'failed',
+      pipelineId: ['pipe-A', 'pipe-B'],
+      pipelineStatus: { 'pipe-A': 'failed', 'pipe-B': 'success' },
+    })
+
+    await handlePipelineEvent({ provider: 'gitlab', pipelineId: 'pipe-A', status: 'success' }, env.id)
+
+    const [done] = await db.select().from(orders).where(eq(orders.id, order.id))
+    expect(done.status).toBe('completed')
+    expect(done.pipelineStatus).toEqual({ 'pipe-A': 'success', 'pipe-B': 'success' })
+  })
+
+  it('completes an order written off before its pipeline ever reported (#206)', async () => {
+    // markOrderFailed guesses 'failed' in the absence of information; the write-off
+    // touches no pipeline status. A pipeline that was in fact fine and reports late
+    // must be able to say so.
+    const { user, product, env, project } = await buildScenario()
+    const order = await createOrder(project.id, product.id, env.id, user.id, {
+      status: 'failed',
+      pipelineId: ['pipe-late'],
+    })
+
+    await handlePipelineEvent({ provider: 'gitlab', pipelineId: 'pipe-late', status: 'success' }, env.id)
+
+    const [done] = await db.select().from(orders).where(eq(orders.id, order.id))
+    expect(done.status).toBe('completed')
+    expect(done.pipelineStatus).toEqual({ 'pipe-late': 'success' })
+  })
+
+  it('keeps a trigger-failed sentinel in the way of a failed order too', async () => {
+    // The sentinel stands for a trigger that never started. A restart of the
+    // pipelines that DID start does not provision the one that did not.
+    const { user, product, env, project } = await buildScenario()
+    const order = await createOrder(project.id, product.id, env.id, user.id, {
+      status: 'failed',
+      pipelineId: ['pipe-A'],
+      pipelineStatus: { 'trigger-failed:0': 'product webhook "b" (#2): boom' },
+    })
+
+    await handlePipelineEvent({ provider: 'gitlab', pipelineId: 'pipe-A', status: 'success' }, env.id)
+
+    const [after] = await db.select().from(orders).where(eq(orders.id, order.id))
+    expect(after.status).toBe('failed')
+    expect(after.pipelineStatus).toMatchObject({
+      'pipe-A': 'success',
+      'trigger-failed:0': 'product webhook "b" (#2): boom',
+    })
+  })
+
+  it('does not touch a completed order', async () => {
+    const { user, product, env, project } = await buildScenario()
+    const order = await createOrder(project.id, product.id, env.id, user.id, {
+      status: 'completed',
+      pipelineId: ['pipe-A'],
+    })
+
+    await handlePipelineEvent({ provider: 'gitlab', pipelineId: 'pipe-A', status: 'success' }, env.id)
+
+    const [after] = await db.select().from(orders).where(eq(orders.id, order.id))
+    expect(after.status).toBe('completed')
+    expect(after.pipelineStatus).toEqual({})
+  })
+
+  it('does not touch a rejected order', async () => {
+    const { user, product, env, project } = await buildScenario()
+    const order = await createOrder(project.id, product.id, env.id, user.id, {
+      status: 'rejected',
+      pipelineId: ['pipe-A'],
+    })
+
+    await handlePipelineEvent({ provider: 'gitlab', pipelineId: 'pipe-A', status: 'success' }, env.id)
+
+    const [after] = await db.select().from(orders).where(eq(orders.id, order.id))
+    expect(after.status).toBe('rejected')
+    expect(after.pipelineStatus).toEqual({})
+  })
+
+  it('lets a second failure of an already-failed order change nothing', async () => {
+    // The failure branch keeps its 'provisioning'-only guard on purpose: the order
+    // is already failed, so there is nothing to learn and nobody to tell twice.
+    const { user, product, env, project } = await buildScenario()
+    const order = await createOrder(project.id, product.id, env.id, user.id, {
+      status: 'failed',
+      pipelineId: ['pipe-A', 'pipe-B'],
+      pipelineStatus: { 'pipe-A': 'failed' },
+    })
+    vi.mocked(sendProvisioningFailed).mockClear()
+
+    await handlePipelineEvent({ provider: 'gitlab', pipelineId: 'pipe-B', status: 'failed' }, env.id)
+
+    const [after] = await db.select().from(orders).where(eq(orders.id, order.id))
+    expect(after.status).toBe('failed')
+    expect(after.pipelineStatus).toEqual({ 'pipe-A': 'failed' })
+    expect(sendProvisioningFailed).not.toHaveBeenCalled()
+  })
+
+  it('cannot be un-failed from another environment', async () => {
+    // Widening the status must not widen who may move the row.
+    const { user, product, env, project } = await buildScenario()
+    const ci2 = await createCiSource({ name: 'CI-2' })
+    const envB = await createEnvironment(ci2.id, 'wh-secret-b')
+    const order = await createOrder(project.id, product.id, env.id, user.id, {
+      status: 'failed',
+      pipelineId: ['pipe-shared'],
+      pipelineStatus: { 'pipe-shared': 'failed' },
+    })
+
+    await handlePipelineEvent({ provider: 'gitlab', pipelineId: 'pipe-shared', status: 'success' }, envB.id)
+
+    const [unchanged] = await db.select().from(orders).where(eq(orders.id, order.id))
+    expect(unchanged.status).toBe('failed')
+    expect(unchanged.pipelineStatus).toEqual({ 'pipe-shared': 'failed' })
   })
 })
 

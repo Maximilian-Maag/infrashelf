@@ -240,6 +240,15 @@ export const createOrder = async (
   overrides?: {
     status?: string
     pipelineId?: string[]
+    /**
+     * The per-pipeline map, as the webhook handler merges into it.
+     *
+     * It has to be settable at creation: a fixture that seeds an order with
+     * `pipelineId: ['pipe-1', 'pipe-2']` but no statuses starts from an EMPTY
+     * map, so the first event's merge produces a one-key map and any
+     * multi-pipeline case is silently reduced to the single-pipeline one.
+     */
+    pipelineStatus?: Record<string, string>
     isTrial?: boolean
     sizeCode?: string | null
     quantity?: number
@@ -255,6 +264,7 @@ export const createOrder = async (
       userId,
       status: (overrides?.status ?? 'pending') as schema.Order['status'],
       pipelineId: overrides?.pipelineId ?? [],
+      ...(overrides?.pipelineStatus !== undefined ? { pipelineStatus: overrides.pipelineStatus } : {}),
       ...(overrides?.isTrial !== undefined ? { isTrial: overrides.isTrial } : {}),
       ...(overrides?.sizeCode !== undefined ? { sizeCode: overrides.sizeCode } : {}),
       ...(overrides?.quantity !== undefined ? { quantity: overrides.quantity } : {}),
