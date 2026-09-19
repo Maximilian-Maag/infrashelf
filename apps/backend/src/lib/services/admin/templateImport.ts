@@ -6,7 +6,12 @@ import { and, eq } from 'drizzle-orm'
 import { logAudit } from '@/lib/audit'
 import { isReservedCiVariable, isPipelineSuppliedVariable } from '@/lib/ci/reserved'
 
-type ParsedParameter = Omit<Parameter, 'id' | 'scope' | 'scopeId' | 'environmentId' | 'sizeValues'>
+// `narrowingKey` is derived from `parameter_projects` and written only by
+// `setProjectNarrowing` (#404), so nothing parsed out of a template has one.
+type ParsedParameter = Omit<
+  Parameter,
+  'id' | 'scope' | 'scopeId' | 'environmentId' | 'sizeValues' | 'narrowingKey'
+>
 
 /** A variable the scan found, and where it came from. */
 export interface ScannedVariable extends ParsedParameter {
