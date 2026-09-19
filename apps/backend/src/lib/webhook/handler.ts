@@ -17,6 +17,12 @@ export const handlePipelineEvent = async (
   // request. A pipeline id is only unique within a CI source/environment, and
   // (more importantly) env A's secret must never be able to transition an
   // order/infra element that belongs to env B.
+  //
+  // 'failed' is in the selection because a restart in CI is a repair (#500): the
+  // pipeline succeeds, the same webhook arrives, and with `provisioning` alone the
+  // row matched nothing and the event was dropped with no record that it came. The
+  // branch below decides what a matching success may then do; this predicate only
+  // decides who gets to be considered.
   const matchingOrders = await db
     .select({
       id: orders.id,
@@ -28,7 +34,7 @@ export const handlePipelineEvent = async (
     })
     .from(orders)
     .where(
-      sql`${orders.status} = 'provisioning' AND ${orders.environmentId} = ${environmentId} AND ${orders.pipelineId} @> ${pipelineIdJson}::jsonb`,
+      sql`${orders.status} IN ('provisioning', 'failed') AND ${orders.environmentId} = ${environmentId} AND ${orders.pipelineId} @> ${pipelineIdJson}::jsonb`,
     )
 
   const matchingInfra = await db
@@ -49,8 +55,15 @@ export const handlePipelineEvent = async (
     for (const order of matchingOrders) {
       // Merge this pipeline's success into the JSONB map atomically: `||` is a
       // single UPDATE, so two concurrent success events can't lose each other's
-      // keys (read-modify-write would). Guard on the order still being
-      // 'provisioning' so a stale event can't resurrect a terminal order.
+      // keys (read-modify-write would). Guard on the order being findable at all
+      // — 'provisioning' or 'failed' (#500) — so a stale event can't resurrect a
+      // completed or rejected order.
+      //
+      // `failed` is allowed through because it is where a restart in CI lands: the
+      // operator fixes the pipeline in the CI UI, it succeeds, and this merge is
+      // what records it. Whether that finishes the order is settle's call, and it
+      // is the map merged here that decides: a sibling still failed or still
+      // running leaves the order failed.
       const successPatch = JSON.stringify({ [event.pipelineId]: 'success' })
       const merged = await db
         .update(orders)
@@ -58,7 +71,7 @@ export const handlePipelineEvent = async (
           pipelineStatus: sql`${orders.pipelineStatus} || ${successPatch}::jsonb`,
           updatedAt: new Date(),
         })
-        .where(sql`${orders.id} = ${order.id} AND ${orders.status} = 'provisioning'`)
+        .where(sql`${orders.id} = ${order.id} AND ${orders.status} IN ('provisioning', 'failed')`)
         .returning({ pipelineId: orders.pipelineId, pipelineStatus: orders.pipelineStatus })
 
       if (!merged.length) continue // already terminal — ignore stale/duplicate event
@@ -100,6 +113,11 @@ export const handlePipelineEvent = async (
       // 'provisioning' (compare-and-swap) so a stale failure can't overwrite a
       // completed order and re-send notifications, and merge the status
       // atomically to avoid losing concurrent updates.
+      //
+      // Narrower than the success guard above, on purpose (#500): an order that is
+      // already 'failed' learns nothing from a second failure, and the customer
+      // and the admins have already been told once. Only a success can move a
+      // failed order, and only when nothing is left outstanding.
       const failPatch = JSON.stringify({ [event.pipelineId]: event.status })
       const failed = await db
         .update(orders)

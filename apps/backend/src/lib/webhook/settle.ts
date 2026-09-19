@@ -114,13 +114,20 @@ export const settleOrderIfComplete = async (
    * column, so the swap matches nothing and this caller returns false, which is
    * exactly what it does for any other lost race. Compared as jsonb rather than
    * text, so key order cannot make two equal snapshots miss each other.
+   *
+   * 'failed' is in the status half because a restart in CI completes a failed
+   * order (#500) — the decision that produced this snapshot is still the decision
+   * on the row, which is what the `pipeline_status` half is checking, and the map
+   * it merges into only reaches "settled" when every recorded pipeline is a
+   * success. 'completed' and 'rejected' stay untouchable: neither is a state an
+   * operator is trying to leave.
    */
   const decided = JSON.stringify(tracking.pipelineStatus)
   const completed = await db
     .update(orders)
     .set({ status: 'completed', updatedAt: new Date() })
     .where(
-      sql`${orders.id} = ${order.id} AND ${orders.status} = 'provisioning' AND ${orders.pipelineStatus} = ${decided}::jsonb`,
+      sql`${orders.id} = ${order.id} AND ${orders.status} IN ('provisioning', 'failed') AND ${orders.pipelineStatus} = ${decided}::jsonb`,
     )
     .returning({ id: orders.id })
   if (!completed.length) return false

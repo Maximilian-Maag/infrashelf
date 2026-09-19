@@ -99,17 +99,78 @@ describe('settleOrderIfComplete — the completion swap', () => {
   })
 
   // The status guard still has to work on its own: a snapshot can match while
-  // the order has already gone terminal by another route.
-  it('does not complete an order that is no longer provisioning', async () => {
+  // the order has already gone terminal by another route. `completed` and
+  // `rejected` are the two that must stay untouchable — `failed` deliberately is
+  // no longer one of them (#500, see the two tests below).
+  it('does not complete an order that has already been completed', async () => {
+    const { user, product, environment, project } = await scenario()
+    const tracking = { pipelineId: ['100'], pipelineStatus: { '100': 'success' } }
+    const order = await createOrder(project.id, product.id, environment.id, user.id, {
+      status: 'completed',
+      pipelineId: tracking.pipelineId,
+    })
+    await db.update(orders).set({ pipelineStatus: tracking.pipelineStatus }).where(eq(orders.id, order.id))
+
+    expect(await settleOrderIfComplete(order, tracking, 'all pipelines succeeded')).toBe(false)
+
+    const [row] = await db.select({ status: orders.status }).from(orders).where(eq(orders.id, order.id))
+    expect(row.status).toBe('completed')
+  })
+
+  it('does not complete a rejected order', async () => {
+    const { user, product, environment, project } = await scenario()
+    const tracking = { pipelineId: ['100'], pipelineStatus: { '100': 'success' } }
+    const order = await createOrder(project.id, product.id, environment.id, user.id, {
+      status: 'rejected',
+      pipelineId: tracking.pipelineId,
+    })
+    await db.update(orders).set({ pipelineStatus: tracking.pipelineStatus }).where(eq(orders.id, order.id))
+
+    expect(await settleOrderIfComplete(order, tracking, 'all pipelines succeeded')).toBe(false)
+
+    const [row] = await db.select({ status: orders.status }).from(orders).where(eq(orders.id, order.id))
+    expect(row.status).toBe('rejected')
+  })
+
+  /*
+   * The other half of #500: `failed` used to sit in the same predicate as the two
+   * statuses above, which left a restart in CI unable to repair anything. It is
+   * the status an operator acts on, and it is now the one terminal-looking status
+   * a matching success may leave.
+   */
+  it('completes an order that a restart has moved out of failed', async () => {
     const { user, product, environment, project } = await scenario()
     const tracking = { pipelineId: ['100'], pipelineStatus: { '100': 'success' } }
     const order = await createOrder(project.id, product.id, environment.id, user.id, {
       status: 'failed',
       pipelineId: tracking.pipelineId,
     })
+    // The restart's own success, already merged into the map by the handler.
     await db.update(orders).set({ pipelineStatus: tracking.pipelineStatus }).where(eq(orders.id, order.id))
+    await createInfraElement(order.id, project.id, environment.id, product.id, { status: 'provisioning' })
 
-    expect(await settleOrderIfComplete(order, tracking, 'all pipelines succeeded')).toBe(false)
+    expect(await settleOrderIfComplete(order, tracking, 'Pipeline 100 succeeded')).toBe(true)
+
+    const [row] = await db.select({ status: orders.status }).from(orders).where(eq(orders.id, order.id))
+    expect(row.status).toBe('completed')
+  })
+
+  it('refuses a failed order whose snapshot a retry has replaced', async () => {
+    // The `pipeline_status` half of the compare is what keeps a concurrent Retry
+    // winning: the retry rewrites the column, so this caller's snapshot matches
+    // nothing — whichever status the retry left behind.
+    const { user, product, environment, project } = await scenario()
+    const decided = { pipelineId: ['100'], pipelineStatus: { '100': 'success' } }
+    const order = await createOrder(project.id, product.id, environment.id, user.id, {
+      status: 'failed',
+      pipelineId: ['200'],
+      pipelineStatus: { '200': 'success' },
+    })
+
+    expect(await settleOrderIfComplete(order, decided, 'Pipeline 100 succeeded')).toBe(false)
+
+    const [row] = await db.select({ status: orders.status }).from(orders).where(eq(orders.id, order.id))
+    expect(row.status).toBe('failed')
   })
 
   // jsonb, not text: Postgres does not promise key order in a jsonb round trip,
