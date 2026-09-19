@@ -21,6 +21,7 @@ const adminSections: { href: string; title: keyof Translations; description: key
   { href: '/admin/products', title: 'productsTitle', description: 'manageCatalogProducts' },
   { href: '/admin/environments', title: 'environments', description: 'environmentsSubtitle' },
   { href: '/admin/ci-sources', title: 'ciSources', description: 'ciSourcesSubtitle' },
+  { href: '/admin/integrations', title: 'integrations', description: 'integrationsSubtitle' },
   { href: '/admin/cost-centers', title: 'costCenters', description: 'costCentersSubtitle' },
   { href: '/admin/users', title: 'users', description: 'usersSubtitle' },
   { href: '/admin/parameters', title: 'globalParameters', description: 'globalParametersSubtitle' },
