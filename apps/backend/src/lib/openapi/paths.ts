@@ -264,8 +264,18 @@ registry.registerPath({
   security: [],
   responses: {
     200: {
-      description: 'Service is healthy',
-      content: { 'application/json': { schema: z.object({ status: z.string() }) } },
+      description:
+        'Service is healthy. Still 200 when the configuration has problems — this is ' +
+        'the container health probe, and failing it would replace a diagnosable ' +
+        '"logins are broken" with an undiagnosable "nothing starts".',
+      content: {
+        'application/json': {
+          schema: z.object({
+            status: z.string(),
+            warnings: z.array(z.string()).optional(),
+          }),
+        },
+      },
     },
   },
 })
