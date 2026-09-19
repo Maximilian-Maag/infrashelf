@@ -46,6 +46,7 @@ const AUTHED_PAGES = [
   '/admin/categories',
   '/admin/ci-sources',
   '/admin/integrations',
+  '/admin/integrations/foreman',
   '/admin/environments',
   '/admin/products',
   '/admin/products/new',

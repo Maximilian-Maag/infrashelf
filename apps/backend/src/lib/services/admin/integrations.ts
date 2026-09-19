@@ -558,6 +558,15 @@ export interface ResolvedIntegration {
   authType: IntegrationAuthType
   username: string
   credential: string | null
+  /**
+   * Which environment this row is bound to, or NULL for a portal-wide one.
+   *
+   * Carried because "which environments does this integration answer for" is a
+   * question its consumers have to ask — the Foreman reconciliation scopes its
+   * orphan list by it — and re-reading the row to find out would be a second
+   * query for a field the resolve already selected.
+   */
+  environmentId: number | null
   failureMode: IntegrationFailureMode
   /** True when a failed call to it must abort the caller's operation. */
   blocking: boolean
@@ -642,6 +651,7 @@ export const resolveIntegration = async (
     authType: row.authType,
     username: row.username,
     credential,
+    environmentId: row.environmentId,
     failureMode: row.failureMode,
     blocking: blocksProvisioning(row),
   }
