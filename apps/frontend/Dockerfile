@@ -6,7 +6,12 @@ WORKDIR /app
 
 # ── Stage 2: deps ─────────────────────────────────────────────────────────────
 FROM base AS deps
-RUN npm install -g pnpm
+# Pinned, like the backend image and for the same reason: unpinned takes
+# whatever npm calls `latest`, and pnpm 12 broke this stage on linux/arm64
+# (exit 1, no output) while pnpm 11.9.0 installs the same lockfile fine.
+# `scripts/toolchain.test.ts` holds the pins to each other.
+ARG PNPM_VERSION=11.9.0
+RUN npm install -g pnpm@${PNPM_VERSION}
 
 # Copy workspace manifests needed for dependency resolution
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
@@ -17,7 +22,8 @@ RUN pnpm install --frozen-lockfile
 
 # ── Stage 3: builder ──────────────────────────────────────────────────────────
 FROM base AS builder
-RUN npm install -g pnpm
+ARG PNPM_VERSION=11.9.0
+RUN npm install -g pnpm@${PNPM_VERSION}
 
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/apps/frontend/node_modules ./apps/frontend/node_modules

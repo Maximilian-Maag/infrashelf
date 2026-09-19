@@ -48,4 +48,39 @@ describe('the pinned toolchain agrees with itself', () => {
     expect(ciMajor, 'node-version in .github/actions/setup/action.yml').toBeDefined()
     expect(miseTool('node').split('.')[0]).toBe(ciMajor)
   })
+
+  /*
+   * The images are the fourth place the toolchain is written, and the one nothing
+   * was watching.
+   *
+   * `npm install -g pnpm` with no version installs whatever npm's `latest` is at
+   * build time. That is not a pin and not a range — it is the registry's opinion
+   * of the day, and on 2026-09-19 it changed under a release nobody touched: pnpm
+   * 12 became `latest`, and the linux/arm64 leg of CD — Release died in the deps
+   * stage with exit code 1 and no output whatsoever, against the same lockfile
+   * pnpm 11.9.0 installs from the same image. The amd64 leg went on passing
+   * because its layer came from cache, so the workflow was red on one
+   * architecture with nothing to read.
+   *
+   * A docker build is not something this suite can run, so it checks the two
+   * things that make it a pin: a version is named, and it is the version the rest
+   * of the toolchain pins.
+   */
+  it('installs a pinned pnpm in the images', () => {
+    for (const file of ['apps/frontend/Dockerfile', 'apps/backend/Dockerfile']) {
+      const text = read(file)
+      const installs = text.match(/npm install -g pnpm@\$\{PNPM_VERSION\}/g) ?? []
+      const pins = [...text.matchAll(/^ARG PNPM_VERSION=(\S+)$/gm)]
+
+      expect(installs.length, `${file} installs pnpm`).toBeGreaterThan(0)
+      // Every ARG that installs declares the version, and every declared version
+      // is the one the other three places pin.
+      expect(pins.length, `${file} declares PNPM_VERSION once per installing stage`).toBe(
+        installs.length,
+      )
+      for (const [, version] of pins) expect(version, `${file}`).toBe(miseTool('pnpm'))
+      // The regression itself: an install with no version after it.
+      expect(text, `${file} installs pnpm unpinned`).not.toMatch(/npm install -g pnpm(?!@)/)
+    }
+  })
 })
