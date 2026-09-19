@@ -100,4 +100,47 @@ test.describe('Shopping cart', () => {
     await page.getByRole('button', { name: /empty cart/i }).click()
     await expect(page.getByText(/your cart is empty/i)).toBeVisible({ timeout: 8000 })
   })
+
+  /*
+   * Issue #501: the per-line Remove was a real button in the middle of the row
+   * with its own horizontal padding zeroed, so the only control that looked like
+   * one was "Empty cart" — and every test above cleans up with THAT, including the
+   * one whose name says "can be removed". The placement in this test is measured,
+   * not asserted by convention: it is the whole of the bug and jsdom has no layout.
+   */
+  test('a line is removed by a control that reads as one, at the row edge', async ({ page }) => {
+    requireSeeded(await addFirstProduct(page), 'nothing on /catalog could be added to the cart')
+
+    await page.goto('/cart')
+    const row = page.locator('[data-testid^="cart-item-"]').first()
+    await expect(row).toBeVisible({ timeout: 10000 })
+
+    const rowId = await row.getAttribute('data-testid')
+    const remove = row.getByRole('button', { name: /^remove:/i })
+    await expect(remove).toBeVisible()
+
+    // Trailing edge of the row, level with the top of it — not mid-row under the
+    // quantity field, which is where a shopper stopped finding it.
+    const [removeBox, nameBox, quantityBox] = await Promise.all([
+      remove.boundingBox(),
+      row.getByRole('link').first().boundingBox(),
+      row.getByLabel(/quantity/i).boundingBox(),
+    ])
+    expect(removeBox!.x).toBeGreaterThan(nameBox!.x)
+    expect(removeBox!.y).toBeLessThan(quantityBox!.y)
+
+    // WCAG 2.5.5 needs a 44px target; giving the padding back must not have cost
+    // it, which is what zeroing it was probably working around.
+    expect(removeBox!.height).toBeGreaterThanOrEqual(44)
+
+    await remove.click()
+    await expect(page.locator(`[data-testid="${rowId}"]`)).toHaveCount(0, { timeout: 8000 })
+
+    // Repeatable: the cart is shared per user and other specs add to it.
+    const emptyCart = page.getByRole('button', { name: /empty cart/i })
+    if (await appears(emptyCart)) {
+      await emptyCart.click()
+      await expect(page.getByText(/your cart is empty/i)).toBeVisible({ timeout: 8000 })
+    }
+  })
 })
