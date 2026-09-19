@@ -4,7 +4,12 @@ import type { Parameter } from '@/lib/db/schema'
 // nothing in one says what an instance type should be at size M. Which variable
 // is driven by the T-shirt size is an operator's decision, made after the import
 // by switching the parameter's type to `size` and filling the map in.
-type ParsedParameter = Omit<Parameter, 'id' | 'scope' | 'scopeId' | 'environmentId' | 'sizeValues'>
+// `narrowingKey` is derived from `parameter_projects` and written only by
+// `setProjectNarrowing` (#404), so nothing parsed out of a template has one.
+type ParsedParameter = Omit<
+  Parameter,
+  'id' | 'scope' | 'scopeId' | 'environmentId' | 'sizeValues' | 'narrowingKey'
+>
 
 // Match variable blocks including nested braces
 const extractVariableBlocks = (content: string): Array<{ name: string; body: string }> => {

@@ -45,6 +45,7 @@ const AUTHED_PAGES = [
   '/admin',
   '/admin/categories',
   '/admin/ci-sources',
+  '/admin/integrations',
   '/admin/integrations/foreman',
   '/admin/environments',
   '/admin/products',
@@ -760,6 +761,7 @@ test.describe('Accessibility — dialogs', () => {
   const MODALS: [string, RegExp][] = [
     ['/admin/categories', /add category/i],
     ['/admin/ci-sources', /add ci source/i],
+    ['/admin/integrations', /add integration/i],
     ['/admin/environments', /add environment/i],
     ['/admin/cost-centers', /add cost center/i],
     ['/admin/parameters', /add parameter/i],

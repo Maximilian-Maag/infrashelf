@@ -16,6 +16,17 @@ import {
   SECRET_KEY_ENV,
 } from '@/lib/crypto/secrets'
 import { probeIntegration as probe, type ProbeResult } from '@/lib/integrations/probe'
+// A unique violation here is "one integration of a kind per environment"; a
+// CHECK violation is `integrations_credential_check`, the rule
+// `updateIntegration` also states in TypeScript and which two interleaved edits
+// can still reach (#195, finding 9). Both answer with the reason rather than a
+// bare 500, which an operator has no way to read.
+import {
+  pgErrorCode,
+  UNIQUE_VIOLATION,
+  FK_VIOLATION,
+  CHECK_VIOLATION,
+} from '@/lib/db/pgError'
 
 /**
  * The registry of external systems that are not CI providers (issue #111):
@@ -185,44 +196,6 @@ export const getIntegrationById = async (id: number): Promise<Result<Integration
   const rows = await db.select(publicColumns).from(integrations).where(eq(integrations.id, id)).limit(1)
   if (!rows.length) return err(404, 'Not found')
   return ok(rows[0] as IntegrationPublic)
-}
-
-/**
- * Postgres unique-violation. Surfaced as a 409 with the reason rather than a
- * bare 500: the constraint being hit is a modelling rule (one integration of a
- * kind per environment), and an operator has no way to guess that from a 500.
- */
-const UNIQUE_VIOLATION = '23505'
-
-/** Foreign-key violation — here, an environmentId that does not exist. */
-const FK_VIOLATION = '23503'
-
-/**
- * CHECK violation — in practice `integrations_credential_check`.
- *
- * The same rule `updateIntegration` states in TypeScript, enforced where it
- * cannot be raced. Reaching it means two edits interleaved (#195, finding 9),
- * so the message says that rather than blaming the caller's input, which was
- * fine when they sent it.
- */
-const CHECK_VIOLATION = '23514'
-
-/**
- * The SQLSTATE of a failed query, or null.
- *
- * Walks `cause`: drizzle wraps the driver's error in a DrizzleQueryError, so the
- * `code` is one or more levels down. Reading `e.code` directly — which is what
- * the raw-`postgres` call sites in lib/bootstrap do, correctly, because they
- * bypass drizzle — silently finds nothing here, and the 409 below would have been
- * a 500 with the constraint name in it.
- */
-const pgErrorCode = (e: unknown): string | null => {
-  for (let cursor = e, depth = 0; cursor !== null && cursor !== undefined && depth < 5; depth++) {
-    const code = (cursor as { code?: unknown }).code
-    if (typeof code === 'string') return code
-    cursor = (cursor as { cause?: unknown }).cause
-  }
-  return null
 }
 
 const conflictMessage = (kind: string, environmentId: number | null): string =>

@@ -553,6 +553,83 @@ export interface ForemanReconciliation {
   unidentified: { elementId: number; orderId: number; productId: number }[]
 }
 
+// Integrations (issue #111)
+
+/** The external systems the portal knows how to talk to. Mirrors INTEGRATION_KINDS. */
+export type IntegrationKind = 'foreman' | 'ansible' | 'nexus' | 'pulp' | 'loki' | 'grafana'
+
+export type IntegrationAuthType = 'none' | 'bearer' | 'basic' | 'token_header'
+
+/**
+ * Whether a failed call to this system blocks the operation that made it, or is
+ * logged and carried on from. Stored per integration rather than decided at each
+ * call site, which is how "best effort" becomes invisible.
+ */
+export type IntegrationFailureMode = 'blocking' | 'best_effort'
+
+/**
+ * An integration as every read path returns it: the credential is never in here.
+ * `hasCredential` says whether one is stored without saying anything about it.
+ */
+export interface Integration {
+  id: number
+  kind: IntegrationKind
+  name: string
+  baseUrl: string
+  authType: IntegrationAuthType
+  username: string
+  hasCredential: boolean
+  /** NULL means portal-wide — one instance serving the whole installation. */
+  environmentId: number | null
+  enabled: boolean
+  failureMode: IntegrationFailureMode
+  /** Only ever set on a SUCCESSFUL probe: "when did this last work". */
+  lastContactedAt: string | null
+  /** Why the most recent probe failed, cleared on the next success. */
+  lastError: string | null
+  createdAt: string | null
+  updatedAt: string | null
+}
+
+export interface CreateIntegrationRequest {
+  kind: IntegrationKind
+  name: string
+  baseUrl: string
+  authType: IntegrationAuthType
+  username?: string
+  credential?: string
+  environmentId?: number | null
+  enabled?: boolean
+  /** Required, and deliberately not defaulted — somebody has to decide it. */
+  failureMode: IntegrationFailureMode
+}
+
+/** `kind` is absent on purpose: a Foreman cannot become a Nexus. */
+export interface UpdateIntegrationRequest {
+  name?: string
+  baseUrl?: string
+  authType?: IntegrationAuthType
+  username?: string
+  /** Sending this rotates the credential; omitting it leaves the stored one. */
+  credential?: string
+  environmentId?: number | null
+  enabled?: boolean
+  failureMode?: IntegrationFailureMode
+}
+
+/**
+ * What a probe answers. `ok: false` arrives with HTTP 200 — the admin asked
+ * whether the system is reachable, and "no, because ..." answers that question.
+ */
+export interface IntegrationProbeResult {
+  ok: boolean
+  status: number | null
+  detail?: string
+  error?: string
+  lastContactedAt: string | null
+  lastError: string | null
+}
+
 // Deployment Environments
 export interface DeploymentEnvironment {
   id: number

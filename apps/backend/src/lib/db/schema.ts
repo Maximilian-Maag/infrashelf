@@ -357,6 +357,16 @@ export const productTranslations = pgTable('product_translations', {
   longDescription: text('long_description').notNull().default(''),
 }, (t) => [primaryKey({ columns: [t.productId, t.languageCode] })])
 
+/**
+ * The narrowing fingerprint of a parameter that is narrowed to nothing (#404).
+ *
+ * sha256 of the empty string. Spelled out rather than computed, because it is a
+ * column DEFAULT: the same literal has to appear in the migration, and a value
+ * the two could disagree about is not a default worth having.
+ */
+export const EMPTY_NARROWING_KEY =
+  'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
+
 export const parameters = pgTable('parameters', {
   id: bigserial({ mode: 'number' }).primaryKey(),
   scope: text({ enum: ['global', 'category', 'product'] }).notNull(),
@@ -402,7 +412,52 @@ export const parameters = pgTable('parameters', {
    * at a string's shape.
    */
   sizeValues: jsonb('size_values').$type<Record<string, string>>().notNull().default({}),
-})
+  /**
+   * Fingerprint of the projects this parameter is narrowed to (#404).
+   *
+   * sha256 of the ids sorted ascending, de-duplicated and joined with commas —
+   * so `[7, 4]`, `[4, 7]` and `[4, 4, 7]` are one value, because the order the
+   * ids arrive in is the order a form serialised them and nobody meant it. The
+   * default is sha256 of the empty string: narrowed to nothing, which every row
+   * is until `parameter_projects` says otherwise.
+   *
+   * It exists to make "one definition per name, per place, NARROWING INCLUDED"
+   * expressible as a unique index. The set itself lives in `parameter_projects`,
+   * and an index predicate cannot contain a subquery, so without a column on the
+   * row the only enforcement available is the check-then-insert in
+   * `services/admin/parameters.ts` — which races with itself (#477).
+   *
+   * Hashed rather than the list itself: a parameter narrowed to a few hundred
+   * projects would put kilobytes into a btree tuple, and 2704 bytes is where
+   * that stops working. Nothing reads it back for meaning; `parameter_projects`
+   * is the truth, and this is derived from it.
+   *
+   * Maintained by the service, in the same transaction that writes the
+   * narrowing, rather than by a trigger on `parameter_projects`. A trigger is
+   * invisible to drizzle — neither created nor dropped by `db:push` — so a local
+   * database built that way would silently not have it, which is the class of
+   * divergence #141 is about.
+   */
+  narrowingKey: text('narrowing_key').notNull().default(EMPTY_NARROWING_KEY),
+}, (t) => [
+  // One definition per name, per place, narrowing included (#404).
+  //
+  // A pair, because `environment_id` is nullable and `NULL` is distinct from
+  // every other `NULL` in a unique index — a single index over all five columns
+  // would let any number of all-environments duplicates through. Same shape as
+  // the `integrations` pair above, and for the same reason.
+  //
+  // This is what the application guard in `services/admin/parameters.ts` cannot
+  // be: that one is a check-then-insert, and two simultaneous creates both pass
+  // it. The guard stays, because it answers 409 naming the definition that is in
+  // the way, which a constraint violation cannot do.
+  uniqueIndex('parameters_definition_env_key')
+    .on(t.scope, t.scopeId, t.name, t.environmentId, t.narrowingKey)
+    .where(sql`environment_id IS NOT NULL`),
+  uniqueIndex('parameters_definition_all_envs_key')
+    .on(t.scope, t.scopeId, t.name, t.narrowingKey)
+    .where(sql`environment_id IS NULL`),
+])
 
 /**
  * Which projects a parameter is narrowed to. No rows means every project.
