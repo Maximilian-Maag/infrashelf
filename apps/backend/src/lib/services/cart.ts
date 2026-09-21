@@ -544,6 +544,12 @@ export const checkoutCart = async (
         if (created.data.budgetWarning) {
           warnings.push({ orderId: created.data.id, message: created.data.budgetWarning })
         }
+        // The policy warning travels with the order for the same reason: a
+        // checkout that says nothing about a rule that almost refused the order
+        // is indistinguishable from one where nothing was wrong (#110).
+        if (created.data.policyWarning) {
+          warnings.push({ orderId: created.data.id, message: created.data.policyWarning })
+        }
       } else {
         failed.push({ cartItemId, message: created.message })
       }

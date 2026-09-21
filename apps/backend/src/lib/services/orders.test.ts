@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type { SessionUser } from '@infrashelf/types'
 
 vi.mock('@/lib/notification', () => ({
@@ -12,6 +12,7 @@ vi.mock('@/lib/ci/webhooks', () => ({
 }))
 
 import { listOrders, getOrderById, createOrder, markOrderFailed, STUCK_ORDER_SILENCE_MS } from './orders'
+import { createIntegration } from '@/lib/services/admin/integrations'
 import { sendOrderCreated, sendApprovalRequest } from '@/lib/notification'
 import { triggerProductWebhooksTracked, triggerPipelineStacksTracked } from '@/lib/ci/webhooks'
 import { db } from '@/lib/db/client'
@@ -2196,5 +2197,178 @@ describe('createOrder — budget enforcement', () => {
     if (!result.ok) return
     expect(result.data.budgetWarning).toBeUndefined()
     expect(await db.select().from(auditLog).where(eq(auditLog.action, 'order.budget_warning'))).toHaveLength(0)
+  })
+})
+
+/*
+ * Policy enforcement at the order ordinals (#110).
+ *
+ * The gate itself is tested in `lib/policy/gate.test.ts`; what these tests are
+ * for is the WIRING — that a refusal reaches the requester as a refusal, that a
+ * warning is on the order the requester gets back rather than only in a log, and
+ * that the override is root's alone. Every one of those is a place where a gate
+ * that works can still be a gate nobody feels.
+ */
+describe('createOrder — policy enforcement (#110)', () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  /** A portal-wide OPA engine, which is what an installation has one of. */
+  const withEngine = async (failureMode: 'blocking' | 'best_effort' = 'blocking') => {
+    const root = await createUser({ role: 'root', email: 'root@test.dev', name: 'Root' })
+    await createIntegration(root.id, {
+      kind: 'opa',
+      name: 'Policy engine',
+      baseUrl: 'https://opa.example.com',
+      authType: 'none',
+      failureMode,
+    })
+    return root
+  }
+
+  const decision = (payload: Record<string, unknown>) =>
+    new Response(JSON.stringify({ result: payload }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })
+
+  const order = (base: Awaited<ReturnType<typeof buildBase>>, over?: { overridePolicy?: boolean }) => ({
+    projectId: base.project.id,
+    productId: base.product.id,
+    environmentId: base.env.id,
+    parameters: {},
+    ...(over ?? {}),
+  })
+
+  it('refuses an order a policy denies, and names the rule that refused it', async () => {
+    // #110 in one assertion: "denied" with no rule leaves the requester with
+    // nothing to change and nobody to ask.
+    const base = await buildBase()
+    await withEngine()
+    vi.spyOn(global, 'fetch').mockResolvedValue(
+      decision({ decision: 'deny', rule: 'quota/vm-count', message: 'This project already holds 20 VMs' }),
+    )
+
+    const result = await createOrder(makeSession(base.admin), order(base))
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.status).toBe(409)
+    expect(result.message).toContain('This project already holds 20 VMs.')
+    expect(result.message).toContain('quota/vm-count')
+  })
+
+  it('places an order a policy allows', async () => {
+    mockedTriggerWebhooks.mockResolvedValueOnce({ pipelineIds: ['pipe-allow'], failures: [] })
+    const base = await buildBase()
+    await withEngine()
+    vi.spyOn(global, 'fetch').mockResolvedValue(decision({ decision: 'allow', rule: 'baseline' }))
+
+    const result = await createOrder(makeSession(base.admin), order(base))
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.data.policyWarning).toBeUndefined()
+  })
+
+  it('places a warned order with the policy’s own words on it', async () => {
+    mockedTriggerWebhooks.mockResolvedValueOnce({ pipelineIds: ['pipe-warn'], failures: [] })
+    const base = await buildBase()
+    await withEngine()
+    vi.spyOn(global, 'fetch').mockResolvedValue(
+      decision({ decision: 'warn', rule: 'quota/near-limit', message: 'This project is near its VM limit.' }),
+    )
+
+    const result = await createOrder(makeSession(base.admin), order(base))
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    // On the order, not only in the log: the person who placed it is the one who
+    // can do something about it.
+    expect(result.data.policyWarning).toBe('This project is near its VM limit.')
+
+    const entries = await db.select().from(auditLog).where(eq(auditLog.action, 'order.policy_warning'))
+    expect(entries).toHaveLength(1)
+    expect(entries[0].details).toContain('quota/near-limit')
+  })
+
+  it('lets root through WITH the override, and records the rule that was waived', async () => {
+    mockedTriggerWebhooks.mockResolvedValueOnce({ pipelineIds: ['pipe-override'], failures: [] })
+    const base = await buildBase()
+    const root = await withEngine()
+    vi.spyOn(global, 'fetch').mockResolvedValue(
+      decision({ decision: 'deny', rule: 'quota/vm-count', message: 'This project already holds 20 VMs' }),
+    )
+
+    const result = await createOrder(makeSession(root), order(base, { overridePolicy: true }))
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    // Root is told what they waived — the override says they meant to place it,
+    // not that they wanted it quiet.
+    expect(result.data.policyWarning).toContain('quota/vm-count')
+
+    const entries = await db.select().from(auditLog).where(eq(auditLog.action, 'order.policy_overridden'))
+    expect(entries).toHaveLength(1)
+    expect(entries[0].details).toContain('quota/vm-count')
+  })
+
+  it('refuses root without the override, so the escape is deliberate', async () => {
+    const base = await buildBase()
+    const root = await withEngine()
+    vi.spyOn(global, 'fetch').mockResolvedValue(decision({ decision: 'deny', rule: 'quota/vm-count' }))
+
+    const result = await createOrder(makeSession(root), order(base))
+    expect(result.ok).toBe(false)
+  })
+
+  it('does not let a non-root user override a refusal', async () => {
+    // Otherwise a policy is advisory for anyone who knows the flag exists.
+    const base = await buildBase()
+    await withEngine()
+    vi.spyOn(global, 'fetch').mockResolvedValue(decision({ decision: 'deny', rule: 'quota/vm-count' }))
+
+    const result = await createOrder(makeSession(base.admin), order(base, { overridePolicy: true }))
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.status).toBe(409)
+  })
+
+  it('refuses under a blocking engine that cannot be asked, saying so', async () => {
+    const base = await buildBase()
+    await withEngine('blocking')
+    vi.spyOn(global, 'fetch').mockRejectedValue(new Error('connect ECONNREFUSED'))
+
+    const result = await createOrder(makeSession(base.admin), order(base))
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.status).toBe(409)
+    expect(result.message).toContain('could not be asked')
+  })
+
+  it('places, with a warning, under a best-effort engine that cannot be asked', async () => {
+    mockedTriggerWebhooks.mockResolvedValueOnce({ pipelineIds: ['pipe-degraded'], failures: [] })
+    const base = await buildBase()
+    await withEngine('best_effort')
+    vi.spyOn(global, 'fetch').mockRejectedValue(new Error('connect ECONNREFUSED'))
+
+    const result = await createOrder(makeSession(base.admin), order(base))
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.data.policyWarning).toContain('could not be asked')
+
+    // And the unevaluated order is on the record, because "this order was never
+    // checked" is exactly the outcome nobody sees otherwise.
+    const entries = await db.select().from(auditLog).where(eq(auditLog.action, 'order.policy_unavailable'))
+    expect(entries).toHaveLength(1)
+  })
+
+  it('leaves orders exactly as they were when no engine is configured', async () => {
+    // The state every installation starts in: installing a policy engine must be
+    // a choice, and this is what makes it one.
+    mockedTriggerWebhooks.mockResolvedValueOnce({ pipelineIds: ['pipe-nopolicy'], failures: [] })
+    const base = await buildBase()
+    const fetchMock = vi.spyOn(global, 'fetch')
+
+    const result = await createOrder(makeSession(base.admin), order(base))
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.data.policyWarning).toBeUndefined()
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 })

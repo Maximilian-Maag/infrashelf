@@ -1061,6 +1061,13 @@ export interface Order {
    */
   budgetWarning?: string
   /**
+   * Set when policy allowed the order but had something to say (#110) — the
+   * policy's own message, or the reason a `best_effort` engine could not be
+   * asked. Placed on the created order for the same reason `budgetWarning` is: a
+   * warning nobody sees is indistinguishable from no warning.
+   */
+  policyWarning?: string
+  /**
    * The cost centre as a person refers to it — `IT-4711 — Platform Networking`.
    *
    * The order carries `costCenterId` because that is what it is charged against,

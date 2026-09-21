@@ -22,6 +22,13 @@ const CreateOrderSchema = z.object({
   sizeCode: z.string().min(1).max(SIZE_CODE_MAX_LENGTH).nullable().optional(),
   // One order, N infrastructure elements (issue #104). Capped by the service.
   quantity: z.number().int().positive().optional(),
+  // Root's audited escape from a policy refusal (#110). Not trusted from the
+  // client any more than `overrideBudget` is trusted: `createPreparedOrder`
+  // checks the role itself.
+  overridePolicy: z.boolean().optional(),
+  // Root's audited escape from an exhausted budget (#325), kept beside the
+  // policy one so the two rights are visible together.
+  overrideBudget: z.boolean().optional(),
 })
 
 export async function GET(req: NextRequest) {
