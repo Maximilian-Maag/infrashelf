@@ -57,6 +57,7 @@ describe('probeIntegration — success', () => {
     pulp: '/pulp/api/v3/status/',
     loki: '/ready',
     grafana: '/api/health',
+    opa: '/health',
   }
 
   it.each(Object.entries(paths))('uses the documented health path for %s', async (kind, path) => {

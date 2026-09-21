@@ -503,8 +503,16 @@ export const ciSources = pgTable('ci_sources', {
   provider: text({ enum: ['gitlab', 'github', 'bitbucket'] }).notNull().default('gitlab'),
 })
 
-/** Every external system the registry below can hold. */
-export const INTEGRATION_KINDS = ['foreman', 'ansible', 'nexus', 'pulp', 'loki', 'grafana'] as const
+/**
+ * Every external system the registry below can hold.
+ *
+ * `opa` is #110's engine: the policy evaluation the portal calls at order time.
+ * It is a registry row rather than a `POLICY_ENGINE_URL` env var for the reasons
+ * #111 exists — one place for the credential, the per-environment binding, the
+ * health and the failure semantics — and because a policy gate whose endpoint
+ * cannot be named in the admin UI cannot be switched off in an emergency.
+ */
+export const INTEGRATION_KINDS = ['foreman', 'ansible', 'nexus', 'pulp', 'loki', 'grafana', 'opa'] as const
 
 /** How the portal authenticates to an integration. */
 export const INTEGRATION_AUTH_TYPES = ['none', 'bearer', 'basic', 'token_header'] as const
@@ -624,7 +632,7 @@ export const integrations = pgTable('integrations', {
   // a row written by something that is not this ORM still cannot hold a value the
   // readers do not handle. Declared here because `db:push` drops what schema.ts
   // does not (#141).
-  check('integrations_kind_check', sql`kind IN ('foreman','ansible','nexus','pulp','loki','grafana')`),
+  check('integrations_kind_check', sql`kind IN ('foreman','ansible','nexus','pulp','loki','grafana','opa')`),
   check('integrations_auth_type_check', sql`auth_type IN ('none','bearer','basic','token_header')`),
   check('integrations_failure_mode_check', sql`failure_mode IN ('blocking','best_effort')`),
   /*

@@ -2,6 +2,11 @@ import { z } from 'zod'
 import { extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi'
 import { registry } from './registry'
 import { SIZE_CODE_MAX_LENGTH } from '@/lib/services/sizes'
+import {
+  INTEGRATION_KINDS,
+  INTEGRATION_AUTH_TYPES,
+  INTEGRATION_FAILURE_MODES,
+} from '@/lib/db/schema'
 
 extendZodWithOpenApi(z)
 
@@ -122,9 +127,18 @@ const ciSourceSchema = z.object({
   provider: z.string(),
 })
 
-const integrationKinds = ['foreman', 'ansible', 'nexus', 'pulp', 'loki', 'grafana'] as const
-const integrationAuthTypes = ['none', 'bearer', 'basic', 'token_header'] as const
-const integrationFailureModes = ['blocking', 'best_effort'] as const
+/*
+ * The kind list is READ from the schema, not repeated. It was a fifth copy of
+ * the same seven strings — beside `INTEGRATION_KINDS`, its CHECK constraint, the
+ * shared type and the admin UI — and a copy in the spec is the one that lies
+ * quietly: the API rejects a kind the spec advertises (or accepts one the docs
+ * never mention), and the generated client for it is wrong rather than missing.
+ * paths.ts already imports from `@/lib/services`, so this is one more app import,
+ * not a new layer.
+ */
+const integrationKinds = INTEGRATION_KINDS
+const integrationAuthTypes = INTEGRATION_AUTH_TYPES
+const integrationFailureModes = INTEGRATION_FAILURE_MODES
 
 const integrationSchema = z.object({
   id: z.number(),

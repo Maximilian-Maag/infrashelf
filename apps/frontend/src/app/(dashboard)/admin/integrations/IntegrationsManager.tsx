@@ -29,6 +29,10 @@ const KINDS: { value: IntegrationKind; label: string }[] = [
   { value: 'pulp', label: 'Pulp' },
   { value: 'loki', label: 'Loki' },
   { value: 'grafana', label: 'Grafana' },
+  // Open Policy Agent, the order-time policy engine (#110). Shown by its
+  // project's acronym because that is what its own documentation and the
+  // integration registry call it.
+  { value: 'opa', label: 'OPA' },
 ]
 
 /*

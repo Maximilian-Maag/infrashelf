@@ -556,7 +556,7 @@ export interface ForemanReconciliation {
 // Integrations (issue #111)
 
 /** The external systems the portal knows how to talk to. Mirrors INTEGRATION_KINDS. */
-export type IntegrationKind = 'foreman' | 'ansible' | 'nexus' | 'pulp' | 'loki' | 'grafana'
+export type IntegrationKind = 'foreman' | 'ansible' | 'nexus' | 'pulp' | 'loki' | 'grafana' | 'opa'
 
 export type IntegrationAuthType = 'none' | 'bearer' | 'basic' | 'token_header'
 
