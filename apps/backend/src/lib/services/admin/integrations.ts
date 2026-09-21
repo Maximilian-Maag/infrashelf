@@ -23,6 +23,7 @@ import { probeIntegration as probe, type ProbeResult } from '@/lib/integrations/
 // bare 500, which an operator has no way to read.
 import {
   pgErrorCode,
+  pgConstraintName,
   UNIQUE_VIOLATION,
   FK_VIOLATION,
   CHECK_VIOLATION,
@@ -253,6 +254,31 @@ export const createIntegration = async (
     const code = pgErrorCode(e)
     if (code === UNIQUE_VIOLATION) return err(409, conflictMessage(input.kind, environmentId))
     if (code === FK_VIOLATION) return err(400, `Environment #${environmentId} does not exist.`)
+    /*
+     * A CHECK violation, answered rather than thrown.
+     *
+     * `updateIntegration` has done this since #195; create did not, so the same
+     * class of refusal was a 409 on one half of the service and a 500 with
+     * Postgres's "Failed query" and a constraint name in it on the other. On
+     * create the reachable one is `integrations_kind_check`: the API validates
+     * `kind` against `INTEGRATION_KINDS` and the column against a SQL literal of
+     * the same seven strings, so the two only disagree after an edit to one and
+     * not the other — and when they do, every attempt to create that kind is a
+     * 500 naming a constraint the operator has never heard of.
+     *
+     * The constraint name is in the message on purpose: it is the difference
+     * between "the portal is broken" and "this row is refused, and here is
+     * which rule refused it".
+     */
+    if (code === CHECK_VIOLATION) {
+      const constraint = pgConstraintName(e)
+      return err(
+        409,
+        `The database refused this integration${constraint ? ` (${constraint})` : ''}: one of its ` +
+          `fields is outside what the schema allows. If a new kind was just added, its migration ` +
+          `may not have been applied yet.`,
+      )
+    }
     throw e
   }
 

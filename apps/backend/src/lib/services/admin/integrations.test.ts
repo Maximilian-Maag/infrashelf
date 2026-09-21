@@ -3,7 +3,7 @@ import { sql } from 'drizzle-orm'
 import { testDb } from '@/test/setup'
 import { createUser, createCiSource, createEnvironment } from '@/test/helpers'
 import { db } from '@/lib/db/client'
-import { auditLog, integrations } from '@/lib/db/schema'
+import { auditLog, integrations, INTEGRATION_KINDS, type IntegrationKind } from '@/lib/db/schema'
 import {
   createIntegration,
   updateIntegration,
@@ -16,6 +16,7 @@ import {
   type CreateIntegrationInput,
 } from './integrations'
 import { SECRET_KEY_ENV, isEncryptedEnvelope } from '@/lib/crypto/secrets'
+import type { IntegrationKind as SharedIntegrationKind } from '@infrashelf/types'
 
 const configuredKey = process.env[SECRET_KEY_ENV]
 
@@ -598,6 +599,32 @@ describe('the integrations table itself', () => {
   })
 })
 
+describe('a create the database refuses', () => {
+  /*
+   * `createIntegration` mapped UNIQUE and FK out of the driver error and
+   * RETHREW everything else, so a CHECK violation — a value inside the schema's
+   * lists and outside the database's — arrived as an unhandled error: a 500
+   * whose body is Postgres's "Failed query", naming a constraint the operator
+   * has never heard of. `updateIntegration` has answered the same class of
+   * failure with a 409 and a sentence since #195, so the two halves of one
+   * service disagreed about it.
+   *
+   * The kinds are in sync today, which is why the test passes a kind the API's
+   * own enum cannot produce: it is the SHAPE a kind added without its migration
+   * takes (#110's `opa` was one edit away from it), and the point of the test is
+   * the answer a caller gets when it happens — not that it cannot.
+   */
+  it('answers with the constraint rather than a 500', async () => {
+    const actor = await rootId()
+    const result = await createIntegration(actor, input({ kind: 'rancher' as IntegrationKind }))
+
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.status).toBe(409)
+    expect(result.message).toContain('integrations_kind_check')
+  })
+})
+
 describe('probeIntegrationById', () => {
   it('records the contact time on success and clears any previous error', async () => {
     const actor = await rootId()
@@ -796,5 +823,64 @@ describe('blocksProvisioning', () => {
     // Switching one off says "carry on without it"; the opposite reading would
     // let one toggle stop all provisioning.
     expect(blocksProvisioning({ enabled: false, failureMode: 'blocking' })).toBe(false)
+  })
+})
+
+describe('the kinds the code can send and the kinds the database accepts', () => {
+  /*
+   * `INTEGRATION_KINDS` is a TypeScript tuple and `integrations_kind_check` is a
+   * SQL literal 120 lines below it in the same file. Two hand-maintained lists,
+   * neither derived from the other, and until this test nothing said they agree.
+   *
+   * The two failure modes are both silent-ish and worth naming: a kind in the
+   * tuple with no CHECK is refused by Postgres on create, and `createIntegration`
+   * maps only UNIQUE and FK (the CHECK is rethrown), so it arrives as a 500; a
+   * kind in the CHECK with no tuple member is unreachable from the API entirely.
+   *
+   * Adding `opa` (#110) is what made this concrete — the kind had to be added in
+   * two places and a migration, and nothing but this test notices if one of them
+   * is missed — so every member is inserted here against a real Postgres, and
+   * something that is not a member is not.
+   */
+  const insertKind = (kind: string) =>
+    testDb.execute(
+      sql`INSERT INTO integrations (kind, name, base_url, auth_type, failure_mode)
+          VALUES (${kind}, 'Kind probe', 'https://example.com', 'none', 'best_effort')`,
+    )
+
+  it.each(INTEGRATION_KINDS)('accepts %s', async (kind) => {
+    await expect(insertKind(kind)).resolves.toBeDefined()
+  })
+
+  it('refuses a kind the code does not know', async () => {
+    await expect(insertKind('rancher')).rejects.toThrow()
+  })
+})
+
+describe('the shared type the frontend compiles against', () => {
+  /*
+   * `IntegrationKind` in `@infrashelf/types` is a hand-written mirror, and it
+   * cannot be derived: that package is built independently and does not import
+   * the backend. So it is asserted instead, in both directions, by the two
+   * annotations below — a backend kind missing from the mirror is not assignable
+   * to `Record<SharedIntegrationKind, true>`, and a mirror member the backend
+   * does not have is not assignable to `IntegrationKind[]`. CI runs `tsc
+   * --noEmit` over this file, so the failure is at build time and names the file,
+   * rather than a frontend that compiles against a kind the API has never heard
+   * of.
+   */
+  const mirror: Record<SharedIntegrationKind, true> = {
+    foreman: true,
+    ansible: true,
+    nexus: true,
+    pulp: true,
+    loki: true,
+    grafana: true,
+    opa: true,
+  }
+  const backendKinds: SharedIntegrationKind[] = [...INTEGRATION_KINDS]
+
+  it('names exactly the kinds the backend registry holds', () => {
+    expect(Object.keys(mirror).sort()).toEqual([...backendKinds].sort())
   })
 })

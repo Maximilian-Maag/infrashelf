@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import type { Integration, DeploymentEnvironment } from '@infrashelf/types'
+import type { Integration, IntegrationKind, DeploymentEnvironment } from '@infrashelf/types'
 import { IntegrationsManager } from './IntegrationsManager'
 
 vi.mock('@/lib/api', () => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), del: vi.fn() }))
@@ -56,6 +56,45 @@ beforeEach(() => {
  * that somebody decided it; and health is two facts — when this last worked, and
  * why it does not now — which must not be collapsed into one.
  */
+const KIND_LABELS: Record<IntegrationKind, string> = {
+  foreman: 'Foreman',
+  ansible: 'Ansible',
+  nexus: 'Nexus',
+  pulp: 'Pulp',
+  loki: 'Loki',
+  grafana: 'Grafana',
+  opa: 'OPA',
+}
+
+/**
+ * Every kind the shared type carries has to be offerable in the Add form, and
+ * this is the only place that can say so.
+ *
+ * The other four lists of these strings — `INTEGRATION_KINDS`, the CHECK
+ * constraint, the OpenAPI enum — are all backend files with a test near them.
+ * This one is in a different package and cannot import any of them, so a kind
+ * added to the API and not here is an integration NOBODY CAN CREATE: the select
+ * simply does not offer it, nothing fails, and the registry looks complete.
+ *
+ * `Record<IntegrationKind, string>` is what makes this a guard and not another
+ * copy of the list: adding a member to `IntegrationKind` stops this file
+ * compiling until the label is named here too.
+ */
+describe('the kinds the Add form offers', () => {
+  it('offers every kind the shared type carries, with its label', async () => {
+    const u = userEvent.setup()
+    render(<IntegrationsManager initial={[]} environments={environments} />)
+
+    await u.click(screen.getByRole('button', { name: 'Add integration' }))
+    const dialog = screen.getByRole('dialog', { name: 'Add integration' })
+    const select = within(dialog).getByLabelText(/^System/) as HTMLSelectElement
+
+    expect(Array.from(select.options).map((o) => [o.value, o.textContent])).toEqual(
+      Object.entries(KIND_LABELS),
+    )
+  })
+})
+
 describe('IntegrationsManager', () => {
   it('lists each integration with its system, URL and binding', () => {
     render(<IntegrationsManager initial={[integration()]} environments={environments} />)

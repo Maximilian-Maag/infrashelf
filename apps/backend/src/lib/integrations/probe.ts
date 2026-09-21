@@ -51,6 +51,12 @@ const HEALTH_PATHS: Record<IntegrationKind, string> = {
   pulp: '/pulp/api/v3/status/',
   loki: '/ready',
   grafana: '/api/health',
+  // OPA (#110). Not `v1/health`: the policy engine's own liveness endpoint sits
+  // outside the versioned data API, and `v1/health` is a 404 that would read as
+  // "OPA is down" for a URL that is perfectly correct. Answers `{}` with 200 and,
+  // unlike `/v1/data/*`, is never behind a decision — which is what a probe
+  // needs, since a probe cannot ask a policy whether it is allowed to probe.
+  opa: '/health',
 }
 
 /**
