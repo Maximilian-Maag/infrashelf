@@ -1,4 +1,4 @@
-import { vi, describe, it, expect } from 'vitest'
+import { vi, describe, it, expect, afterEach } from 'vitest'
 
 vi.mock('@/lib/ci', () => ({ triggerPipeline: vi.fn().mockResolvedValue('pipeline-1') }))
 vi.mock('@/lib/notification', () => ({
@@ -22,11 +22,13 @@ import {
   createProject,
   linkProductEnvironment,
   createProductWebhook,
+  createCostCenter,
   makeAuthHeader,
 } from '@/test/helpers'
 import { sendApprovalRequest, sendOrderCreated } from '@/lib/notification'
+import { createIntegration } from '@/lib/services/admin/integrations'
 import { db } from '@/lib/db/client'
-import { infrastructureElements, orders, parameters } from '@/lib/db/schema'
+import { infrastructureElements, orders, parameters, costCenters, projects } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
 
 const makeReq = (url: string, body?: unknown, auth?: string) =>
@@ -341,5 +343,121 @@ describe('GET /api/orders — sensitive values', () => {
       expect(text).not.toContain('sup3rs3cret')
       expect(text).toContain('ADMIN_PASSWORD')
     }
+  })
+})
+
+/*
+ * The two overrides at the HTTP boundary.
+ *
+ * Both were service-only for a while, and the service-only tests could not see
+ * it: `CreateOrderSchema` had no field for either, so Zod dropped them on the way
+ * in and the escapes existed for callers who could already reach the service
+ * directly — which is to say, for nobody. The budget half is #509; the policy
+ * half arrived with the gate (#110) and is only useful if the same is not true of
+ * it.
+ */
+describe('POST /api/orders — the overrides reach the service', () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  const ready = async () => {
+    const admin = await createUser({ role: 'admin' })
+    const root = await createUser({ role: 'root' })
+    const pm = await createUser({ role: 'project_manager' })
+    const cat = await createCategory()
+    const product = await createProduct(cat.id)
+    const ci = await createCiSource()
+    const env = await createEnvironment(ci.id)
+    await linkProductEnvironment(product.id, env.id)
+    await createProductWebhook(product.id, env.id)
+    const project = await createProject(pm.id)
+    return { admin, root, pm, product, env, project }
+  }
+
+  const bodyFor = (base: Awaited<ReturnType<typeof ready>>, over?: Record<string, unknown>) => ({
+    projectId: base.project.id,
+    productId: base.product.id,
+    environmentId: base.env.id,
+    parameters: {},
+    ...(over ?? {}),
+  })
+
+  const deny = () =>
+    vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({ result: { decision: 'deny', rule: 'quota/vm-count', message: 'This project is at its limit' } }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
+    )
+
+  const policyEngine = async (rootId: number) =>
+    createIntegration(rootId, {
+      kind: 'opa',
+      name: 'Policy engine',
+      baseUrl: 'https://opa.example.com',
+      authType: 'none',
+      failureMode: 'blocking',
+    })
+
+  it('refuses an order a policy denies, naming the rule', async () => {
+    const base = await ready()
+    await policyEngine(base.root.id)
+    deny()
+
+    const res = await POST(makeReq('http://localhost/api/orders', bodyFor(base), await makeAuthHeader(base.root)))
+    expect(res.status).toBe(409)
+    const { error } = (await res.json()) as { error: string }
+    expect(error).toContain('quota/vm-count')
+  })
+
+  it('places it for root with overridePolicy, and only with it', async () => {
+    const base = await ready()
+    await policyEngine(base.root.id)
+    deny()
+
+    const refused = await POST(
+      makeReq('http://localhost/api/orders', bodyFor(base), await makeAuthHeader(base.root)),
+    )
+    expect(refused.status).toBe(409)
+
+    const auth = await makeAuthHeader(base.root)
+    const allowed = await POST(
+      makeReq('http://localhost/api/orders', bodyFor(base, { overridePolicy: true }), auth),
+    )
+    expect(allowed.status).toBe(201)
+  })
+
+  it('refuses a non-boolean overridePolicy rather than reading it as consent', async () => {
+    // "false" is a string, and a schema that coerced it would turn a client's
+    // "no" into root's override.
+    const base = await ready()
+    const res = await POST(
+      makeReq('http://localhost/api/orders', bodyFor(base, { overridePolicy: 'true' }), await makeAuthHeader(base.root)),
+    )
+    expect(res.status).toBe(400)
+  })
+
+  it('lets root place an order against a spent budget with overrideBudget (#509)', async () => {
+    /*
+     * The budget half of the same wire. Before #509 this POST was refused even
+     * for root, because the field was stripped before the service ever saw it —
+     * and nothing in the suite noticed, since the service tests called
+     * `createOrder` directly and never went through the schema.
+     */
+    const base = await ready()
+    const centre = await createCostCenter()
+    await db.update(projects).set({ costCenterId: centre.id }).where(eq(projects.id, base.project.id))
+    await db
+      .update(costCenters)
+      .set({ budgetAmount: '0.00', budgetCurrency: 'EUR', budgetPeriod: 'total', budgetBehaviour: 'block' })
+      .where(eq(costCenters.id, centre.id))
+
+    const auth = await makeAuthHeader(base.root)
+    const refused = await POST(makeReq('http://localhost/api/orders', bodyFor(base), auth))
+    expect(refused.status).toBe(409)
+
+    const allowed = await POST(
+      makeReq('http://localhost/api/orders', bodyFor(base, { overrideBudget: true }), auth),
+    )
+    expect(allowed.status).toBe(201)
   })
 })

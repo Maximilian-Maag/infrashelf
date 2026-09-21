@@ -42,6 +42,7 @@ import { captureProductSnapshot, type ProductSnapshot } from '@/lib/services/sna
 import { substitutionsByEmail } from '@/lib/services/delegations'
 import { resolveOfferingPrice, validateQuantity } from '@/lib/services/sizes'
 import { productNameSql } from '@/lib/db/productText'
+import { evaluateOrderPolicy } from '@/lib/policy/gate'
 
 export interface OrderRow {
   id: number
@@ -135,6 +136,19 @@ export interface CreateOrderInput {
    * the way `order.window_overridden` already does for deployment windows.
    */
   overrideBudget?: boolean
+  /**
+   * Place the order even though a policy refused it (#110).
+   *
+   * Root only, and audited with the rule that was overridden — a SEPARATE right
+   * from `overrideBudget`, deliberately. An approval says "this order is wanted";
+   * an override says "this rule does not apply here". Conflating them would mean
+   * an approver cannot approve anything without also waiving policy.
+   *
+   * It exists for the same reason the budget override does: a deny with no way
+   * past it becomes an outage during an incident, and the escape is worth more
+   * than the guarantee it weakens as long as it leaves a record naming the rule.
+   */
+  overridePolicy?: boolean
   parameters: Record<string, string>
   /** Order as a time-boxed trial (issue #1). Requires a trial-enabled offering. */
   trial?: boolean
@@ -179,6 +193,13 @@ export interface CreatedOrder {
    * (#325). The order exists — this is what the orderer is told about it.
    */
   budgetWarning?: string
+  /**
+   * Set when policy allowed the order but wanted to say something (#110) — the
+   * policy's own message, or the reason a `best_effort` engine could not be
+   * asked. Mirrors `budgetWarning`, for the same reason: a warning nobody sees is
+   * indistinguishable from no warning.
+   */
+  policyWarning?: string
 }
 
 /**
@@ -597,6 +618,8 @@ export interface PreparedOrder {
   quantity: number
   /** Root's audited escape from an exhausted budget (#325). */
   overrideBudget?: boolean
+  /** Root's audited escape from a policy refusal (#110), a separate right. */
+  overridePolicy?: boolean
 }
 
 /**
@@ -784,6 +807,7 @@ export const prepareOrder = async (
     sizeCode: priced.data.sizeCode,
     quantity: quantityResult.data,
     overrideBudget: input.overrideBudget,
+    overridePolicy: input.overridePolicy,
   })
 }
 
@@ -1152,8 +1176,32 @@ export const createPreparedOrder = async (
   const {
     projectId, productId, environmentId, parameters,
     costCenterId: resolvedCostCenterId, isTrial, trialDurationMinutes, productSnapshot, isAdmin,
-    sizeCode, quantity, overrideBudget,
+    sizeCode, quantity, overrideBudget, overridePolicy,
   } = prepared
+
+  /*
+   * The policy gate (#110), at the same single point the budget gate sits on and
+   * for the same reason: the approval path reaches this function too, so a check
+   * in the checkout handler alone would let an order approved next week run
+   * against a policy that has changed since.
+   *
+   * BEFORE the transaction rather than inside it, unlike the budget. That
+   * transaction takes a per-cost-centre advisory lock, and `evaluateOrderPolicy`
+   * is a network call to someone else's engine — holding the lock across it is
+   * how one slow policy engine becomes an outage on checkout, which is the same
+   * argument the comment below makes about provisioning.
+   *
+   * A refusal returns without writing anything, so there is nothing to roll back
+   * and the 409 stays an ordinary result rather than an exception. Root's escape
+   * is `overridePolicy`, a separate right from `overrideBudget`: an approval says
+   * "this order is wanted", an override says "this rule does not apply here".
+   */
+  const policy = await evaluateOrderPolicy(prepared, session)
+  const policyOverridden = policy.outcome === 'deny' && session.role === 'root' && overridePolicy === true
+
+  if (policy.outcome === 'deny' && !policyOverridden) {
+    return err(409, policy.message ?? 'This order is not permitted by policy.')
+  }
 
   /*
    * The budget gate, at the single point both paths go through (#325), and the
@@ -1262,6 +1310,40 @@ export const createPreparedOrder = async (
       )
     }
 
+    /*
+     * The policy outcome, written with the order it describes — the same
+     * placement the budget entries above use, and for the same reason: an
+     * override and its order have to commit or roll back together.
+     *
+     * A plain refusal writes nothing here (there is no order, and the budget gate
+     * does not audit its own either); the two entries that matter are the
+     * override, which is a privilege being exercised and names the rule that was
+     * waived, and the warning, which is the only trace of an order the gate had
+     * something to say about.
+     */
+    if (policyOverridden) {
+      await logAuditWith(
+        tx,
+        session.id,
+        'order.policy_overridden',
+        order.id,
+        `${session.email} placed an order refused by policy: ` +
+          // The rule is already inside the composed sentence (`denyMessage`), so
+          // it is not named twice here.
+          `${policy.message ?? '(no message)'}`,
+      )
+    } else if (policy.outcome === 'warn') {
+      await logAuditWith(
+        tx,
+        session.id,
+        'order.policy_warning',
+        order.id,
+        `${session.email} placed an order policy allowed with a warning` +
+          (policy.rule ? ` (rule: ${policy.rule})` : '') +
+          `: ${policy.message ?? '(no message)'}`,
+      )
+    }
+
     return { kind: 'placed' as const, order, budget }
   })
 
@@ -1333,6 +1415,7 @@ export const createPreparedOrder = async (
       infraId: provisioned.elementIds[0],
       infraIds: provisioned.elementIds,
       ...(budget.message ? { budgetWarning: budget.message } : {}),
+      ...(policy.message ? { policyWarning: policy.message } : {}),
     })
   } else {
     await logAudit(session.id, 'order.created', order.id, `Order created for product ${productId}`)
@@ -1362,6 +1445,7 @@ export const createPreparedOrder = async (
     return ok({
       ...(order as CreatedOrder),
       ...(budget.message ? { budgetWarning: budget.message } : {}),
+      ...(policy.message ? { policyWarning: policy.message } : {}),
     })
   }
 }

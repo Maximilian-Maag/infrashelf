@@ -572,6 +572,63 @@ skipped.
 
 ---
 
+## 5b. Policy as Code (OPA)
+
+Under **Administration → Integrations**, an integration of kind **OPA** points the
+portal at an [Open Policy Agent](https://www.openpolicyagent.org/) instance. When
+one is configured, every order is put to it before it is written, and its answer
+decides whether the order is placed.
+
+**What the portal sends.** One request per order:
+
+```
+POST {base URL}/v1/data/infrashelf/order/decision
+{ "input": { "version": 1, "projectId": …, "productId": …, "environmentId": …,
+             "size": "M", "quantity": 2, "trial": false, "costCenterId": …,
+             "parameters": { "instance_type": "t3.large", "db_password": "[redacted]" },
+             "sensitiveParameters": ["db_password"],
+             "requester": { "id": …, "email": …, "role": "project_manager" } } }
+```
+
+**The shape is an interface, not an implementation detail** — policies are
+written against it, so the `version` tells a policy which document it is looking
+at, and a rule written for version 1 keeps working when the portal moves on.
+**Sensitive parameters are redacted and named**, never sent: the engine is a
+system the policy authors administer, and the portal redacts those values
+everywhere else it shows them.
+
+**What the portal expects back:**
+
+```json
+{ "result": { "decision": "allow", "rule": "quota/vm-count", "message": "…" } }
+```
+
+`decision` is one of `allow`, `warn` or `deny`. **`deny` refuses the order and
+names the rule**, so the requester learns something; `warn` places the order and
+shows the policy's own message to the person who placed it. Anything else — no
+answer, a redirect, a body that is not this shape, a rule that is not loaded — is
+treated as *the engine could not be asked*, which is what the integration's
+**failure mode** decides:
+
+| Failure mode | When the engine cannot be asked |
+|---|---|
+| **Blocking** | The order is refused, with the reason and where to look |
+| **Best effort** | The order is placed and carries the warning |
+
+Both are recorded as `order.policy_unavailable` in the audit log, because an
+order that was never evaluated is the outcome nobody would otherwise see. With
+**no OPA integration configured at all**, orders are placed as they were before —
+a portal with no policies has nothing to enforce.
+
+**Root can override a refusal** with `overridePolicy`, which is a *separate*
+right from the budget override: an approval says "this order is wanted", an
+override says "this rule does not apply here". The audit entry names the rule that
+was waived.
+
+An integration bound to an environment answers for that environment; a
+portal-wide one answers everywhere else. Each integration has a **Test
+connection** button, which checks the engine's own `/health` endpoint.
+
 ## 6. User Management
 
 Under **Administration → Users**:
@@ -618,6 +675,9 @@ Logged action types (this list has grown since the feature was first documented 
 | `cost_center.budget_set` / `cost_center.budget_cleared` | A cost centre's budget is set, changed or removed (5.1) |
 | `order.budget_warning` | An order went through with its cost centre's budget already spent, under a `warn` budget |
 | `order.budget_overridden` | Root placed an order against a spent `block` budget |
+| `order.policy_warning` | An order went through that the policy engine allowed with a warning (5b) |
+| `order.policy_overridden` | Root placed an order a policy refused, naming the rule that was waived (5b) |
+| `order.policy_unavailable` | The policy engine could not be asked — recorded whether the order was then refused (`blocking`) or allowed (`best_effort`), because an unevaluated order is the outcome nobody would otherwise see (5b) |
 | `project.created` / `project.updated` | A project is added or edited |
 | `user.created` / `user.updated` | An account is created, or its role/details change |
 | `environment.updated` | A deployment environment is edited |
