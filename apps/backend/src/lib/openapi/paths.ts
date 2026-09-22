@@ -10,6 +10,17 @@ import {
 
 extendZodWithOpenApi(z)
 
+/*
+ * Internal endpoints are deliberately NOT registered here (#534).
+ *
+ * `/internal/*` is called by the scheduler and by pipelines with an internal
+ * token, never by a client with a session. The spec has exactly one security
+ * scheme — `BearerAuth`, a session JWT — which would be wrong for them, and their
+ * bodies are machine-written reports rather than an interface anybody should
+ * call. `contract.test.ts` asserts the exclusion by name, so adding a fifth one
+ * is a decision somebody makes rather than an oversight nobody notices.
+ */
+
 const bearerAuth = [{ BearerAuth: [] }]
 
 // ─── Shared schemas ───────────────────────────────────────────────────────────
@@ -22,6 +33,51 @@ const userSchema = z.object({
   active: z.boolean(),
   ssoSub: z.string().nullable(),
   createdAt: z.string().nullable(),
+})
+
+/**
+ * What a successful sign-in returns.
+ *
+ * Two shapes in one: a session token and the user, or — when the account has a
+ * second factor — a challenge with NO token, to be traded at
+ * `POST /auth/login/mfa`. Declared once because three routes answer with it
+ * (`/auth/login`, `/auth/login/mfa` and passwordless WebAuthn), and a union
+ * copied three times is three places to forget a field.
+ */
+const sessionResponseSchema = z.union([
+  z.object({
+    token: z.string().openapi({
+      description:
+        'Names the server-side session; only accepted while that session is live, so a revoked ' +
+        'session stops working on the next request.',
+    }),
+    user: z.object({
+      id: z.number(),
+      email: z.string(),
+      name: z.string().nullable(),
+      role: z.string(),
+    }),
+  }),
+  z.object({
+    mfaRequired: z.literal(true),
+    mfaToken: z.string(),
+    expiresIn: z.number(),
+  }),
+  z.object({ mfaRequired: z.literal(false) }).openapi({
+    description: '`challengeOnly`, and no second factor is enrolled.',
+  }),
+])
+
+// ── Moved up from the Admin — Branding section: `/public/branding` reads it too,
+// and a `const` used above its declaration is a compile error, not a hoisted one.
+const brandingSchema = z.object({
+  id: z.number().optional(),
+  primaryColor: z.string().nullable(),
+  secondaryColor: z.string().nullable(),
+  shopName: z.string().nullable(),
+  shopSubtitle: z.string().nullable(),
+  imprintText: z.string().nullable(),
+  logoMime: z.string().nullable(),
 })
 
 const orderSchema = z.object({
@@ -124,6 +180,46 @@ const costCenterSchema = z.object({
   code: z.string(),
   name: z.string(),
   active: z.boolean(),
+})
+
+/**
+ * A cost centre's spending limit and how much of it is gone (#325).
+ *
+ * The committed figure is computed, not stored: it is the sum of the orders
+ * placed in the budget's window that could be converted into its currency. What
+ * could NOT be converted is not folded in silently — it is named in `unconverted`
+ * — because a total that quietly omits spend is worse than one that admits it.
+ */
+const budgetStateSchema = z.object({
+  costCenterId: z.number(),
+  costCenterLabel: z.string().openapi({ description: '`code — name`, as the screens show it.' }),
+  amount: z.number().nullable().openapi({
+    description: 'Null when this cost centre has no budget: nothing here refuses anything.',
+  }),
+  currency: z.string().nullable(),
+  period: z.enum(['total', 'monthly']).nullable().openapi({
+    description: '`total` is the whole life of the cost centre; `monthly` resets each month.',
+  }),
+  behaviour: z.enum(['warn', 'block']).nullable().openapi({
+    description:
+      '`warn` places the order and says so in the audit log; `block` refuses it with a 409 on ' +
+      '`code: "budget_blocked"`, which root can waive.',
+  }),
+  committed: z.number().openapi({
+    description: 'Spend so far, in the budget currency, over the budget window.',
+  }),
+  remaining: z.number().openapi({ description: 'What is left. Negative once overspent.' }),
+  exhausted: z.boolean().openapi({ description: 'True when `committed` has reached `amount`.' }),
+  unconverted: z.array(z.object({ currency: z.string(), amount: z.number() })).openapi({
+    description:
+      'Spend whose currency has no exchange rate into the budget currency. Missing from ' +
+      '`committed`, and listed here so an incomplete figure says so.',
+  }),
+  unpriced: z.number().openapi({
+    description:
+      'Committed orders with no recoverable price at all — no snapshot, and the offering they ' +
+      'were placed against is gone (#189). A count, not an amount: the price is unknown, not zero.',
+  }),
 })
 
 const ciSourceSchema = z.object({
@@ -365,25 +461,7 @@ registry.registerPath({
         'challenge with NO token — see POST /auth/login/mfa.',
       content: {
         'application/json': {
-          schema: z.union([
-            z.object({
-              token: z.string(),
-              user: z.object({
-                id: z.number(),
-                email: z.string(),
-                name: z.string().nullable(),
-                role: z.string(),
-              }),
-            }),
-            z.object({
-              mfaRequired: z.literal(true),
-              mfaToken: z.string(),
-              expiresIn: z.number(),
-            }),
-            z.object({ mfaRequired: z.literal(false) }).openapi({
-              description: 'challengeOnly, and no second factor is enrolled.',
-            }),
-          ]),
+          schema: sessionResponseSchema
         },
       },
     },
@@ -440,6 +518,104 @@ registry.registerPath({
     400: { description: 'Invalid or already-used code' },
     401: { description: 'Challenge expired, forged, or superseded by a password change' },
     429: { description: 'Second factor locked after repeated failures' },
+  },
+})
+
+// ─── Auth — WebAuthn (passwordless) ───────────────────────────────────────────
+//
+// Sign in with a security key or a passkey, no password and no email (#241). Two
+// calls: ask for a challenge, then present the assertion it was issued for. The
+// second-factor flow, which runs AFTER a password, is on /auth/login/webauthn.
+
+registry.registerPath({
+  method: 'post',
+  path: '/auth/webauthn/options',
+  summary: 'Start a passwordless sign-in',
+  description:
+    'Issues a challenge for a discoverable credential. No account is named: the authenticator ' +
+    'says which credential to use, which is what makes this a sign-in button rather than a form.',
+  tags: ['Auth'],
+  security: [],
+  responses: {
+    200: {
+      description: 'PublicKeyCredentialRequestOptionsJSON, to be passed to `navigator.credentials.get`',
+      content: { 'application/json': { schema: z.object({}).passthrough() } },
+    },
+    429: { description: 'Too many attempts from this address' },
+  },
+})
+
+registry.registerPath({
+  method: 'post',
+  path: '/auth/webauthn/verify',
+  summary: 'Complete a passwordless sign-in',
+  description:
+    'Verifies the assertion against the challenge and opens the session. Rate limited per address — ' +
+    'modestly, because forging an assertion is not a guessing game: without the private key an ' +
+    'attacker cannot produce one at any rate, and this is here to cap how often they can try.',
+  tags: ['Auth'],
+  security: [],
+  request: {
+    body: {
+      content: {
+        'application/json': {
+          schema: z.object({
+            response: z.object({ id: z.string().min(1) }).passthrough().openapi({
+              description: 'The AuthenticationResponseJSON from the browser.',
+            }),
+            rememberMe: z.boolean().optional().openapi({
+              description: 'Extend the session from the 8 h default to 30 days.',
+            }),
+          }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: 'A session, exactly as `POST /auth/login` returns one',
+      content: { 'application/json': { schema: sessionResponseSchema } },
+    },
+    400: { description: 'Invalid request' },
+    401: { description: 'The assertion did not verify' },
+    429: { description: 'Too many sign-in attempts. Wait a few minutes and try again.' },
+  },
+})
+
+registry.registerPath({
+  method: 'post',
+  path: '/auth/login/webauthn/options',
+  summary: 'Start the second-factor step with a security key',
+  description:
+    'The WebAuthn equivalent of presenting a TOTP code, AFTER the password: it trades the ' +
+    '`mfaToken` from `POST /auth/login` for a challenge. Presenting the assertion is the same ' +
+    'call as the passwordless one, `POST /auth/webauthn/verify`.',
+  tags: ['Auth'],
+  security: [],
+  request: {
+    body: {
+      content: {
+        'application/json': {
+          schema: z.object({
+            mfaToken: z.string().min(1).openapi({
+              description: 'The challenge returned by `POST /auth/login` for an account with a factor.',
+            }),
+          }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: 'PublicKeyCredentialRequestOptionsJSON, restricted to this account\'s keys',
+      content: { 'application/json': { schema: z.object({}).passthrough() } },
+    },
+    400: { description: 'Invalid request' },
+    401: {
+      description:
+        'The challenge is unknown or has expired, the account is gone, or it no longer has a ' +
+        'password — all deliberately the same answer, so a caller cannot probe for accounts',
+    },
   },
 })
 
@@ -1058,6 +1234,25 @@ registry.registerPath({
   },
 })
 
+registry.registerPath({
+  method: 'delete',
+  path: '/sessions/current',
+  summary: 'End the session this request is made with',
+  description:
+    'Signs this device out: the session row is revoked, so the token stops being accepted on the ' +
+    'next request. The same revocation the sessions list offers, for the commonest case — the ' +
+    'caller does not have to know its own session id.',
+  tags: ['Users'],
+  security: bearerAuth,
+  responses: {
+    200: {
+      description: 'How many sessions were revoked',
+      content: { 'application/json': { schema: revokeResponseSchema } },
+    },
+    401: { description: 'Unauthorized' },
+  },
+})
+
 // ─── Catalog ──────────────────────────────────────────────────────────────────
 
 registry.registerPath({
@@ -1302,6 +1497,107 @@ registry.registerPath({
     401: { description: 'Unauthorized' },
     403: { description: 'Forbidden' },
     404: { description: 'Order not found' },
+  },
+})
+
+registry.registerPath({
+  method: 'post',
+  path: '/orders/{id}/deploy-now',
+  summary: '[root] Deploy a scheduled order now, without waiting for its window',
+  description:
+    'An order that waits for a deployment window (#330) can be brought forward by root — the ' +
+    'decision that it should happen NOW, outside the hours the company said it watches its own ' +
+    'systems, rather than the admin decision that it should happen at all. Audited as a window ' +
+    'override. The gates are asked again at this moment, exactly as at approval (#511): an order ' +
+    'approved days ago can be refused here because the budget moved or a rule changed.',
+  tags: ['Orders'],
+  security: bearerAuth,
+  request: {
+    params: z.object({ id: z.string().openapi({ description: 'Order id' }) }),
+    body: {
+      content: {
+        'application/json': {
+          schema: z.object({
+            overrideBudget: z.boolean().optional().openapi({
+              description:
+                '[root] Deploy now and waive a budget refusal. The same right as on `POST /orders` ' +
+                'and on the approve endpoint; answers `code: "budget_blocked"`.',
+            }),
+            overridePolicy: z.boolean().optional().openapi({
+              description:
+                '[root] Deploy now and waive a policy refusal, a separate right from ' +
+                '`overrideBudget`; answers `code: "policy_denied"` and records the rule waived.',
+            }),
+          }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: 'The window was waived and the order is being provisioned',
+      content: { 'application/json': { schema: z.object({ success: z.boolean() }) } },
+    },
+    400: { description: 'The id is not an id, or the order is not waiting for a window' },
+    401: { description: 'Unauthorized' },
+    403: { description: 'Forbidden: not root' },
+    404: { description: 'Order not found' },
+    409: {
+      description:
+        'Refused at the commit gate, by the budget or by policy. Nothing was built and the order ' +
+        'is still scheduled, so it can be brought forward again with the matching waiver.',
+      content: {
+        'application/json': {
+          schema: z.object({
+            error: z.string().openapi({ description: 'The refusal, as a sentence to show.' }),
+            code: z.enum(['budget_blocked', 'policy_denied']).openapi({
+              description: 'Which waiver answers this refusal. Each is a separate root right.',
+            }),
+          }),
+        },
+      },
+    },
+  },
+})
+
+registry.registerPath({
+  method: 'post',
+  path: '/orders/{id}/write-off',
+  summary: '[root] Write off an order that will never be built',
+  description:
+    'Marks a stuck order failed with a reason, so it leaves the queue of things somebody is ' +
+    'still waiting on. Root only — stricter than the `admin` its neighbours take — because it ' +
+    'closes the question without delivering anything, and the reason goes in the audit log.',
+  tags: ['Orders'],
+  security: bearerAuth,
+  request: {
+    params: z.object({ id: z.string().openapi({ description: 'Order id' }) }),
+    body: {
+      content: {
+        'application/json': {
+          schema: z.object({
+            reason: z.string().min(1).openapi({
+              description: 'Why the order is being written off. Required, and recorded.',
+            }),
+          }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: 'The order\u2019s id and its new status',
+      content: {
+        'application/json': {
+          schema: z.object({ id: z.number(), status: z.string() }),
+        },
+      },
+    },
+    400: { description: 'No reason given, or the id is not an id' },
+    401: { description: 'Unauthorized' },
+    403: { description: 'Forbidden: not root' },
+    404: { description: 'Order not found' },
+    409: { description: 'The order is not in a state that can be written off' },
   },
 })
 
@@ -2002,6 +2298,31 @@ registry.registerPath({
   },
 })
 
+registry.registerPath({
+  method: 'get',
+  path: '/infrastructure/{id}',
+  summary: 'Get one infrastructure element',
+  description:
+    'The element with its order, project, product and environment, plus its outputs and its ' +
+    'decommission schedule. Visible to whoever may see the project it belongs to; anybody else ' +
+    'gets a 404 rather than a 403, so the response does not confirm that an element they cannot ' +
+    'see exists.',
+  tags: ['Infrastructure'],
+  security: bearerAuth,
+  request: {
+    params: z.object({ id: z.string().openapi({ description: 'Infrastructure element id' }) }),
+  },
+  responses: {
+    200: {
+      description: 'The element, with translated product and environment names',
+      content: { 'application/json': { schema: infraSchema } },
+    },
+    400: { description: 'The id is not an id' },
+    401: { description: 'Unauthorized' },
+    404: { description: 'Not found, or not visible to this caller' },
+  },
+})
+
 // ─── Users ────────────────────────────────────────────────────────────────────
 
 registry.registerPath({
@@ -2070,6 +2391,131 @@ registry.registerPath({
     },
     400: { description: 'Bad request or wrong current password' },
     401: { description: 'Unauthorized' },
+  },
+})
+
+// ─── Security keys ────────────────────────────────────────────────────────────
+//
+// The WebAuthn credentials an account holds (#241). Registered and removed by the
+// account itself; `requireAuthPendingSecondFactor` on the first three, so an
+// account that owes a factor can still enrol one and get past the gate.
+
+const webauthnCredentialSchema = z.object({
+  id: z.number(),
+  label: z.string().openapi({ description: 'What the person called this key.' }),
+  createdAt: z.string(),
+  lastUsedAt: z.string().nullable(),
+  backedUp: z.boolean().openapi({
+    description: 'A synced passkey rather than one bound to a single device.',
+  }),
+})
+
+registry.registerPath({
+  method: 'get',
+  path: '/users/me/webauthn',
+  summary: 'List the security keys on my account',
+  tags: ['Users'],
+  security: bearerAuth,
+  responses: {
+    200: {
+      description: 'Newest last, so the list reads as a history',
+      content: {
+        'application/json': {
+          schema: z.object({ credentials: z.array(webauthnCredentialSchema) }),
+        },
+      },
+    },
+    401: { description: 'Unauthorized' },
+  },
+})
+
+registry.registerPath({
+  method: 'post',
+  path: '/users/me/webauthn/register/options',
+  summary: 'Start registering a security key',
+  description: 'Issues the creation options; the browser passes them to `navigator.credentials.create`.',
+  tags: ['Users'],
+  security: bearerAuth,
+  responses: {
+    200: {
+      description: 'PublicKeyCredentialCreationOptionsJSON',
+      content: { 'application/json': { schema: z.object({}).passthrough() } },
+    },
+    401: { description: 'Unauthorized' },
+  },
+})
+
+registry.registerPath({
+  method: 'post',
+  path: '/users/me/webauthn/register/verify',
+  summary: 'Finish registering a security key',
+  description:
+    'Stores the credential under the label given. `recoveryCodes` is present only on the first ' +
+    'factor this account registers, and the response is marked `no-store`: that body is the only ' +
+    'copy of those codes that will ever exist.',
+  tags: ['Users'],
+  security: bearerAuth,
+  request: {
+    body: {
+      content: {
+        'application/json': {
+          schema: z.object({
+            label: z.string().min(1).openapi({ description: 'What to call this key.' }),
+            response: z.object({ id: z.string().min(1) }).passthrough().openapi({
+              description: 'The RegistrationResponseJSON from the browser.',
+            }),
+          }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: 'The key was registered',
+      content: {
+        'application/json': {
+          schema: z.object({
+            label: z.string(),
+            recoveryCodes: z.array(z.string()).optional().openapi({
+              description: 'One-time codes, returned once, on the first factor registered.',
+            }),
+          }),
+        },
+      },
+    },
+    400: { description: 'Invalid request, or the attestation did not verify' },
+    401: { description: 'Unauthorized' },
+  },
+})
+
+registry.registerPath({
+  method: 'post',
+  path: '/users/me/webauthn/{id}/remove',
+  summary: 'Remove a security key from my account',
+  description:
+    'Requires the account password — the key being removed may be the only one left, and a stolen ' +
+    'session should not be able to strip the factor that stands between it and the account. ' +
+    '`requireAuth` rather than the pending variant: an account that owes a factor is already inside.',
+  tags: ['Users'],
+  security: bearerAuth,
+  request: {
+    params: z.object({ id: z.string().openapi({ description: 'Credential id, from the list above' }) }),
+    body: {
+      content: {
+        'application/json': {
+          schema: z.object({ password: z.string().min(1) }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: 'How many credentials were removed — 0 when the id is not this account\'s',
+      content: { 'application/json': { schema: z.object({ removed: z.number() }) } },
+    },
+    400: { description: 'Invalid request, or the id is not an id' },
+    401: { description: 'Unauthorized' },
+    403: { description: 'The password is wrong' },
   },
 })
 
@@ -2256,6 +2702,50 @@ registry.registerPath({
     },
     401: { description: 'Unauthorized' },
     403: { description: 'Forbidden' },
+  },
+})
+
+// ─── Public ───────────────────────────────────────────────────────────────────
+//
+// Unauthenticated reads. They exist so the login screen can be rendered before
+// anybody has a token: branding is what it looks like, exchange rates are what an
+// amount is displayed in.
+
+registry.registerPath({
+  method: 'get',
+  path: '/public/branding',
+  summary: 'The shop\'s branding',
+  description:
+    'Colours, name, subtitle, imprint and logo type — what the sign-in screen and the chrome ' +
+    'around it need. Public by necessity: it is read before anybody is signed in.',
+  tags: ['Public'],
+  security: [],
+  responses: {
+    200: {
+      description: 'The branding, never including the logo bytes themselves',
+      content: { 'application/json': { schema: brandingSchema } },
+    },
+    503: { description: 'Branding could not be read' },
+  },
+})
+
+registry.registerPath({
+  method: 'get',
+  path: '/public/exchange-rates',
+  summary: 'The stored exchange rates',
+  description:
+    'What the costs screens convert with. Public because a price has to be displayable before ' +
+    'sign-in on the catalogue, and the rates are not secret.',
+  tags: ['Public'],
+  security: [],
+  responses: {
+    200: {
+      description:
+        'Every stored rate. Rates are the only way an amount in another currency can be shown or ' +
+        'compared, and a missing one is visible rather than silently treated as parity.',
+      content: { 'application/json': { schema: z.array(exchangeRateSchema) } },
+    },
+    503: { description: 'Rates could not be read' },
   },
 })
 
@@ -3308,6 +3798,315 @@ registry.registerPath({
   },
 })
 
+// ─── Admin — Pipeline stacks ──────────────────────────────────────────────────
+//
+// How a product is provisioned (#200): an ordered set of steps, each a template
+// in the infra-templates repo, sharing one OpenTofu state per order. Root only.
+
+const stackStepSchema = z.object({
+  template: z.string().min(1).openapi({
+    description: 'Path to the step template in the infra-templates repo, e.g. `linode/virtual-machine`.',
+  }),
+  stateSuffix: z.string().min(1).openapi({
+    description: 'Appended to the state key to make this step\'s state name unique.',
+  }),
+  execOrder: z.number().int().min(0).optional().openapi({
+    description:
+      'Steps with the same value run in parallel; higher groups wait for every lower one. ' +
+      'Reversed automatically on destroy. Defaults to 0.',
+  }),
+  upstreamRefs: z
+    .array(
+      z.object({
+        varName: z.string().openapi({
+          description: 'UPPER_SNAKE_CASE CI variable name, promoted to `TF_VAR_<lowercase>` at runtime.',
+        }),
+        suffix: z.string().min(1).openapi({
+          description: 'The `stateSuffix` of an EARLIER step whose state name this variable carries.',
+        }),
+      }),
+    )
+    .optional(),
+  fixedParams: z.record(z.string(), z.string()).optional().openapi({
+    description: 'Extra CI variables for this step, one `KEY=value` per entry.',
+  }),
+})
+
+const pipelineStackSchema = z.object({
+  id: z.number(),
+  productId: z.number(),
+  environmentId: z.number(),
+  name: z.string(),
+  stateKeyParam: z.string().openapi({
+    description:
+      'The order parameter whose value forms the readable half of the state key, with the order id ' +
+      'appended. Stored on the element is the NAMESPACE — the id half — and this half is re-derived ' +
+      'on every run, including the destroy.',
+  }),
+  steps: z.array(stackStepSchema),
+})
+
+registry.registerPath({
+  method: 'get',
+  path: '/admin/products/{id}/pipeline-stacks',
+  summary: '[root] List a product\'s pipeline stacks',
+  tags: ['Admin'],
+  security: bearerAuth,
+  request: {
+    params: z.object({ id: z.string().openapi({ description: 'Product id' }) }),
+  },
+  responses: {
+    200: {
+      description: 'Stacks in the order they were added',
+      content: { 'application/json': { schema: z.array(pipelineStackSchema) } },
+    },
+    400: { description: 'The id is not an id' },
+    401: { description: 'Unauthorized' },
+    403: { description: 'Forbidden: not root' },
+    404: { description: 'Product not found' },
+  },
+})
+
+registry.registerPath({
+  method: 'post',
+  path: '/admin/products/{id}/pipeline-stacks',
+  summary: '[root] Add a pipeline stack to a product',
+  tags: ['Admin'],
+  security: bearerAuth,
+  request: {
+    params: z.object({ id: z.string().openapi({ description: 'Product id' }) }),
+    body: {
+      content: {
+        'application/json': {
+          schema: z.object({
+            environmentId: z.number().int().positive(),
+            name: z.string().min(1),
+            stateKeyParam: z.string().min(1).optional().openapi({ description: 'Defaults to `hostname`.' }),
+            steps: z.array(stackStepSchema).min(1),
+          }),
+        },
+      },
+    },
+  },
+  responses: {
+    201: {
+      description: 'Stack created',
+      content: { 'application/json': { schema: pipelineStackSchema } },
+    },
+    400: { description: 'Invalid request, or the id is not an id' },
+    401: { description: 'Unauthorized' },
+    403: { description: 'Forbidden: not root' },
+    404: { description: 'Product not found' },
+  },
+})
+
+registry.registerPath({
+  method: 'put',
+  path: '/admin/products/{id}/pipeline-stacks/{stackId}',
+  summary: '[root] Update a pipeline stack',
+  description:
+    'A partial update: absent fields are left alone. `stateKeyParam` is refused with a 409 while ' +
+    'elements provisioned through this stack are still standing — a changed value would make ' +
+    'their teardown address a state that was never created, report success, and leave the real ' +
+    'infrastructure running while the portal shows it decommissioned (#200).',
+  tags: ['Admin'],
+  security: bearerAuth,
+  request: {
+    params: z.object({
+      id: z.string().openapi({ description: 'Product id' }),
+      stackId: z.string().openapi({ description: 'Pipeline stack id' }),
+    }),
+    body: {
+      content: {
+        'application/json': {
+          schema: z.object({
+            name: z.string().min(1).optional(),
+            stateKeyParam: z.string().min(1).optional(),
+            steps: z.array(stackStepSchema).min(1).optional(),
+          }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: 'Stack updated',
+      content: { 'application/json': { schema: pipelineStackSchema } },
+    },
+    400: { description: 'Invalid request, or an id is not an id' },
+    401: { description: 'Unauthorized' },
+    403: { description: 'Forbidden: not root' },
+    404: { description: 'Product or stack not found' },
+    409: {
+      description:
+        'The state key parameter cannot change while infrastructure provisioned through this ' +
+        'stack is still deployed. The message names how many elements.',
+    },
+  },
+})
+
+registry.registerPath({
+  method: 'delete',
+  path: '/admin/products/{id}/pipeline-stacks/{stackId}',
+  summary: '[root] Delete a pipeline stack',
+  tags: ['Admin'],
+  security: bearerAuth,
+  request: {
+    params: z.object({
+      id: z.string().openapi({ description: 'Product id' }),
+      stackId: z.string().openapi({ description: 'Pipeline stack id' }),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'Stack deleted',
+      content: { 'application/json': { schema: z.object({ success: z.boolean() }) } },
+    },
+    400: { description: 'An id is not an id' },
+    401: { description: 'Unauthorized' },
+    403: { description: 'Forbidden: not root' },
+    404: { description: 'Product or stack not found' },
+  },
+})
+
+registry.registerPath({
+  method: 'put',
+  path: '/admin/products/{id}/retired',
+  summary: '[root] Retire a product, or bring it back',
+  description:
+    'A retired product cannot be ordered, and its page stays readable — the orders placed against ' +
+    'it still need to resolve it. Root only, like every other product mutation.',
+  tags: ['Admin'],
+  security: bearerAuth,
+  request: {
+    params: z.object({ id: z.string().openapi({ description: 'Product id' }) }),
+    body: {
+      content: {
+        'application/json': {
+          schema: z.object({
+            retired: z.boolean().openapi({
+              description: 'True hides the offering from the catalogue; false puts it back.',
+            }),
+          }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: 'Product updated',
+      content: { 'application/json': { schema: adminProductSchema } },
+    },
+    400: { description: 'Invalid request, or the id is not an id' },
+    401: { description: 'Unauthorized' },
+    403: { description: 'Forbidden: not root' },
+    404: { description: 'Product not found' },
+  },
+})
+
+registry.registerPath({
+  method: 'post',
+  path: '/admin/products/{id}/import-parameters',
+  summary: '[root] Import parameters from a template file',
+  description:
+    'Reads a template from the CI source through the API, parses the variables it declares, and ' +
+    'creates the ones this product does not have yet — the alternative is typing a variable ' +
+    'catalogue by hand from a file the CI already holds the truth about.',
+  tags: ['Admin'],
+  security: bearerAuth,
+  request: {
+    params: z.object({ id: z.string().openapi({ description: 'Product id' }) }),
+    body: {
+      content: {
+        'application/json': {
+          schema: z.object({
+            ciSourceId: z.number().int().positive(),
+            projectId: z.string().min(1).openapi({ description: 'Project path in the CI source.' }),
+            ref: z.string().min(1).openapi({ description: 'Branch, tag or commit to read at.' }),
+            path: z.string().openapi({ description: 'Path to the template file.' }),
+            environmentId: z.number().int().positive().optional(),
+          }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description:
+        'What the scan found and what it created. Existing definitions are never overwritten: an ' +
+        'admin who edited a label or narrowed a type has made a decision. `filesRead` is what says ' +
+        'whether an empty result means the path was wrong or the template declares nothing.',
+      content: {
+        'application/json': {
+          schema: z.object({
+            created: z.number(),
+            skipped: z.number().openapi({
+              description: 'Already defined on this product, and left as they are.',
+            }),
+            createdNames: z.array(z.string()),
+            skippedModules: z.array(
+              z.object({
+                module: z.string(),
+                source: z.string(),
+                reason: z.string().openapi({
+                  description: 'Why a module was not followed, e.g. an unreachable source.',
+                }),
+              }),
+            ),
+            filesRead: z.array(z.string()),
+            stack: z
+              .object({
+                created: z.boolean(),
+                reason: z.string(),
+              })
+              .optional()
+              .openapi({ description: 'Absent when the caller did not ask for a stack.' }),
+          }),
+        },
+      },
+    },
+    400: { description: 'Invalid request, or the id is not an id' },
+    401: { description: 'Unauthorized' },
+    403: { description: 'Forbidden: not root' },
+    404: { description: 'Product or CI source not found' },
+    422: { description: 'The template could not be read at that ref' },
+  },
+})
+
+registry.registerPath({
+  method: 'post',
+  path: '/admin/products/{id}/sync-parameters',
+  summary: '[root] Sync a product\'s parameters from its pipeline stack',
+  description:
+    'Reads the product\'s template through the CI source and adds the parameters it declares that ' +
+    'the product does not have. Reserved and pipeline-supplied variables are skipped: they are ' +
+    'the orchestrator\'s to set, and offering them in the order form would let somebody overwrite ' +
+    'what a run depends on.',
+  tags: ['Admin'],
+  security: bearerAuth,
+  request: {
+    params: z.object({ id: z.string().openapi({ description: 'Product id' }) }),
+  },
+  responses: {
+    200: {
+      description: 'How many parameters were created, out of how many the template declares',
+      content: {
+        'application/json': {
+          schema: z.object({ created: z.number(), skipped: z.number() }),
+        },
+      },
+    },
+    400: { description: 'The id is not an id' },
+    401: { description: 'Unauthorized' },
+    403: { description: 'Forbidden: not root' },
+    422: {
+      description:
+        'Nothing to sync from: no pipeline stack, no deployment environment, no CI source, or a ' +
+        'template that could not be read',
+    },
+  },
+})
+
 // ─── Admin — Parameters ───────────────────────────────────────────────────────
 
 registry.registerPath({
@@ -3742,6 +4541,91 @@ registry.registerPath({
   },
 })
 
+registry.registerPath({
+  method: 'get',
+  path: '/admin/integrations/foreman/reconcile',
+  summary: '[root] Reconcile an environment\'s hosts against Foreman',
+  description:
+    'Asks Foreman for the hosts it knows in this environment and reports the difference against ' +
+    'what the portal believes it deployed (#111). A read-only comparison: it reports drift, it ' +
+    'does not adopt or delete anything.',
+  tags: ['Admin'],
+  security: bearerAuth,
+  request: {
+    query: z.object({
+      environmentId: z.string().openapi({
+        description: 'The deployment environment to reconcile. Required.',
+      }),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'The comparison, three lists rather than a verdict',
+      content: {
+        'application/json': {
+          schema: z.object({
+            integration: z.object({ id: z.number(), name: z.string(), baseUrl: z.string() }),
+            environmentId: z.number(),
+            checkedAt: z.string(),
+            matched: z.array(
+              z.object({
+                elementId: z.number(),
+                hostName: z.string(),
+                foremanHostId: z.number(),
+                status: z.string().nullable(),
+              }),
+            ),
+            ghosts: z.array(
+              z.object({
+                elementId: z.number(),
+                orderId: z.number(),
+                productId: z.number(),
+                hostName: z.string(),
+              }),
+            ).openapi({
+              description:
+                'The portal believes it deployed these and Foreman has never heard of them. Not ' +
+                'proof that the machine is gone — a host removed from Foreman by hand looks ' +
+                'identical from here. The list worth looking at, not a verdict.',
+            }),
+            orphans: z.array(
+              z.object({
+                id: z.number(),
+                name: z.string().openapi({
+                  description: 'Foreman\'s `name`, which is the FQDN for a host it manages.',
+                }),
+                status: z.string().nullable().openapi({
+                  description: 'Foreman\'s own lifecycle word, e.g. `Active`. Shown, never matched on.',
+                }),
+                lastReportAt: z.string().nullable().openapi({
+                  description: 'When Foreman last heard from the host. Null for one that never reported.',
+                }),
+              }),
+            ).openapi({
+              description:
+                'Present in Foreman, matching nothing the portal ordered. Reported as unmanaged ' +
+                'rather than faulty: an estate predating the portal is full of them (#109). ' +
+                'Claimed across every environment this Foreman serves, not only the one asked about.',
+            }),
+            unidentified: z.array(
+              z.object({ elementId: z.number(), orderId: z.number(), productId: z.number() }),
+            ).openapi({
+              description:
+                'Active elements carrying no host name at all, so no comparison is possible. Kept ' +
+                'out of `ghosts`: "Foreman does not have this host" and "the portal never recorded ' +
+                'which host this is" are different problems with different fixes.',
+            }),
+          }),
+        },
+      },
+    },
+    400: { description: '`environmentId` is missing' },
+    401: { description: 'Unauthorized' },
+    403: { description: 'Forbidden: not root' },
+    404: { description: 'Integration or environment not found' },
+  },
+})
+
 // ─── Admin — CI Browser ───────────────────────────────────────────────────────
 
 registry.registerPath({
@@ -3998,6 +4882,69 @@ registry.registerPath({
   },
 })
 
+// ─── Admin — Inbound callback secret ──────────────────────────────────────────
+//
+// The secret a CI pipeline presents when it reports back to the portal. Kept off
+// the general environment create/get/update/list responses on purpose, and served
+// only here, root only — reading it is a decision like any other and is audited.
+
+const callbackSecretSchema = z.object({
+  callbackSecret: z.string().openapi({
+    description:
+      'Present it as the callback token on an inbound pipeline report. Rotating it invalidates ' +
+      'the copy the pipeline holds until the pipeline is updated.',
+  }),
+})
+
+registry.registerPath({
+  method: 'get',
+  path: '/admin/environments/{id}/callback-secret',
+  summary: '[root] Read an environment\'s inbound callback secret',
+  description:
+    'Served only from this route: the secret is stripped from the environment read paths, so it ' +
+    'cannot leak through a screen that does not need it. The read itself is recorded in the audit ' +
+    'log — "who looked at the secret" is a question worth being able to answer.',
+  tags: ['Admin'],
+  security: bearerAuth,
+  request: {
+    params: z.object({ id: z.string().openapi({ description: 'Environment id' }) }),
+  },
+  responses: {
+    200: {
+      description: 'The secret',
+      content: { 'application/json': { schema: callbackSecretSchema } },
+    },
+    400: { description: 'The id is not an id' },
+    401: { description: 'Unauthorized' },
+    403: { description: 'Forbidden: not root' },
+    404: { description: 'Environment not found' },
+  },
+})
+
+registry.registerPath({
+  method: 'post',
+  path: '/admin/environments/{id}/callback-secret',
+  summary: '[root] Regenerate an environment\'s inbound callback secret',
+  description:
+    'Issues a new secret and invalidates the old one immediately: a pipeline still holding the ' +
+    'previous value is rejected until it is updated. Audited.',
+  tags: ['Admin'],
+  security: bearerAuth,
+  request: {
+    params: z.object({ id: z.string().openapi({ description: 'Environment id' }) }),
+  },
+  responses: {
+    200: {
+      description: 'The new secret',
+      content: { 'application/json': { schema: callbackSecretSchema } },
+    },
+    400: { description: 'The id is not an id' },
+    401: { description: 'Unauthorized' },
+    403: { description: 'Forbidden: not root' },
+    404: { description: 'Environment not found' },
+  },
+})
+
 // ─── Admin — Cost Centers ─────────────────────────────────────────────────────
 
 registry.registerPath({
@@ -4115,6 +5062,365 @@ registry.registerPath({
     401: { description: 'Unauthorized' },
     403: { description: 'Forbidden' },
     404: { description: 'Not found' },
+  },
+})
+
+// ─── Admin — Budgets ──────────────────────────────────────────────────────────
+//
+// Root only, on every verb here, and deliberately NOT riding on the cost-centre
+// write above, which is `admin`. Renaming a cost centre and deciding what the
+// platform refuses to provision are different powers (#325).
+
+registry.registerPath({
+  method: 'get',
+  path: '/admin/cost-centers/budgets',
+  summary: '[root] Every cost centre\'s budget state',
+  description:
+    'The whole estate in one call, for the screen that shows what is spent where. Reading is ' +
+    'root-only for the same reason setting is: who may see a spending limit is the same question ' +
+    'as who may set one.',
+  tags: ['Admin'],
+  security: bearerAuth,
+  responses: {
+    200: {
+      description: 'One entry per cost centre, budget or not',
+      content: { 'application/json': { schema: z.array(budgetStateSchema) } },
+    },
+    401: { description: 'Unauthorized' },
+    403: { description: 'Forbidden: not root' },
+  },
+})
+
+registry.registerPath({
+  method: 'get',
+  path: '/admin/cost-centers/{id}/budget',
+  summary: '[root] A cost centre\'s budget state',
+  description:
+    'The STATE, not the stored row: `committed` and `remaining` are what say whether a budget ' +
+    'about to be set has already been spent, and they are what the screen shows beside the amount.',
+  tags: ['Admin'],
+  security: bearerAuth,
+  request: {
+    params: z.object({ id: z.string().openapi({ description: 'Cost centre id' }) }),
+  },
+  responses: {
+    200: {
+      description: 'Budget state, whether or not a budget is set',
+      content: { 'application/json': { schema: budgetStateSchema } },
+    },
+    400: { description: 'The id is not an id' },
+    401: { description: 'Unauthorized' },
+    403: { description: 'Forbidden: not root' },
+    404: { description: 'Cost centre not found' },
+  },
+})
+
+registry.registerPath({
+  method: 'put',
+  path: '/admin/cost-centers/{id}/budget',
+  summary: '[root] Set a cost centre\'s budget',
+  description:
+    'Replaces the budget wholesale and records it in the audit log. The currency is upper-cased ' +
+    'and shape-checked here rather than trusted: a budget stored as `eur` matches no exchange ' +
+    'rate, so every order in another currency lands as unconvertible and a `block` budget stops ' +
+    'blocking while still looking set.',
+  tags: ['Admin'],
+  security: bearerAuth,
+  request: {
+    params: z.object({ id: z.string().openapi({ description: 'Cost centre id' }) }),
+    body: {
+      content: {
+        'application/json': {
+          schema: z.object({
+            amount: z.number().min(0),
+            currency: z.string().openapi({
+              description:
+                'ISO-4217, stored upper-case. Need not have a stored exchange rate — spend in ' +
+                'the same currency converts trivially, and refusing the rest would reject working ' +
+                'configurations.',
+            }),
+            period: z.enum(['total', 'monthly']),
+            behaviour: z.enum(['warn', 'block']).openapi({
+              description:
+                '`warn` places the order and says so; `block` refuses it unless root waives it ' +
+                'with `overrideBudget`.',
+            }),
+          }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: 'Budget set, and its state after the change',
+      content: { 'application/json': { schema: budgetStateSchema } },
+    },
+    400: { description: 'Invalid request, or the id is not an id' },
+    401: { description: 'Unauthorized' },
+    403: { description: 'Forbidden: not root' },
+    404: { description: 'Cost centre not found' },
+  },
+})
+
+registry.registerPath({
+  method: 'delete',
+  path: '/admin/cost-centers/{id}/budget',
+  summary: '[root] Remove a cost centre\'s budget',
+  description:
+    'The cost centre stops refusing anything. Recorded in the audit log like any other change ' +
+    'to a spending limit — "nobody set it" and "somebody removed it" are different histories.',
+  tags: ['Admin'],
+  security: bearerAuth,
+  request: {
+    params: z.object({ id: z.string().openapi({ description: 'Cost centre id' }) }),
+  },
+  responses: {
+    200: {
+      description: 'Budget removed; the returned state has `amount: null`',
+      content: { 'application/json': { schema: budgetStateSchema } },
+    },
+    400: { description: 'The id is not an id' },
+    401: { description: 'Unauthorized' },
+    403: { description: 'Forbidden: not root' },
+    404: { description: 'Cost centre not found' },
+  },
+})
+
+// ─── Admin — Deployment windows ───────────────────────────────────────────────
+//
+// When provisioning may run (#330). Root only, reading as well as writing: the
+// windows are a statement about when the company is watching its own
+// infrastructure, and they are what an approved order waits on.
+
+const deploymentWindowSchema = z.object({
+  startMinute: z.number().int().min(0).max(1439).openapi({
+    description: 'Minutes past local midnight, in the settings\' `timeZone`.',
+  }),
+  durationMinutes: z.number().int().min(1).max(1440),
+})
+
+registry.registerPath({
+  method: 'get',
+  path: '/admin/deployment-windows',
+  summary: '[root] Read the deployment windows',
+  tags: ['Admin'],
+  security: bearerAuth,
+  responses: {
+    200: {
+      description: 'The time zone and every window, in the order they were written down',
+      content: {
+        'application/json': {
+          schema: z.object({
+            timeZone: z.string().openapi({
+              description:
+                'An IANA zone, validated by asking `Intl` rather than by matching a pattern: ' +
+                '"Europe/Berlin" and "Mars/Olympus" have the same shape.',
+            }),
+            windows: z.array(deploymentWindowSchema),
+          }),
+        },
+      },
+    },
+    401: { description: 'Unauthorized' },
+    403: { description: 'Forbidden: not root' },
+  },
+})
+
+registry.registerPath({
+  method: 'put',
+  path: '/admin/deployment-windows',
+  summary: '[root] Replace the deployment windows',
+  description:
+    'Replaces the set wholesale — the windows in the body are the windows afterwards. Whether ' +
+    'any environment actually respects them is a per-environment setting ' +
+    '(`PUT /admin/environments/{id}`, `respectsDeploymentWindows`).',
+  tags: ['Admin'],
+  security: bearerAuth,
+  request: {
+    body: {
+      content: {
+        'application/json': {
+          schema: z.object({
+            timeZone: z.string().min(1).max(64),
+            windows: z.array(deploymentWindowSchema).max(48).openapi({
+              description: 'Capped because the body is parsed into memory before anything else.',
+            }),
+          }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: 'Windows replaced',
+      content: {
+        'application/json': {
+          schema: z.object({ timeZone: z.string(), windows: z.array(deploymentWindowSchema) }),
+        },
+      },
+    },
+    400: { description: 'Invalid request: a window outside the day, or an unknown time zone' },
+    401: { description: 'Unauthorized' },
+    403: { description: 'Forbidden: not root' },
+  },
+})
+
+// ─── Admin — Holidays ─────────────────────────────────────────────────────────
+//
+// The holiday table (#330): the days the company does not deploy on, either
+// maintained by hand or pulled from a feed. Root only, every verb.
+
+const holidaySchema = z.object({
+  date: z.string().openapi({ description: 'YYYY-MM-DD.' }),
+  name: z.string(),
+  source: z.enum(['manual', 'feed']).openapi({
+    description:
+      'Where the row came from. A feed refresh never overwrites a manual entry for the same day.',
+  }),
+  observed: z.boolean().openapi({
+    description:
+      'Whether the company actually takes the day. Unticking a public holiday it works through ' +
+      'is a decision, so it is a field rather than a delete.',
+  }),
+})
+
+const holidayFeedStatusSchema = z.object({
+  url: z.string().nullable().openapi({ description: 'Null when no feed is configured.' }),
+  lastSuccessAt: z.string().nullable(),
+  lastError: z.string().nullable(),
+  lastErrorAt: z.string().nullable(),
+  ageDays: z.number().nullable(),
+  stale: z.boolean().openapi({ description: 'The last good read is older than the staleness limit.' }),
+  neverSucceeded: z.boolean().openapi({
+    description:
+      'A URL is set and has never read successfully. While this is true the windows do not apply ' +
+      'at all — the fail-closed rule, and the reason clearing the URL has to be possible.',
+  }),
+  observedCount: z.number(),
+})
+
+registry.registerPath({
+  method: 'get',
+  path: '/admin/holidays',
+  summary: '[root] Read the holidays and the state of the feed',
+  description:
+    'Holidays from today onwards: past ones are history, and a list that opens on last January is ' +
+    'a list nobody scrolls.',
+  tags: ['Admin'],
+  security: bearerAuth,
+  responses: {
+    200: {
+      description: 'The feed\'s state and the upcoming holidays',
+      content: {
+        'application/json': {
+          schema: z.object({
+            feed: holidayFeedStatusSchema,
+            holidays: z.array(holidaySchema),
+          }),
+        },
+      },
+    },
+    401: { description: 'Unauthorized' },
+    403: { description: 'Forbidden: not root' },
+  },
+})
+
+registry.registerPath({
+  method: 'patch',
+  path: '/admin/holidays',
+  summary: '[root] Configure or refresh the holiday feed',
+  description:
+    'Three actions, discriminated by `action`. `setFeed` with a null `url` CLEARS the feed, which ' +
+    'matters more than it looks: a URL that has never read successfully stops the windows applying ' +
+    'at all, so there has to be a way back that is not the database.',
+  tags: ['Admin'],
+  security: bearerAuth,
+  request: {
+    body: {
+      content: {
+        'application/json': {
+          schema: z.discriminatedUnion('action', [
+            z.object({
+              action: z.literal('setFeed'),
+              url: z.string().max(2048).nullable(),
+            }),
+            z.object({
+              action: z.literal('preview'),
+              url: z.string().min(1).max(2048).openapi({
+                description: 'Fetches and parses without storing, so the dates can be seen first.',
+              }),
+            }),
+            z.object({
+              action: z.literal('refresh').openapi({
+                description: 'Pulls now rather than waiting for the scheduler.',
+              }),
+            }),
+          ]),
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description:
+        'For `preview`, the parsed dates; for `refresh`, `{ refreshed: true, … }` or ' +
+        '`{ refreshed: false, error }` with a 200 — a feed that is down is news, not a server ' +
+        'error, and the cached dates are untouched either way',
+      content: { 'application/json': { schema: z.object({}).passthrough() } },
+    },
+    400: { description: 'Invalid request' },
+    401: { description: 'Unauthorized' },
+    403: { description: 'Forbidden: not root' },
+  },
+})
+
+registry.registerPath({
+  method: 'put',
+  path: '/admin/holidays',
+  summary: '[root] Add or update one holiday by hand',
+  tags: ['Admin'],
+  security: bearerAuth,
+  request: {
+    body: {
+      content: {
+        'application/json': {
+          schema: z.object({
+            date: z.string().openapi({ description: 'YYYY-MM-DD.' }),
+            name: z.string().min(1).max(200),
+            observed: z.boolean().optional().openapi({ description: 'Defaults to true.' }),
+          }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: 'Holiday stored',
+      content: { 'application/json': { schema: z.object({ success: z.boolean() }) } },
+    },
+    400: { description: 'Invalid request' },
+    401: { description: 'Unauthorized' },
+    403: { description: 'Forbidden: not root' },
+  },
+})
+
+registry.registerPath({
+  method: 'delete',
+  path: '/admin/holidays',
+  summary: '[root] Remove one holiday',
+  tags: ['Admin'],
+  security: bearerAuth,
+  request: {
+    query: z.object({ date: z.string().openapi({ description: 'The holiday to remove, YYYY-MM-DD.' }) }),
+  },
+  responses: {
+    200: {
+      description: 'Holiday removed',
+      content: { 'application/json': { schema: z.object({ success: z.boolean() }) } },
+    },
+    400: { description: '`date` is missing or not a date' },
+    401: { description: 'Unauthorized' },
+    403: { description: 'Forbidden: not root' },
   },
 })
 
@@ -4365,15 +5671,6 @@ registry.registerPath({
 
 // ─── Admin — Branding ─────────────────────────────────────────────────────────
 
-const brandingSchema = z.object({
-  id: z.number().optional(),
-  primaryColor: z.string().nullable(),
-  secondaryColor: z.string().nullable(),
-  shopName: z.string().nullable(),
-  shopSubtitle: z.string().nullable(),
-  imprintText: z.string().nullable(),
-  logoMime: z.string().nullable(),
-})
 
 registry.registerPath({
   method: 'get',
