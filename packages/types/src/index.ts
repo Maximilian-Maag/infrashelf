@@ -1063,10 +1063,25 @@ export interface Order {
   /**
    * Set when policy allowed the order but had something to say (#110) — the
    * policy's own message, or the reason a `best_effort` engine could not be
-   * asked. Placed on the created order for the same reason `budgetWarning` is: a
-   * warning nobody sees is indistinguishable from no warning.
+   * asked.
+   *
+   * Stored on the order since #526, so this is the sentence the order itself
+   * carries: returned to the caller who placed it, shown on the approval row to
+   * whoever can still act on it, and readable on the order detail page long after
+   * both. Null when policy had nothing to say.
    */
-  policyWarning?: string
+  policyWarning?: string | null
+  /**
+   * Set when policy held this order for somebody else's approval (#110, #517) —
+   * the rule that asked, so the person who placed it is not left watching an
+   * order that never starts.
+   *
+   * Not a warning: an admin's order normally provisions the moment it is placed,
+   * and this one waits instead. Present on the order the placement returns, and
+   * deliberately separate from `policyWarning` so a caller never has to tell the
+   * two apart by their sentences.
+   */
+  policyApprovalRequired?: string
   /**
    * The cost centre as a person refers to it — `IT-4711 — Platform Networking`.
    *

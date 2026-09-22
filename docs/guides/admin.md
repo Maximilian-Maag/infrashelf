@@ -105,6 +105,11 @@ committed against what limit, and which of the two behaviours root configured:
   **warn**. Approving works normally and the audit log gets an
   `order.budget_warning` entry.
 
+A row can also carry a **policy warning**: what a rule said about the order when it
+was placed. It is on the order itself, so it survives the request — the approver is
+the last person who can still act on it, which is why it is here rather than only on
+the page the person who placed it saw.
+
 Rows whose budget still has room say nothing, and so do orders against a cost
 centre with no budget at all. The check runs when the approval is *granted*, so
 without this notice a block would only announce itself after you clicked. See

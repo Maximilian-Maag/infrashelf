@@ -57,7 +57,13 @@ const product = {
 } as unknown as ProductDetail
 
 beforeEach(() => {
-  mockedPost.mockReset().mockResolvedValue(undefined as never)
+  /*
+   * A body, because that is what the endpoint returns: the created order. It was
+   * `undefined` and the form tolerated it, which stopped being true when the form
+   * started reading the verdicts off it (#526) — and a 200 with no body is not
+   * something the route does.
+   */
+  mockedPost.mockReset().mockResolvedValue({ id: 1 } as never)
   mockedGet.mockReset()
   // Templates lookup (fired on project selection) — not exercised here.
   mockedGet.mockResolvedValue([] as never)
@@ -693,5 +699,65 @@ describe('OrderForm offers root the escape from a refusal (#509)', () => {
     const body = mockedPost.mock.calls[2][1] as Record<string, unknown>
     expect(body.overridePolicy).toBeUndefined()
     expect(body.overrideBudget).toBeUndefined()
+  })
+})
+
+/**
+ * What the server said about the order it just placed (#526).
+ *
+ * The cart has shown these since #325 and #517 — it stays on the page and prints
+ * the verdicts above the orders it placed. The form navigated away on success and
+ * threw them away, so the same verdict reached one of the two ways an order can be
+ * placed and not the other.
+ */
+describe('OrderForm placed verdicts', () => {
+  const projects = [{ id: 5, name: 'Proj', costCenterId: null }] as never
+
+  async function place() {
+    const user = userEvent.setup()
+    render(<OrderForm product={product} projects={projects} costCenters={[]} />)
+    await user.selectOptions(screen.getByLabelText(/environment/i), '1')
+    await user.selectOptions(await screen.findByLabelText(/project/i), '5')
+    await user.click(screen.getByRole('button', { name: /place order/i }))
+    return user
+  }
+
+  it('shows a policy warning instead of redirecting past it', async () => {
+    mockedPost.mockResolvedValueOnce({
+      id: 9,
+      policyWarning: 'This project is near its VM limit.',
+    })
+
+    await place()
+
+    expect(await screen.findByText(/This order went through with a policy warning/i)).toBeInTheDocument()
+    expect(screen.getByText(/near its VM limit/i)).toBeInTheDocument()
+    // Not the success banner: the order was placed, but not as it would have been.
+    expect(screen.queryByText(/Redirecting/i)).not.toBeInTheDocument()
+  })
+
+  it('says the order is waiting when a rule asked for a person', async () => {
+    // Not a warning — the order is in the queue instead of built — so it must not
+    // be dressed as one (#517).
+    mockedPost.mockResolvedValueOnce({
+      id: 9,
+      policyApprovalRequired: 'Refused by rule sod/production: a second person must approve.',
+    })
+
+    await place()
+
+    expect(await screen.findByText(/Needs approval/i)).toBeInTheDocument()
+    expect(screen.getByText(/sod\/production/)).toBeInTheDocument()
+    expect(screen.queryByText(/This order went through with a policy warning/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Redirecting/i)).not.toBeInTheDocument()
+  })
+
+  it('redirects as before when the server had nothing to add', async () => {
+    mockedPost.mockResolvedValueOnce({ id: 9 })
+
+    await place()
+
+    expect(await screen.findByText(/Redirecting/i)).toBeInTheDocument()
+    expect(screen.queryByText(/This order went through with a policy warning/i)).not.toBeInTheDocument()
   })
 })

@@ -278,6 +278,29 @@ describe('OrderDetailPage', () => {
     expect(screen.queryByText('no budget this quarter')).not.toBeInTheDocument()
   })
 
+  /*
+   * #110 / #526. The warning is a property of the order, written when it was
+   * placed, and this page is where an order is read afterwards — by its owner, by
+   * the approver who never saw it, by whoever asks why it went through.
+   *
+   * Unlike the rejection note it is not gated on a status: a rule's warning stays
+   * true of the order whatever happened to it afterwards.
+   */
+  it('shows what policy said about the order when it was placed', async () => {
+    answer({ order: order({ status: 'active', policyWarning: 'This project is near its VM limit.' } as never) })
+    render(await OrderDetailPage({ params }))
+
+    expect(screen.getByText(/This order went through with a policy warning/i)).toBeInTheDocument()
+    expect(screen.getByText('This project is near its VM limit.')).toBeInTheDocument()
+  })
+
+  it('shows nothing about policy for an order that raised no warning', async () => {
+    answer({ order: order({ status: 'active', policyWarning: null } as never) })
+    render(await OrderDetailPage({ params }))
+
+    expect(screen.queryByText(/This order went through with a policy warning/i)).not.toBeInTheDocument()
+  })
+
   it('offers write-off only to root, and only from provisioning', async () => {
     // The one status that has no other way out. The server checks both again;
     // this is about not offering what will be refused.

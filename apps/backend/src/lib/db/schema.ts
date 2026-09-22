@@ -906,6 +906,20 @@ export const orders = pgTable('orders', {
   // before this existed have no snapshot, and inventing one would be a lie.
   productSnapshot: jsonb('product_snapshot').$type<ProductSnapshot>(),
   rejectionNote: text('rejection_note'),
+  /*
+   * What policy said about this order when it was placed (#110, #526).
+   *
+   * `warn` means "tell me, do not refuse me", and the sentence was returned to
+   * the caller and written to the audit log and stored nowhere — so an order
+   * placed against a rule's advice was, a week later, indistinguishable from one
+   * that raised nothing, on every page that shows an order.
+   *
+   * The row is the record: whoever opens the order, and the approver who is the
+   * last person able to act on it, read it here. Null means policy had nothing to
+   * say (including for orders placed before this existed, where the sentence is
+   * not recoverable and inventing one would be a lie).
+   */
+  policyWarning: text('policy_warning'),
   pipelineId: jsonb('pipeline_id').$type<string[]>().notNull().default([]),
   // Per-pipeline terminal status keyed by pipeline id, e.g.
   // { "pipe-a": "success", "pipe-b": "failed" }. Lets a multi-pipeline order

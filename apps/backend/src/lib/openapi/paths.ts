@@ -34,6 +34,12 @@ const orderSchema = z.object({
   parameters: z.record(z.string()).nullable(),
   costCenterId: z.number().nullable(),
   rejectionNote: z.string().nullable(),
+  policyWarning: z.string().nullable().openapi({
+    description:
+      'What policy said about this order when it was placed (#110), or null when it had nothing to ' +
+      'say. Stored on the order since #526, so it is readable on the detail view and on the ' +
+      'approvals row rather than only in the response to the placement.',
+  }),
   pipelineId: z.array(z.string()).nullable(),
   createdAt: z.string().nullable(),
   updatedAt: z.string().nullable(),
