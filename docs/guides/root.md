@@ -645,8 +645,11 @@ when its deployment window opens. Between the two, a rule can be added that
 would have refused the order and a ceiling can be lowered, and the second ask is
 the last moment either can change the outcome. An approval refused this way
 leaves the order **pending**, not rejected: raise the budget, or change the rule,
-and it can be approved again. Root may waive a policy refusal at that moment too,
-recorded as `order.policy_overridden` with the rule that was waived.
+and it can be approved again. Root may waive either refusal at that moment — the
+policy as `order.policy_overridden`, naming the rule that was waived, and the
+budget as `order.budget_overridden`, naming the cost centre and its state — and
+both are reachable from the row that showed the refusal, with a **Place anyway**
+control. Not root: the reason, and nothing else.
 
 **An order waiting for its deployment window counts against its budget.** It has
 been approved and its cost is committed, so the room it needs is not available to
@@ -697,7 +700,7 @@ Logged action types (this list has grown since the feature was first documented 
 | `cost_center.created` / `cost_center.updated` | A cost centre is added or edited |
 | `cost_center.budget_set` / `cost_center.budget_cleared` | A cost centre's budget is set, changed or removed (5.1) |
 | `order.budget_warning` | An order went through with its cost centre's budget already spent, under a `warn` budget |
-| `order.budget_overridden` | Root placed an order against a spent `block` budget |
+| `order.budget_overridden` | Root placed — or approved — an order against a spent `block` budget |
 | `order.policy_warning` | An order went through that the policy engine allowed with a warning (5b) |
 | `order.policy_overridden` | Root placed (or approved) an order a policy refused, naming the rule that was waived (5b) |
 | `order.policy_denied` | A policy refused an order as it was about to be built — at an approval, or when a deployment window opened (5b) |

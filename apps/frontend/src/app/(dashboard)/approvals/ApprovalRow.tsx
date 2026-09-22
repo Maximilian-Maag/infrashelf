@@ -2,8 +2,8 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import type { BudgetState, Order } from '@infrashelf/types'
-import { post } from '@/lib/api'
+import type { BudgetState, Order, Role } from '@infrashelf/types'
+import { post, ApiError } from '@/lib/api'
 import { Button } from '@/components/ui/Button'
 import { Alert } from '@/components/ui/Alert'
 import { StatusBadge } from '@/components/ui/StatusBadge'
@@ -19,6 +19,17 @@ interface Props {
    * out before clicking rather than after.
    */
   currentUserId: number
+  /**
+   * Whether this viewer is offered the escapes from a refusal (#514).
+   *
+   * Passed in rather than read from a session hook: the page is a server
+   * component that already has the role, and a client-side session lookup here
+   * would be a second, weaker answer to a question the server has. The backend
+   * re-checks the role — this decides only whether the control is rendered.
+   * Defaulted to the role that gets nothing, so a caller that forgets it fails
+   * closed.
+   */
+  role?: Role
 }
 
 /**
@@ -45,30 +56,71 @@ function BudgetNotice({ budget, lang }: { budget?: BudgetState | null; lang: str
   )
 }
 
-export function ApprovalRow({ order, currentUserId }: Props) {
+export function ApprovalRow({ order, currentUserId, role = 'project_manager' }: Props) {
   const router = useRouter()
   const lang = useLang()
   const [rejecting, setRejecting] = useState(false)
   const [rejectionNote, setRejectionNote] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  /*
+   * The refusal the last approval came back with, when there is an escape from it
+   * (#514). A code rather than a flag, because which escape applies is which gate
+   * refused — the budget and the policy are separate rights, and sending the wrong
+   * one waives nothing.
+   */
+  const [refusal, setRefusal] = useState<'budget_blocked' | 'policy_denied' | null>(null)
+  /*
+   * The waivers already exercised in this refusal chain (see OrderForm, #515).
+   *
+   * The policy gate is asked BEFORE the budget one, so waiving the policy can
+   * uncover a budget refusal underneath it — retrying with only the flag for the
+   * refusal in hand would drop the waiver already made and the two would alternate
+   * for ever. Cleared on a fresh Approve, which is a fresh decision.
+   */
+  const [retryOverrides, setRetryOverrides] = useState<{
+    overrideBudget?: boolean
+    overridePolicy?: boolean
+  }>({})
   const [done, setDone] = useState(false)
 
-  async function handleApprove() {
+  async function handleApprove(overrides: { overrideBudget?: boolean; overridePolicy?: boolean } = {}) {
+    const carried = Object.keys(overrides).length > 0 ? { ...retryOverrides, ...overrides } : {}
+    setRetryOverrides(carried)
     setLoading(true)
     setError(null)
+    setRefusal(null)
     try {
       // /api/approvals, not /api/orders: the approve and reject endpoints live
       // under the approvals resource, and this pointed at a path the backend has
       // never served.
-      await post(`/api/approvals/${order.id}/approve`, {})
+      await post(`/api/approvals/${order.id}/approve`, carried)
       setDone(true)
       router.refresh()
     } catch (err) {
       setError(err instanceof Error ? err.message : t('failedToApprove', lang))
+      const code = err instanceof ApiError ? err.code : undefined
+      // Root, and only for the two refusals that HAVE an escape: a code this row
+      // does not know is not an invitation to guess at one.
+      setRefusal(
+        role === 'root' && (code === 'budget_blocked' || code === 'policy_denied') ? code : null,
+      )
     } finally {
       setLoading(false)
     }
+  }
+
+  /**
+   * Root's escape from the refusal just shown (#325, #110, #514).
+   *
+   * The flag follows the refusal that produced it; the earlier flags of the chain
+   * are carried along. Both are audited server-side with the rule or the budget
+   * that was waived.
+   */
+  async function approveAnyway() {
+    await handleApprove(
+      refusal === 'budget_blocked' ? { overrideBudget: true } : { overridePolicy: true },
+    )
   }
 
   async function handleReject(e: React.FormEvent) {
@@ -138,7 +190,7 @@ export function ApprovalRow({ order, currentUserId }: Props) {
               <Button
                 size="sm"
                 variant="primary"
-                onClick={handleApprove}
+                onClick={() => handleApprove()}
                 disabled={loading}
               >
                 {t('approve', lang)}
@@ -159,6 +211,24 @@ export function ApprovalRow({ order, currentUserId }: Props) {
       {error && (
         <Alert className="mt-3">
           {error}
+          {/* The escape, and only where there is one to offer (#514). Inside the
+              alert rather than beside it: it answers this refusal, so the live
+              region that announced the refusal carries its remedy. */}
+          {refusal && (
+            <div className="mt-3">
+              <p className="text-sm">{t('placeAnywayHint', lang)}</p>
+              <Button
+                type="button"
+                variant="danger"
+                size="sm"
+                className="mt-2"
+                disabled={loading}
+                onClick={approveAnyway}
+              >
+                {t('placeAnyway', lang)}
+              </Button>
+            </div>
+          )}
         </Alert>
       )}
 

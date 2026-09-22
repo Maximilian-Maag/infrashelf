@@ -51,6 +51,16 @@ export interface CommitContext {
   actor?: CommitActor | null
   /** Root's escape from a policy refusal, as on the ordering path (#110). */
   overridePolicy?: boolean
+  /**
+   * Root's escape from a budget refusal, as on the ordering path (#325) (#514).
+   *
+   * The same right, and it was missing here: root could place an order against a
+   * spent budget and then not approve one, which is the path where the money is
+   * actually spent. A ceiling that moves while an order waits is refused here by
+   * design (#511), and the operator facing that during an incident needs the
+   * escape that already exists one step earlier.
+   */
+  overrideBudget?: boolean
 }
 
 export interface CommitVerdict {
@@ -128,13 +138,29 @@ export const recheckOrderGates = async (
   const budget = costCenterId === null ? null : await loadBudgetState(costCenterId)
   if (budget && budget.amount !== null && budget.behaviour === 'block' && budget.committed > budget.amount) {
     const message = overBudgetMessage(budget)
+    /*
+     * Root's escape, the same right as on the ordering path (#325, #514) and
+     * recorded the same way. The refusal is what happens when an operator without
+     * it — or without asking for it — commits against a ceiling that moved.
+     */
+    const waived = context.overrideBudget === true && context.actor?.role === 'root'
+    if (!waived) {
+      await logAudit(
+        context.actor?.id ?? null,
+        'order.budget_denied',
+        orderId,
+        `${who} could not commit order #${orderId} ${context.seam}: ${message}`,
+      )
+      // Named so a client can offer the escape above rather than matching on this
+      // sentence (#509's plumbing, extended to the commit gates by #514).
+      return err(409, message, 'budget_blocked')
+    }
     await logAudit(
       context.actor?.id ?? null,
-      'order.budget_denied',
+      'order.budget_overridden',
       orderId,
-      `${who} could not commit order #${orderId} ${context.seam}: ${message}`,
+      `${context.actor?.email} waived the budget refusal on order #${orderId} ${context.seam}: ${message}`,
     )
-    return err(409, message)
   }
 
   /*
@@ -159,7 +185,7 @@ export const recheckOrderGates = async (
       `${who} could not commit order #${orderId} ${context.seam}: its requester could not be read, ` +
         `so the policy could not be asked.`,
     )
-    return err(409, 'This order\u2019s requester could not be read, so policy could not be asked about it.')
+    return err(409, 'This order\u2019s requester could not be read, so policy could not be asked about it.', 'policy_denied')
   }
 
   const source: OrderDocumentSource = {
@@ -188,7 +214,7 @@ export const recheckOrderGates = async (
         orderId,
         `${who} could not commit order #${orderId} ${context.seam}: ${verdict.message ?? 'refused by policy'}`,
       )
-      return err(409, verdict.message ?? 'This order is not permitted by policy.')
+      return err(409, verdict.message ?? 'This order is not permitted by policy.', 'policy_denied')
     }
 
     await logAudit(

@@ -181,6 +181,64 @@ describe('listApprovals', () => {
       expect(result.ok).toBe(true)
     })
 
+    /*
+     * #514. The budget half of the escape existed on the ORDERING path (#325) and
+     * was missing here, which is backwards: the approval is where the money is
+     * spent, and it is the path where a ceiling that moved while the order waited
+     * shows up at all (#511). A root operator could place an order against a spent
+     * budget and not approve one.
+     */
+    it('lets root waive the budget refusal at the moment of approval (#514)', async () => {
+      const base = await overspentWhileWaiting()
+      const root = await createUser({ role: 'root', email: 'root@test.dev', name: 'Root' })
+
+      const result = await approveOrder(makeSession(root), base.order.id, { overrideBudget: true })
+
+      expect(result.ok).toBe(true)
+      // Built, not merely marked: the waiver is the whole point of the escape.
+      expect(await db.select().from(infrastructureElements)).toHaveLength(1)
+      const entries = await db
+        .select()
+        .from(auditLog)
+        .where(eq(auditLog.action, 'order.budget_overridden'))
+      expect(entries).toHaveLength(1)
+      expect(entries[0].details).toContain('over budget')
+      expect(entries[0].details).toContain('when it was approved')
+      expect(entries[0].userId).toBe(root.id)
+    })
+
+    it('refuses the waiver from a non-root approver, and from a root who did not ask', async () => {
+      const base = await overspentWhileWaiting()
+      const root = await createUser({ role: 'root', email: 'root2@test.dev', name: 'Root' })
+
+      const admin = await approveOrder(makeSession(base.admin), base.order.id, { overrideBudget: true })
+      // The flag is not standing in for the role (#195's rule), and it is not
+      // standing in for the DECISION either: without it, root is refused like
+      // anybody else, so the escape is never taken by accident.
+      expect(admin.ok).toBe(false)
+
+      const unasked = await approveOrder(makeSession(root), base.order.id)
+      expect(unasked.ok).toBe(false)
+      if (unasked.ok) return
+      expect(unasked.status).toBe(409)
+
+      const [row] = await db.select().from(orders).where(eq(orders.id, base.order.id))
+      expect(row.status).toBe('pending')
+    })
+
+    it('names the budget refusal, so a client can offer the escape (#514)', async () => {
+      // The code is what lets the queue row tell a budget refusal from a policy
+      // one. Both are 409s with prose written for a person, and a client matching
+      // on that prose would offer the wrong waiver the first time it is reworded.
+      const base = await overspentWhileWaiting()
+
+      const result = await approveOrder(makeSession(base.admin), base.order.id)
+
+      expect(result.ok).toBe(false)
+      if (result.ok) return
+      expect(result.code).toBe('budget_blocked')
+    })
+
     it('commits anyway when the budget only warns', async () => {
       /*
        * The control for the two refusals above, and the one a wrong check would

@@ -90,6 +90,7 @@ export default async function ApprovalsPage() {
               key={order.id}
               order={order}
               currentUserId={currentUserId}
+              role={role}
             />
           ))}
         </div>
