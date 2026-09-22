@@ -26,9 +26,30 @@ export async function POST(
   const orderId = parseRouteId(id)
   if (orderId === null) return invalidId('order id')
 
-  const outcome = await deployScheduledOrderNow(orderId, session, new Date())
+  /*
+   * Root's escapes, read from the body (#519). This route is root-only, so the
+   * role check has already happened — but whether a privilege exists is still
+   * decided against the session (inside `recheckOrderGates`) and never by the
+   * flag, which is only what the caller asked for.
+   *
+   * Parsed leniently, like the approve route: every existing caller posts no
+   * body, and `?? {}` as well as the catch because a body of literal `null`
+   * parses and it is the property read after it that throws.
+   */
+  const body = ((await req.json().catch(() => null)) ?? {}) as {
+    overridePolicy?: unknown
+    overrideBudget?: unknown
+  }
+
+  const outcome = await deployScheduledOrderNow(orderId, session, new Date(), {
+    overridePolicy: body.overridePolicy === true,
+    overrideBudget: body.overrideBudget === true,
+  })
   if (!outcome.ok) {
-    return NextResponse.json({ error: outcome.message }, { status: outcome.status })
+    return NextResponse.json(
+      { error: outcome.message, ...(outcome.code ? { code: outcome.code } : {}) },
+      { status: outcome.status },
+    )
   }
   return NextResponse.json({ success: true })
 }

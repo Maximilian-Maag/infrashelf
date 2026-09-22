@@ -174,7 +174,8 @@ export const deployScheduledOrderNow = async (
   orderId: number,
   actor: { id: number; email: string; role?: Role },
   now: Date,
-): Promise<{ ok: true } | { ok: false; status: number; message: string }> => {
+  overrides: { overridePolicy?: boolean; overrideBudget?: boolean } = {},
+): Promise<{ ok: true } | { ok: false; status: number; message: string; code?: string }> => {
   /*
    * The gates, before the claim (#511): root deploying a scheduled order early
    * is the same commitment as approving it, a day later than the decision, so the
@@ -185,12 +186,21 @@ export const deployScheduledOrderNow = async (
    * either have to roll that record back — losing the fact that root tried — or
    * leave an order provisioned against a spent budget. Asking first costs one
    * engine call on a button a human presses.
+   *
+   * `overrides` reaches the same escapes the approval has (#519): this route is
+   * root-only, and a refusal here is an order that cannot be built at all until
+   * somebody changes a budget or a rule — the incident #325's escape exists for.
+   * The role is still checked in `recheckOrderGates` rather than here.
    */
   const gates = await recheckOrderGates(orderId, {
     seam: 'when it was deployed outside its window',
     actor: actor.role ? { id: actor.id, email: actor.email, role: actor.role } : null,
+    overridePolicy: overrides.overridePolicy,
+    overrideBudget: overrides.overrideBudget,
   })
-  if (!gates.ok) return { ok: false, status: gates.status, message: gates.message }
+  if (!gates.ok) {
+    return { ok: false, status: gates.status, message: gates.message, ...(gates.code ? { code: gates.code } : {}) }
+  }
 
   /*
    * The claim and its audit entry in ONE transaction.
