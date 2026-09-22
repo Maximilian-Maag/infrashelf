@@ -137,6 +137,44 @@ describe('committed spend includes what has only been asked for', () => {
 
     expect((await loadBudgetState(s.centre.id))?.committed).toBe(300)
   })
+
+  /*
+   * An order waiting for its deployment window (#512).
+   *
+   * `'scheduled'` was missing from the list above, so an order approved outside
+   * a window dropped out of `committed` the moment it was scheduled and came
+   * back when the window opened. In between the budget showed room that was
+   * already spoken for.
+   */
+  it('counts an order waiting for its deployment window', async () => {
+    const s = await scene('100.00')
+    await db.update(projects).set({ costCenterId: s.centre.id }).where(eq(projects.id, s.project.id))
+    await setBudget(s.centre.id, { amount: '150.00', currency: 'EUR', period: 'total', behaviour: 'block' })
+    await placeOrder(s, { status: 'scheduled' })
+
+    expect((await loadBudgetState(s.centre.id))?.committed).toBe(100)
+  })
+
+  it('leaves no room for the second order a waiting one has already spoken for', async () => {
+    /*
+     * The overspend this pins: with the waiting order invisible, a second order
+     * of the same size was accepted against the same money — because the gate
+     * asked "would THIS order take it over" of a `committed` that did not
+     * include the order already approved and waiting for the same budget.
+     */
+    const s = await scene('400.00')
+    await db.update(projects).set({ costCenterId: s.centre.id }).where(eq(projects.id, s.project.id))
+    await setBudget(s.centre.id, { amount: '500.00', currency: 'EUR', period: 'total', behaviour: 'block' })
+    await placeOrder(s, { status: 'scheduled' })
+
+    const verdict = await checkBudget(s.centre.id, new Date(), {
+      price: '400.00',
+      currency: 'EUR',
+      quantity: 1,
+    })
+
+    expect(verdict.outcome).toBe('block')
+  })
 })
 
 describe('the window a budget applies over', () => {

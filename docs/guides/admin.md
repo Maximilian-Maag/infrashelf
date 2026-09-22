@@ -102,6 +102,18 @@ centre with no budget at all. The check runs when the approval is *granted*, so
 without this notice a block would only announce itself after you clicked. See
 the root guide §5.1 for how budgets are set.
 
+**The gates are asked again when you approve** (#511). Approving is a second
+decision, taken later than the request: the budget may have been lowered, or a
+policy added that would have refused the order. So the budget and the policy are
+both asked once more at the moment of commitment, and if either refuses, the
+approval is refused with the reason — the order stays **pending**, and can be
+approved again once the budget is raised or the rule changed.
+
+The same applies when a deployment window opens: an order that waited for its
+window is re-checked before it deploys, and one that no longer passes goes back
+to the approvals queue rather than being built. See the root guide §5b for
+policies and the `order.budget_denied` / `order.policy_denied` audit entries.
+
 ### 3.2 Rejecting an Order
 
 1. Open an order under **Approvals → Open**

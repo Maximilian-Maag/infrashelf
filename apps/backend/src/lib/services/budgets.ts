@@ -30,8 +30,18 @@ import { linePriceSql, lineCurrencySql } from '@/lib/services/sizes'
  * because none of them has been built yet, and then collectively blow it the
  * moment they are approved. So a budget check counts what has been asked for
  * as well as what exists.
+ *
+ * ── And `scheduled`, which it did NOT until #512 ────────────────────────────
+ *
+ * An order approved outside a deployment window (#330) moves to `scheduled` and
+ * waits — sometimes until the next working day. That state was missing from this
+ * list, so its cost fell out of `committed` the moment it was scheduled and came
+ * back when the window opened. In between, the budget showed room that was
+ * already spoken for: further orders were accepted against it, and when the
+ * windows opened the estate was over budget with every individual check having
+ * passed.
  */
-export const COMMITTED_STATUSES = ['pending', 'provisioning', 'completed'] as const
+export const COMMITTED_STATUSES = ['pending', 'scheduled', 'provisioning', 'completed'] as const
 
 type Db = typeof db
 /** The handle a `db.transaction` callback receives. */

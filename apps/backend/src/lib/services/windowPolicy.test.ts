@@ -1,14 +1,15 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { eq, sql } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import {
   appConfig, auditLog, deploymentEnvironments, deploymentWindows, holidays,
-  holidayFeedState, orders,
+  holidayFeedState, orders, costCenters, projects,
 } from '@/lib/db/schema'
 import {
   createUser, createCategory, createProduct, createCiSource,
-  createEnvironment, createProject, createOrder,
+  createEnvironment, createProject, createOrder, createCostCenter, linkProductEnvironment,
 } from '@/test/helpers'
+import { createIntegration } from '@/lib/services/admin/integrations'
 import {
   loadWindowPolicy, whenMayItDeploy, dueScheduledOrders, releaseDueScheduledOrders,
   deployScheduledOrderNow,
@@ -353,6 +354,113 @@ describe('releaseDueScheduledOrders', () => {
     expect(out.released).toEqual([])
     expect(vi.mocked(provisionOrderElements)).not.toHaveBeenCalled()
   })
+
+  /*
+   * The sweep asks the gates too (#511).
+   *
+   * This is the path where an order installs itself hours or days after anybody
+   * looked at it, so it is the one where the budget and the policy have most
+   * obviously had time to change — and it used to ask neither. A refusal here is
+   * a decision for a person, so the order goes back to the approvals queue
+   * rather than to 'scheduled', where the next sweep would pick it up again
+   * every minute.
+   */
+  describe('the gates, re-asked when the window opens', () => {
+    afterEach(() => vi.restoreAllMocks())
+
+    const withEngine = async () => {
+      const root = await createUser({ role: 'root', email: `root-${Math.random()}@test.dev` })
+      await createIntegration(root.id, {
+        kind: 'opa',
+        name: 'Policy engine',
+        baseUrl: 'https://opa.example.com',
+        authType: 'none',
+        failureMode: 'blocking',
+      })
+    }
+
+    const deny = () =>
+      vi.spyOn(global, 'fetch').mockResolvedValue(
+        new Response(
+          JSON.stringify({ result: { decision: 'deny', rule: 'quota/vm-count', message: 'At the limit' } }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+      )
+
+    /** A due order whose budget was lowered under it while it waited. */
+    const overspentDueOrder = async () => {
+      const { user, product, environment, project } = await setup()
+      await linkProductEnvironment(product.id, environment.id, { price: '400.00', currency: 'EUR' })
+      const centre = await createCostCenter()
+      await db.update(costCenters).set({
+        budgetAmount: '500.00', budgetCurrency: 'EUR', budgetPeriod: 'total', budgetBehaviour: 'block',
+      }).where(eq(costCenters.id, centre.id))
+      await db.update(projects).set({ costCenterId: centre.id }).where(eq(projects.id, project.id))
+      const order = await createOrder(project.id, product.id, environment.id, user.id, { status: 'pending' })
+      await db
+        .update(orders)
+        .set({ status: 'scheduled', scheduledFor: new Date(AT.getTime() - 60_000) })
+        .where(eq(orders.id, order.id))
+      await db.update(costCenters).set({ budgetAmount: '100.00' }).where(eq(costCenters.id, centre.id))
+      return { order }
+    }
+
+    it('does not provision an order whose budget no longer allows it', async () => {
+      await overspentDueOrder()
+
+      const out = await releaseDueScheduledOrders(AT)
+
+      expect(vi.mocked(provisionOrderElements)).not.toHaveBeenCalled()
+      expect(out.released).toEqual([])
+      expect(out.failed[0].reason).toMatch(/over budget/i)
+    })
+
+    it('returns it to the approval queue rather than rescheduling it', async () => {
+      // 'scheduled' would put it straight back where the next sweep picks it up,
+      // retrying and re-logging every minute until somebody noticed.
+      const { order } = await overspentDueOrder()
+
+      await releaseDueScheduledOrders(AT)
+
+      expect((await reload(order.id)).status).toBe('pending')
+    })
+
+    it('does not provision an order a policy denies by then', async () => {
+      const order = await dueOrder()
+      await withEngine()
+      deny()
+
+      const out = await releaseDueScheduledOrders(AT)
+
+      expect(vi.mocked(provisionOrderElements)).not.toHaveBeenCalled()
+      expect(out.failed[0].reason).toContain('quota/vm-count')
+      expect((await reload(order.id)).status).toBe('pending')
+    })
+
+    it('records the refusal against the seam that made it', async () => {
+      // The sweep has no actor, so the entry says so — 'null' is the convention
+      // its `order.window_opened` entry already follows.
+      await dueOrder()
+      await withEngine()
+      deny()
+
+      await releaseDueScheduledOrders(AT)
+
+      const calls = vi.mocked(logAudit).mock.calls
+      const denial = calls.find((c) => c[1] === 'order.policy_denied')
+      expect(denial).toBeTruthy()
+      expect(String(denial?.[3])).toContain('when its deployment window opened')
+    })
+
+    it('still provisions what still fits, when nothing has changed', async () => {
+      const order = await dueOrder()
+
+      const out = await releaseDueScheduledOrders(AT)
+
+      expect(out.released).toEqual([order.id])
+      expect((await reload(order.id)).status).toBe('provisioning')
+    })
+  })
 })
 
 /*
@@ -497,5 +605,90 @@ describe('deployScheduledOrderNow', () => {
 
   it('is a 404 for an order that does not exist', async () => {
     expect(await deployScheduledOrderNow(999_999, ROOT, AT)).toMatchObject({ ok: false, status: 404 })
+  })
+
+  /*
+   * Deploying early is the same commitment as approving, taken later than the
+   * decisions behind it, so the gates are asked here too (#511). Before the
+   * claim rather than after: the claim writes the window override and its audit
+   * entry in one transaction, and refusing afterwards would either lose the
+   * record that root tried or provision against a spent budget.
+   */
+  describe('the gates, re-asked before the window is overridden', () => {
+    afterEach(() => vi.restoreAllMocks())
+
+    /** A scheduled order whose budget was lowered under it while it waited. */
+    const overspentScheduledOrder = async () => {
+      const { user, product, environment, project } = await setup()
+      await linkProductEnvironment(product.id, environment.id, { price: '400.00', currency: 'EUR' })
+      const centre = await createCostCenter()
+      await db.update(costCenters).set({
+        budgetAmount: '500.00', budgetCurrency: 'EUR', budgetPeriod: 'total', budgetBehaviour: 'block',
+      }).where(eq(costCenters.id, centre.id))
+      await db.update(projects).set({ costCenterId: centre.id }).where(eq(projects.id, project.id))
+      const order = await createOrder(project.id, product.id, environment.id, user.id, { status: 'pending' })
+      await db
+        .update(orders)
+        .set({ status: 'scheduled', scheduledFor: new Date('2026-09-03T06:00:00Z') })
+        .where(eq(orders.id, order.id))
+      await db.update(costCenters).set({ budgetAmount: '100.00' }).where(eq(costCenters.id, centre.id))
+      return { order, actor: { ...ROOT, id: user.id } }
+    }
+
+    it('refuses to deploy early when the budget no longer allows it', async () => {
+      const { order, actor } = await overspentScheduledOrder()
+
+      const outcome = await deployScheduledOrderNow(order.id, actor, AT)
+
+      expect(outcome).toMatchObject({ ok: false, status: 409 })
+      if (!outcome.ok) expect(outcome.message).toMatch(/over budget/i)
+      expect(vi.mocked(provisionOrderElements)).not.toHaveBeenCalled()
+    })
+
+    it('leaves it scheduled, with no override recorded, when it is refused', async () => {
+      // The window was never stepped over, so there is nothing to record about
+      // stepping over it — and the order still has its window.
+      const { order, actor } = await overspentScheduledOrder()
+
+      await deployScheduledOrderNow(order.id, actor, AT)
+
+      const row = await reload(order.id)
+      expect(row.status).toBe('scheduled')
+      expect(row.windowOverrideBy).toBeNull()
+      expect(vi.mocked(logAudit).mock.calls.filter((c) => c[1] === 'order.window_overridden')).toHaveLength(0)
+    })
+
+    it('refuses when a policy denies the order by then', async () => {
+      // No budget in play: the budget gate is asked first, so a fixture with a
+      // lowered ceiling would be refused by that one and never reach the rule.
+      const { order, actor } = await scheduledOrder()
+      const root = await createUser({ role: 'root', email: `root-${Math.random()}@test.dev` })
+      await createIntegration(root.id, {
+        kind: 'opa',
+        name: 'Policy engine',
+        baseUrl: 'https://opa.example.com',
+        authType: 'none',
+        failureMode: 'blocking',
+      })
+      vi.spyOn(global, 'fetch').mockResolvedValue(
+        new Response(
+          JSON.stringify({ result: { decision: 'deny', rule: 'quota/vm-count', message: 'At the limit' } }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+      )
+
+      const outcome = await deployScheduledOrderNow(order.id, actor, AT)
+
+      expect(outcome).toMatchObject({ ok: false, status: 409 })
+      if (!outcome.ok) expect(outcome.message).toContain('quota/vm-count')
+      expect(vi.mocked(provisionOrderElements)).not.toHaveBeenCalled()
+      expect((await reload(order.id)).status).toBe('scheduled')
+    })
+
+    it('still deploys what still fits', async () => {
+      const { order, actor } = await scheduledOrder()
+
+      expect(await deployScheduledOrderNow(order.id, actor, AT)).toEqual({ ok: true })
+    })
   })
 })

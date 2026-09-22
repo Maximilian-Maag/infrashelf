@@ -16,6 +16,7 @@ import { redactParametersForOrders } from '@/lib/services/parameterRedaction'
 import { activeDelegationsHeldBy, type DelegationRow } from '@/lib/services/delegations'
 import { provisionOrderElements } from '@/lib/services/orders'
 import { attachBudgets } from '@/lib/services/budgets'
+import { recheckOrderGates } from '@/lib/services/commitGates'
 import { whenMayItDeploy } from '@/lib/services/windowPolicy'
 import { productNameSql } from '@/lib/db/productText'
 
@@ -54,9 +55,9 @@ export interface ApprovalRow {
    * when there is none — no budget set, or no cost centre resolvable at all.
    *
    * On the queue because this is the last moment the decision can be taken. The
-   * gate in `createPreparedOrder` runs when the approval is granted, so a `warn`
-   * cost centre tells the approver nothing unless it is on the row in front of
-   * them, and a `block` one refuses the approval AFTER they have clicked it.
+   * gates are asked again when the approval commits the order (#511), so a
+   * `warn` cost centre tells the approver nothing unless it is on the row in
+   * front of them, and a `block` one refuses them after they have clicked.
    */
   budget: BudgetState | null
 }
@@ -180,12 +181,28 @@ const assertNotOwnOrder = async (
  * discriminated on, and the route renders a different message for it (#330).
  */
 export type ApprovalOutcome =
-  | { success: true; scheduled: false; infraId: number; infraIds: number[]; pipelineIds: string[] }
-  | { success: true; scheduled: true; scheduledFor: Date }
+  | {
+      success: true
+      scheduled: false
+      infraId: number
+      infraIds: number[]
+      pipelineIds: string[]
+      /** Set when a policy allowed the commit with something to say (#511). */
+      policyWarning?: string
+    }
+  | { success: true; scheduled: true; scheduledFor: Date; policyWarning?: string }
 
+/**
+ * Approve a pending order, re-asking the gates before anything is built (#511).
+ *
+ * `overridePolicy` is root's escape from a policy refusal at this moment, the
+ * same right as on the ordering path (#110) and checked in `recheckOrderGates`:
+ * a rule with no way past it turns a policy mistake into an outage.
+ */
 export const approveOrder = async (
   session: SessionUser,
   orderId: number,
+  options: { overridePolicy?: boolean } = {},
 ): Promise<Result<ApprovalOutcome>> => {
   const separation = await assertNotOwnOrder(session, orderId)
   if (!separation.ok) return separation
@@ -209,6 +226,39 @@ export const approveOrder = async (
   }
 
   const order = claimed[0]
+
+  /*
+   * ── The gates, asked again (#511) ──────────────────────────────────────────
+   *
+   * `createPreparedOrder` asked the budget and the policy when this order was a
+   * REQUEST, which may have been days ago. This is where the money is spent and
+   * the infrastructure is built, so it is the last moment either can refuse —
+   * and until this call existed, nothing here asked at all, while two comments
+   * (this file's queue-row one, and the budget gate's) said the check happened
+   * at exactly this point.
+   *
+   * After the claim, so this caller is the one deciding, and before anything is
+   * built. A refusal RELEASES the claim: the order goes back to 'pending', where
+   * it stays approvable once the budget is raised or the rule changed. Left in
+   * 'provisioning' it would be invisible — no second approval can claim it
+   * (the claim is conditioned on 'pending') and no sweep looks at it — which is
+   * the same trap the window-policy failure below releases the claim for.
+   */
+  const gates = await recheckOrderGates(order.id, {
+    seam: 'when it was approved',
+    actor: { id: session.id, email: session.email, role: session.role },
+    overridePolicy: options.overridePolicy,
+  })
+
+  if (!gates.ok) {
+    await db
+      .update(orders)
+      .set({ status: 'pending', updatedAt: new Date() })
+      .where(eq(orders.id, orderId))
+    return gates
+  }
+
+  const policyWarning = gates.data.policyWarning ?? undefined
 
   /*
    * Does a window have to open first (#330)?
@@ -255,7 +305,12 @@ export const approveOrder = async (
       `Approved, waiting for a deployment window at ${wait.scheduledFor.toISOString()}`,
     )
 
-    return ok({ success: true as const, scheduled: true as const, scheduledFor: wait.scheduledFor })
+    return ok({
+      success: true as const,
+      scheduled: true as const,
+      scheduledFor: wait.scheduledFor,
+      ...(policyWarning ? { policyWarning } : {}),
+    })
   }
 
   // Snapshotted at the moment of the claim, not at logging time: everything
@@ -339,6 +394,7 @@ export const approveOrder = async (
     infraId: provisioned.elementIds[0],
     infraIds: provisioned.elementIds,
     pipelineIds: provisioned.pipelineIds,
+    ...(policyWarning ? { policyWarning } : {}),
   })
 }
 

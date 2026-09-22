@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type { SessionUser } from '@infrashelf/types'
 import type * as WindowPolicyService from '@/lib/services/windowPolicy'
 
@@ -18,6 +18,7 @@ vi.mock('@/lib/services/windowPolicy', async (importOriginal) => ({
 }))
 
 import { listApprovals, approveOrder, rejectOrder } from './approvals'
+import { createIntegration } from '@/lib/services/admin/integrations'
 import { sendOrderApproved, sendOrderRejected } from '@/lib/notification'
 import { triggerProductWebhooksTracked } from '@/lib/ci/webhooks'
 import { whenMayItDeploy } from '@/lib/services/windowPolicy'
@@ -100,11 +101,105 @@ describe('listApprovals', () => {
   /**
    * The approver's half of #325.
    *
-   * The gate runs when the approval is granted, so a `warn` cost centre would
-   * tell the approver nothing and a `block` one would refuse them AFTER they
-   * clicked. The queue row is the last moment the decision can be taken.
+   * The gates are asked again when the approval commits the order (#511), so a
+   * `warn` cost centre would tell the approver nothing and a `block` one would
+   * refuse them AFTER they clicked. The queue row is the last moment the decision
+   * can be taken.
    */
   describe('budget on the queue row', () => {
+    /**
+     * A pending order that has since become unaffordable.
+     *
+     * The only way to reach this state is for the ceiling to MOVE while the
+     * order waits — the budget check at creation already refuses an order that
+     * would not fit, and the advisory lock means two creations cannot race past
+     * it. Root lowering a budget is the ordinary case: the order was affordable
+     * when it was requested and is not any more.
+     */
+    const overspentWhileWaiting = async () => {
+      const base = await setup()
+      await linkProductEnvironment(base.product.id, base.env.id, { price: '400.00', currency: 'EUR' })
+      const centre = await createCostCenter()
+      await db.update(costCenters).set({
+        budgetAmount: '500.00', budgetCurrency: 'EUR', budgetPeriod: 'total', budgetBehaviour: 'block',
+      }).where(eq(costCenters.id, centre.id))
+      await db.update(projects).set({ costCenterId: centre.id }).where(eq(projects.id, base.project.id))
+      const order = await seedOrder(base.project.id, base.product.id, base.env.id, base.pm.id, {
+        status: 'pending',
+      })
+
+      // Root lowers the ceiling under the waiting order.
+      await db.update(costCenters).set({ budgetAmount: '100.00' }).where(eq(costCenters.id, centre.id))
+      return { ...base, centre, order }
+    }
+
+    it('refuses the approval when the ceiling moved while the order waited', async () => {
+      /*
+       * The gap this test exists for: the queue row renders the budget and says
+       * `block`, and approving used to provision anyway — because `approveOrder`
+       * claims the order and calls `provisionOrderElements` WITHOUT asking the
+       * gate that the comment above claims runs here. The comment and the
+       * `block` behaviour on the row both tell an approver that a spent budget
+       * will refuse them after they click; only one of them was true.
+       */
+      const base = await overspentWhileWaiting()
+
+      const result = await approveOrder(makeSession(base.admin), base.order.id)
+
+      expect(result.ok).toBe(false)
+      if (result.ok) return
+      expect(result.status).toBe(409)
+      expect(result.message).toMatch(/over budget/i)
+    })
+
+    it('leaves the order pending when the approval is refused for budget', async () => {
+      // A refusal is not a rejection: the order is still a request somebody can
+      // act on once the budget is raised again, and stranding it in
+      // 'provisioning' would make it unapprovable and invisible to the sweep.
+      const base = await overspentWhileWaiting()
+
+      await approveOrder(makeSession(base.admin), base.order.id)
+
+      const [row] = await db.select().from(orders).where(eq(orders.id, base.order.id))
+      expect(row.status).toBe('pending')
+      expect(await db.select().from(infrastructureElements)).toHaveLength(0)
+    })
+
+    it('still approves what the budget still allows', async () => {
+      const base = await setup()
+      await linkProductEnvironment(base.product.id, base.env.id, { price: '100.00', currency: 'EUR' })
+      const centre = await createCostCenter()
+      await db.update(costCenters).set({
+        budgetAmount: '500.00', budgetCurrency: 'EUR', budgetPeriod: 'total', budgetBehaviour: 'block',
+      }).where(eq(costCenters.id, centre.id))
+      await db.update(projects).set({ costCenterId: centre.id }).where(eq(projects.id, base.project.id))
+      const order = await seedOrder(base.project.id, base.product.id, base.env.id, base.pm.id, {
+        status: 'pending',
+      })
+
+      const result = await approveOrder(makeSession(base.admin), order.id)
+      expect(result.ok).toBe(true)
+    })
+
+    it('commits anyway when the budget only warns', async () => {
+      /*
+       * The control for the two refusals above, and the one a wrong check would
+       * break: `warn` is the setting that says "tell me, do not stop me", and the
+       * queue row has already told the approver. Reading the behaviour as
+       * anything other than a refusal's precondition would turn every warn budget
+       * into a block the moment a total moved.
+       */
+      const base = await priced('400.00')
+      const centre = await budgeted('100.00', 'warn')
+      await db.update(projects).set({ costCenterId: centre.id }).where(eq(projects.id, base.project.id))
+      const order = await seedOrder(base.project.id, base.product.id, base.env.id, base.pm.id, {
+        status: 'pending',
+      })
+
+      const result = await approveOrder(makeSession(base.admin), order.id)
+      expect(result.ok).toBe(true)
+    })
+
     const priced = async (price: string) => {
       const base = await setup()
       await linkProductEnvironment(base.product.id, base.env.id, { price, currency: 'EUR' })
@@ -576,5 +671,181 @@ describe('approveOrder — auditing a delegation in use', () => {
 
     const [row] = await db.select().from(orders).where(eq(orders.id, order.id))
     expect(row.status, 'the order is stranded: nothing can claim it and no sweep looks at it').toBe('pending')
+  })
+})
+
+/*
+ * The gates are re-asked when the approval COMMITS the order (#110, #325).
+ *
+ * An approval is a second decision, taken later than the first, and everything
+ * the first decision was based on can have moved in between: the ceiling, the
+ * cost centre, the policy. `createPreparedOrder` asks once, when the order is a
+ * REQUEST; `approveOrder` is where the money is actually spent and the
+ * infrastructure actually built, and it asked nothing at all. Both comments —
+ * the queue row's and the budget gate's — said the check happened here. Neither
+ * did.
+ */
+describe('approveOrder — the gates are re-asked at the point of commitment', () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  const deny = () =>
+    vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          result: { decision: 'deny', rule: 'quota/vm-count', message: 'This project is at its limit' },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
+    )
+
+  const allow = () =>
+    vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ result: { decision: 'allow', rule: 'baseline' } }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    )
+
+  /** A pending order, and an OPA engine that can be pointed at it. */
+  const waiting = async () => {
+    const base = await setup()
+    const root = await createUser({ role: 'root', email: 'root@test.dev', name: 'Root' })
+    await createIntegration(root.id, {
+      kind: 'opa',
+      name: 'Policy engine',
+      baseUrl: 'https://opa.example.com',
+      authType: 'none',
+      failureMode: 'blocking',
+    })
+    const order = await seedOrder(base.project.id, base.product.id, base.env.id, base.pm.id, {
+      status: 'pending',
+    })
+    return { ...base, root, order }
+  }
+
+  it('refuses the approval when a policy denies the order by then', async () => {
+    /*
+     * #110's own open question — "what happens to an order that policy would
+     * deny after it was approved but before it ran" — answered the other way
+     * round: the order was allowed when it was requested, and the rule that
+     * would refuse it exists by the time somebody approves it. Provisioning it
+     * anyway is the policy being advisory exactly where it is a control.
+     */
+    const base = await waiting()
+    deny()
+
+    const result = await approveOrder(makeSession(base.admin), base.order.id)
+
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.status).toBe(409)
+    expect(result.message).toContain('quota/vm-count')
+    expect(result.message).toContain('This project is at its limit')
+  })
+
+  it('leaves the order pending, and provisions nothing, when a policy refuses it', async () => {
+    // Refused, not rejected: the rule can be argued with, changed, or waived, and
+    // an order that had already been built would be none of those.
+    const base = await waiting()
+    deny()
+
+    await approveOrder(makeSession(base.admin), base.order.id)
+
+    const [row] = await db.select().from(orders).where(eq(orders.id, base.order.id))
+    expect(row.status).toBe('pending')
+    expect(await db.select().from(infrastructureElements)).toHaveLength(0)
+  })
+
+  it('records the refusal, so a queue that will not clear can be explained', async () => {
+    const base = await waiting()
+    deny()
+
+    await approveOrder(makeSession(base.admin), base.order.id)
+
+    // One action name for "policy refused this order as it was about to be
+    // built", whichever seam did the building — the seam itself is in the
+    // details, because "the policy refused order 12" reads very differently
+    // depending on whether an admin was clicking Approve or a window opened.
+    const entries = await db.select().from(auditLog).where(eq(auditLog.action, 'order.policy_denied'))
+    expect(entries).toHaveLength(1)
+    expect(entries[0].details).toContain('quota/vm-count')
+    expect(entries[0].details).toContain('when it was approved')
+    expect(entries[0].userId).toBe(base.admin.id)
+  })
+
+  it('lets root waive the refusal at the moment of approval', async () => {
+    // The same escape as ordering (#110 slice 5), for the same reason: a rule
+    // with no way past it turns a policy mistake into an outage, and root's
+    // override is what makes that acceptable — recorded, with the rule waived.
+    const base = await waiting()
+    deny()
+
+    const result = await approveOrder(makeSession(base.root), base.order.id, { overridePolicy: true })
+
+    expect(result.ok).toBe(true)
+    const entries = await db
+      .select()
+      .from(auditLog)
+      .where(eq(auditLog.action, 'order.policy_overridden'))
+    expect(entries).toHaveLength(1)
+    expect(entries[0].details).toContain('quota/vm-count')
+  })
+
+  it('does not let a non-root approver waive it', async () => {
+    const base = await waiting()
+    deny()
+
+    const result = await approveOrder(makeSession(base.admin), base.order.id, { overridePolicy: true })
+
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.status).toBe(409)
+  })
+
+  it('still approves what policy still allows', async () => {
+    const base = await waiting()
+    allow()
+
+    const result = await approveOrder(makeSession(base.admin), base.order.id)
+    expect(result.ok).toBe(true)
+  })
+
+  it('carries a warning that arrives at commit to the approver, and to the log', async () => {
+    /*
+     * A rule that has changed into a `warn` by the time somebody approves is the
+     * case with the quietest failure mode: the order goes through (correctly),
+     * and the only thing that can carry the message is the approver's own
+     * response — with the sweep binding it has no response at all, which is why
+     * the entry is written where the verdict is made rather than by each caller.
+     */
+    const base = await waiting()
+    vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({ result: { decision: 'warn', rule: 'quota/near-limit', message: 'Nearly at the limit.' } }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
+    )
+
+    const result = await approveOrder(makeSession(base.admin), base.order.id)
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.data.policyWarning).toBe('Nearly at the limit.')
+
+    const entries = await db.select().from(auditLog).where(eq(auditLog.action, 'order.policy_warning'))
+    expect(entries).toHaveLength(1)
+    expect(entries[0].details).toContain('quota/near-limit')
+    expect(entries[0].details).toContain('when it was approved')
+  })
+
+  it('leaves approvals alone when no engine is configured', async () => {
+    // The state every installation starts in, and the one this must not change.
+    const { admin, pm, product, env, project } = await setup()
+    const order = await seedOrder(project.id, product.id, env.id, pm.id, { status: 'pending' })
+    const fetchMock = vi.spyOn(global, 'fetch')
+
+    const result = await approveOrder(makeSession(admin), order.id)
+    expect(result.ok).toBe(true)
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 })
