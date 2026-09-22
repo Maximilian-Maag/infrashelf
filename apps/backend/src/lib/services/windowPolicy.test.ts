@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { eq, sql } from 'drizzle-orm'
+import { eq, and, sql } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import {
   appConfig, auditLog, deploymentEnvironments, deploymentWindows, holidays,
@@ -473,7 +473,7 @@ describe('releaseDueScheduledOrders', () => {
  */
 describe('deployScheduledOrderNow', () => {
   const AT = new Date('2026-09-02T20:00:00Z')
-  const ROOT = { id: 0, email: 'root@test.dev' }
+  const ROOT = { id: 0, email: 'root@test.dev', role: 'root' as const }
 
   const scheduledOrder = async () => {
     const { user, product, environment, project } = await setup()
@@ -689,6 +689,41 @@ describe('deployScheduledOrderNow', () => {
       const { order, actor } = await scheduledOrder()
 
       expect(await deployScheduledOrderNow(order.id, actor, AT)).toEqual({ ok: true })
+    })
+
+    /*
+     * Root's escape (#514). "Deploy now" is a root button and the refusal is a
+     * spent ceiling, which is exactly #325's incident: nobody else can act, and
+     * without the waiver the order can only wait for a budget change that affects
+     * every other order against the cost centre.
+     */
+    it('lets root step over the budget refusal, and records the waiver', async () => {
+      const { order, actor } = await overspentScheduledOrder()
+
+      const outcome = await deployScheduledOrderNow(order.id, actor, AT, { overrideBudget: true })
+
+      expect(outcome).toEqual({ ok: true })
+      expect(vi.mocked(provisionOrderElements)).toHaveBeenCalled()
+      const waived = vi.mocked(logAudit).mock.calls.filter((c) => c[1] === 'order.budget_overridden')
+      expect(waived).toHaveLength(1)
+      expect(waived[0][3]).toContain('when it was deployed outside its window')
+      // And the window override is recorded as usual — the two waivers are
+      // separate records, not one replacing the other. Read out of the audit log
+      // rather than the mock, because the window override is written inside the
+      // claim's transaction (`logAuditWith`) and that one is not mocked here.
+      const windowOverrides = await db
+        .select()
+        .from(auditLog)
+        .where(and(eq(auditLog.action, 'order.window_overridden'), eq(auditLog.entityId, order.id)))
+      expect(windowOverrides).toHaveLength(1)
+    })
+
+    it('names a commit refusal in a code, so a client can offer the right escape', async () => {
+      const { order, actor } = await overspentScheduledOrder()
+
+      const outcome = await deployScheduledOrderNow(order.id, actor, AT)
+
+      expect(outcome).toMatchObject({ ok: false, code: 'budget_blocked' })
     })
   })
 })

@@ -122,6 +122,12 @@ window is re-checked before it deploys, and one that no longer passes goes back
 to the approvals queue rather than being built. See the root guide §5b for
 policies and the `order.budget_denied` / `order.policy_denied` audit entries.
 
+**Deploy now** offers root the same escapes (#519): re-deploying a scheduled
+order early runs those gates too, and a refusal there shows the reason with a
+**Place anyway** control beside it. It is the path where the escapes matter most
+— nobody but root can act on a spent ceiling or a refused rule, and the order
+otherwise waits for a window it cannot enter.
+
 **Orders a policy asked to see** (#110). A rule can answer `needs-approval`
 instead of allowing or refusing, and such an order is placed in this queue rather
 than provisioned — including an admin's own order, which would otherwise build
