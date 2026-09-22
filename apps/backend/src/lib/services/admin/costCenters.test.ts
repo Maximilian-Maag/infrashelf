@@ -173,3 +173,37 @@ describe('cost center audit trail (issue #137)', () => {
     if (!result.ok) expect(result.status).toBe(400)
   })
 })
+
+/*
+ * #325 put the budget on the `cost_centers` row and made every verb that touches
+ * it `root`, deliberately — the route says so: "who may see one is the same
+ * question as who may set it". A `select()` or `returning()` here returns the row,
+ * budget columns and all, to callers who are not root (#539).
+ */
+describe('a cost centre comes back as the four fields it is (#539)', () => {
+  const FOUR_FIELDS = ['active', 'code', 'id', 'name']
+
+  it('on the list, the read and the write echoes', async () => {
+    const created = await createCostCenter({ code: 'LEAK', name: 'Leaky' })
+    if (!created.ok) throw new Error('seed failed')
+
+    await db
+      .update(costCenters)
+      .set({
+        budgetAmount: '100.00',
+        budgetCurrency: 'EUR',
+        budgetPeriod: 'total',
+        budgetBehaviour: 'block',
+      })
+      .where(eq(costCenters.id, created.data.id))
+
+    const list = await listCostCenters()
+    const read = await getCostCenterById(created.data.id)
+    const renamed = await updateCostCenter(created.data.id, { name: 'Renamed' })
+
+    if (!list.ok || !read.ok || !renamed.ok) throw new Error('unexpected refusal')
+    expect(Object.keys(list.data[0]).sort()).toEqual(FOUR_FIELDS)
+    expect(Object.keys(read.data).sort()).toEqual(FOUR_FIELDS)
+    expect(Object.keys(renamed.data).sort()).toEqual(FOUR_FIELDS)
+  })
+})

@@ -426,6 +426,14 @@ Each cost centre can carry a budget. **Budget** on a row opens it; a cost centre
 without one behaves exactly as it did before budgets existed, so this is opt-in
 and nothing changes until you set one.
 
+**Who may see it.** The budget is root's, reading included — the amount, the
+currency, the period and the behaviour are set, changed, cleared and read by root
+alone, because who may see a spending limit and who may set it are the same
+question. The cost-centre list that orderers and project managers pick from
+carries the code, the name and the active flag, and nothing else: those endpoints
+are reachable by any signed-in session, so the budget is not merely hidden on the
+screen, it never leaves the database for them (#539).
+
 A budget is four things:
 
 | Field | Meaning |
