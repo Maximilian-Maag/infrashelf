@@ -73,8 +73,8 @@ export function ApprovalRow({ order, currentUserId, role = 'project_manager' }: 
   /*
    * The waivers already exercised in this refusal chain (see OrderForm, #515).
    *
-   * The policy gate is asked BEFORE the budget one, so waiving the policy can
-   * uncover a budget refusal underneath it — retrying with only the flag for the
+   * The budget gate is asked BEFORE the policy one, so waiving the budget can
+   * uncover a policy refusal underneath it — retrying with only the flag for the
    * refusal in hand would drop the waiver already made and the two would alternate
    * for ever. Cleared on a fresh Approve, which is a fresh decision.
    */

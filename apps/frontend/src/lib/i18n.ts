@@ -891,6 +891,8 @@ export type Translations = {
   /** Root's escape from a refusal the form can see a way past (#509). */
   placeAnyway: string
   placeAnywayHint: string
+  /** The same escape where the action is a deployment, not a placement (#519). */
+  deployAnyway: string
   /* Cost-centre budgets (#325). */
   budget: string
   budgetSet: string
@@ -1762,6 +1764,7 @@ const translations: { en: Translations } & Record<string, Partial<Translations>>
     quantityInvalid: 'Въведете цял брой елементи в допустимия диапазон.',
     placeAnyway: 'Поръчай въпреки това',
     placeAnywayHint: 'Отмяната на това отхвърляне се записва в одиторския дневник.',
+    deployAnyway: 'Внедри въпреки това',
   },
   cs: {
     budgetUnpriced: 'U některých závazně vyčerpaných objednávek nelze zjistit cenu, proto je tento údaj neúplný:',
@@ -2591,6 +2594,7 @@ const translations: { en: Translations } & Record<string, Partial<Translations>>
     quantityInvalid: 'Zadejte celý počet prvků v povoleném rozsahu.',
     placeAnyway: 'Přesto objednat',
     placeAnywayHint: 'Zrušení tohoto odmítnutí se zaznamená do auditu.',
+    deployAnyway: 'Přesto nasadit',
   },
   da: {
     budgetUnpriced: 'Nogle bundne ordrer har ingen genfindelig pris, så dette tal er ufuldstændigt:',
@@ -3420,6 +3424,7 @@ const translations: { en: Translations } & Record<string, Partial<Translations>>
     quantityInvalid: 'Angiv et helt antal elementer inden for det tilladte interval.',
     placeAnyway: 'Bestil alligevel',
     placeAnywayHint: 'Tilsidesættelsen af denne afvisning registreres i revisionsloggen.',
+    deployAnyway: 'Udrul alligevel',
   },
   de: {
     budgetUnpriced: 'Für einige gebundene Bestellungen ist kein Preis mehr ermittelbar, daher ist dieser Wert unvollständig:',
@@ -4249,6 +4254,7 @@ const translations: { en: Translations } & Record<string, Partial<Translations>>
     quantityInvalid: 'Bitte eine ganze Anzahl von Elementen im zulässigen Bereich eingeben.',
     placeAnyway: 'Trotzdem bestellen',
     placeAnywayHint: 'Das Aufheben dieser Ablehnung wird im Prüfprotokoll festgehalten.',
+    deployAnyway: 'Trotzdem bereitstellen',
   },
   el: {
     budgetUnpriced: 'Για ορισμένες δεσμευμένες παραγγελίες δεν είναι δυνατή η ανάκτηση τιμής, οπότε το μέγεθος αυτό είναι ελλιπές:',
@@ -5078,6 +5084,7 @@ const translations: { en: Translations } & Record<string, Partial<Translations>>
     quantityInvalid: 'Εισαγάγετε ακέραιο αριθμό στοιχείων εντός του επιτρεπτού εύρους.',
     placeAnyway: 'Παραγγελία παρά την άρνηση',
     placeAnywayHint: 'Η άρση αυτής της απόρριψης καταγράφεται στο αρχείο ελέγχου.',
+    deployAnyway: 'Ανάπτυξη παρά την άρνηση',
   },
   en: {
     budgetUnpriced: 'Some committed orders have no recoverable price, so this figure is incomplete:',
@@ -5907,6 +5914,7 @@ const translations: { en: Translations } & Record<string, Partial<Translations>>
     quantityInvalid: 'Enter a whole number of elements within the permitted range.',
     placeAnyway: 'Place anyway',
     placeAnywayHint: 'Waiving this refusal is recorded in the audit log.',
+    deployAnyway: 'Deploy anyway',
   },
   es: {
     budgetUnpriced: 'Algunos pedidos comprometidos no tienen precio recuperable, por lo que esta cifra está incompleta:',
@@ -6736,6 +6744,7 @@ const translations: { en: Translations } & Record<string, Partial<Translations>>
     quantityInvalid: 'Introduzca un número entero de elementos dentro del intervalo permitido.',
     placeAnyway: 'Pedir de todos modos',
     placeAnywayHint: 'La exención de este rechazo queda registrada en la auditoría.',
+    deployAnyway: 'Desplegar de todos modos',
   },
   et: {
     budgetUnpriced: 'Mõne seotud tellimuse hinda ei ole võimalik taastada, seega on see näitaja puudulik:',
@@ -7565,6 +7574,7 @@ const translations: { en: Translations } & Record<string, Partial<Translations>>
     quantityInvalid: 'Sisestage täisarv elemente lubatud vahemikus.',
     placeAnyway: 'Esita ikkagi',
     placeAnywayHint: 'Selle keeldumisest loobumine logitakse auditilogis.',
+    deployAnyway: 'Juuruta ikkagi',
   },
   fi: {
     budgetUnpriced: 'Joillekin sidotuille tilauksille ei löydy hintaa, joten tämä luku on epätäydellinen:',
@@ -8394,6 +8404,7 @@ const translations: { en: Translations } & Record<string, Partial<Translations>>
     quantityInvalid: 'Anna kokonaisluku elementtejä sallitulla välillä.',
     placeAnyway: 'Tilaa silti',
     placeAnywayHint: 'Tämän hylkäyksen ohittaminen kirjataan lokiin.',
+    deployAnyway: 'Julkaise silti',
   },
   fr: {
     budgetUnpriced: 'Le prix de certaines commandes engagées n\'est plus récupérable, ce chiffre est donc incomplet :',
@@ -9223,6 +9234,7 @@ const translations: { en: Translations } & Record<string, Partial<Translations>>
     quantityInvalid: 'Saisissez un nombre entier d\'éléments dans la plage autorisée.',
     placeAnyway: 'Commander quand même',
     placeAnywayHint: 'La levée de ce refus est consignée dans le journal d’audit.',
+    deployAnyway: 'Déployer quand même',
   },
   ga: {
     budgetUnpriced: 'Níl praghas inaisghabhála ag roinnt orduithe geallta, mar sin tá an figiúr seo neamhiomlán:',
@@ -10052,6 +10064,7 @@ const translations: { en: Translations } & Record<string, Partial<Translations>>
     quantityInvalid: 'Cuir isteach slánuimhir eilimintí laistigh den raon ceadaithe.',
     placeAnyway: 'Cuir ordú isteach mar sin féin',
     placeAnywayHint: 'Taifeadtar an diúltú seo a tharscaoileadh sa log iniúchta.',
+    deployAnyway: 'Imscaradh mar sin féin',
   },
   hr: {
     budgetUnpriced: 'Za neke obvezane narudžbe cijena se više ne može utvrditi, pa je ovaj iznos nepotpun:',
@@ -10881,6 +10894,7 @@ const translations: { en: Translations } & Record<string, Partial<Translations>>
     quantityInvalid: 'Unesite cijeli broj elemenata unutar dopuštenog raspona.',
     placeAnyway: 'Ipak naruči',
     placeAnywayHint: 'Odustajanje od ovog odbijanja bilježi se u revizijskom dnevniku.',
+    deployAnyway: 'Ipak postavi',
   },
   hu: {
     budgetUnpriced: 'Néhány lekötött rendelés ára nem állapítható meg, ezért ez az érték hiányos:',
@@ -11710,6 +11724,7 @@ const translations: { en: Translations } & Record<string, Partial<Translations>>
     quantityInvalid: 'Adjon meg egész számú elemet a megengedett tartományon belül.',
     placeAnyway: 'Rendelés mindenképp',
     placeAnywayHint: 'Az elutasítás mellőzése bekerül az auditnaplóba.',
+    deployAnyway: 'Telepítés mindenképp',
   },
   it: {
     budgetUnpriced: 'Per alcuni ordini impegnati il prezzo non è più recuperabile, quindi questa cifra è incompleta:',
@@ -12539,6 +12554,7 @@ const translations: { en: Translations } & Record<string, Partial<Translations>>
     quantityInvalid: 'Inserire un numero intero di elementi entro l\'intervallo consentito.',
     placeAnyway: 'Ordina comunque',
     placeAnywayHint: 'La rinuncia a questo rifiuto viene registrata nel registro di controllo.',
+    deployAnyway: 'Distribuisci comunque',
   },
   lt: {
     budgetUnpriced: 'Kai kurių įsipareigotų užsakymų kainos nustatyti nepavyksta, todėl šis skaičius nepilnas:',
@@ -13368,6 +13384,7 @@ const translations: { en: Translations } & Record<string, Partial<Translations>>
     quantityInvalid: 'Įveskite sveikąjį elementų skaičių leistiname intervale.',
     placeAnyway: 'Vis tiek užsakyti',
     placeAnywayHint: 'Šio atmetimo nepaisymas įrašomas audito žurnale.',
+    deployAnyway: 'Vis tiek diegti',
   },
   lv: {
     budgetUnpriced: 'Dažiem rezervētajiem pasūtījumiem cena nav atgūstama, tāpēc šis skaitlis ir nepilnīgs:',
@@ -14197,6 +14214,7 @@ const translations: { en: Translations } & Record<string, Partial<Translations>>
     quantityInvalid: 'Ievadiet veselu elementu skaitu atļautajā diapazonā.',
     placeAnyway: 'Tomēr pasūtīt',
     placeAnywayHint: 'Šī atteikuma atcelšana tiek ierakstīta audita žurnālā.',
+    deployAnyway: 'Tomēr izvietot',
   },
   mt: {
     budgetUnpriced: 'Xi ordnijiet impenjati m’għandhomx prezz li jista’ jinstab, għalhekk din iċ-ċifra hija mhux kompluta:',
@@ -15026,6 +15044,7 @@ const translations: { en: Translations } & Record<string, Partial<Translations>>
     quantityInvalid: 'Daħħal numru sħiħ ta\' elementi fil-medda permessa.',
     placeAnyway: 'Ordna xorta',
     placeAnywayHint: 'L-irrinunzja għal dan ir-rifjut titniżżel fil-log tal-verifika.',
+    deployAnyway: 'Vara xorta',
   },
   nl: {
     budgetUnpriced: 'Van sommige vastgelegde bestellingen is geen prijs meer te achterhalen, dus dit getal is onvolledig:',
@@ -15855,6 +15874,7 @@ const translations: { en: Translations } & Record<string, Partial<Translations>>
     quantityInvalid: 'Voer een geheel aantal elementen in binnen het toegestane bereik.',
     placeAnyway: 'Toch bestellen',
     placeAnywayHint: 'Het opheffen van deze weigering wordt vastgelegd in het auditlogboek.',
+    deployAnyway: 'Toch uitrollen',
   },
   pl: {
     budgetUnpriced: 'Dla części zaangażowanych zamówień nie da się odtworzyć ceny, więc ta wartość jest niepełna:',
@@ -16684,6 +16704,7 @@ const translations: { en: Translations } & Record<string, Partial<Translations>>
     quantityInvalid: 'Podaj całkowitą liczbę elementów z dozwolonego zakresu.',
     placeAnyway: 'Zamów mimo to',
     placeAnywayHint: 'Zniesienie tej odmowy zostanie zapisane w dzienniku audytu.',
+    deployAnyway: 'Wdróż mimo to',
   },
   pt: {
     budgetUnpriced: 'Algumas encomendas comprometidas não têm preço recuperável, pelo que este valor está incompleto:',
@@ -17513,6 +17534,7 @@ const translations: { en: Translations } & Record<string, Partial<Translations>>
     quantityInvalid: 'Introduza um número inteiro de elementos dentro do intervalo permitido.',
     placeAnyway: 'Encomendar mesmo assim',
     placeAnywayHint: 'A dispensa desta recusa fica registada no registo de auditoria.',
+    deployAnyway: 'Implantar mesmo assim',
   },
   ro: {
     budgetUnpriced: 'Pentru unele comenzi angajate prețul nu mai poate fi recuperat, deci această cifră este incompletă:',
@@ -18342,6 +18364,7 @@ const translations: { en: Translations } & Record<string, Partial<Translations>>
     quantityInvalid: 'Introduceți un număr întreg de elemente în intervalul permis.',
     placeAnyway: 'Comandă oricum',
     placeAnywayHint: 'Renunțarea la această respingere este înregistrată în jurnalul de audit.',
+    deployAnyway: 'Implementează oricum',
   },
   ru: {
     budgetUnpriced: 'Для части заказов в обязательствах цену восстановить нельзя, поэтому эта величина неполная:',
@@ -19171,6 +19194,7 @@ const translations: { en: Translations } & Record<string, Partial<Translations>>
     quantityInvalid: 'Введите целое число элементов в допустимом диапазоне.',
     placeAnyway: 'Всё равно заказать',
     placeAnywayHint: 'Отмена этого отказа будет записана в журнал аудита.',
+    deployAnyway: 'Всё равно развернуть',
   },
   sk: {
     budgetUnpriced: 'Pri niektorých viazaných objednávkach sa cena nedá zistiť, preto je tento údaj neúplný:',
@@ -20000,6 +20024,7 @@ const translations: { en: Translations } & Record<string, Partial<Translations>>
     quantityInvalid: 'Zadajte celý počet prvkov v povolenom rozsahu.',
     placeAnyway: 'Napriek tomu objednať',
     placeAnywayHint: 'Zrušenie tohto odmietnutia sa zaznamená do auditného denníka.',
+    deployAnyway: 'Napriek tomu nasadiť',
   },
   sl: {
     budgetUnpriced: 'Pri nekaterih zavezanih naročilih cene ni mogoče ugotoviti, zato je ta številka nepopolna:',
@@ -20829,6 +20854,7 @@ const translations: { en: Translations } & Record<string, Partial<Translations>>
     quantityInvalid: 'Vnesite celo število elementov v dovoljenem obsegu.',
     placeAnyway: 'Vseeno naroči',
     placeAnywayHint: 'Odstop od te zavrnitve se zabeleži v revizijskem dnevniku.',
+    deployAnyway: 'Vseeno uvedi',
   },
   sv: {
     budgetUnpriced: 'För vissa bundna ordrar går priset inte att få fram, så denna siffra är ofullständig:',
@@ -21658,6 +21684,7 @@ const translations: { en: Translations } & Record<string, Partial<Translations>>
     quantityInvalid: 'Ange ett heltal element inom det tillåtna intervallet.',
     placeAnyway: 'Beställ ändå',
     placeAnywayHint: 'Att häva detta avslag registreras i granskningsloggen.',
+    deployAnyway: 'Distribuera ändå',
   },
 }
 

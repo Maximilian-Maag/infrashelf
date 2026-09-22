@@ -690,5 +690,48 @@ describe('deployScheduledOrderNow', () => {
 
       expect(await deployScheduledOrderNow(order.id, actor, AT)).toEqual({ ok: true })
     })
+
+    /*
+     * #519. The escapes reached the approvals queue (#514) and the order form
+     * (#509) and stopped short of this path, which is the one where the operator is
+     * mid-incident with an order that is ready to go: approved, waiting for a
+     * window, wanted now. Same two rights, same rule, same audit entry.
+     */
+    it('lets root waive the budget refusal here too (#519)', async () => {
+      const { order, actor } = await overspentScheduledOrder()
+
+      // With a role: `recheckOrderGates` decides against the actor's own, and the
+      // fixtures above pass one without — which is why nothing could waive here.
+      const outcome = await deployScheduledOrderNow(order.id, { ...actor, role: 'root' }, AT, {
+        overrideBudget: true,
+      })
+
+      expect(outcome).toEqual({ ok: true })
+      expect(vi.mocked(provisionOrderElements)).toHaveBeenCalled()
+      const entry = vi.mocked(logAudit).mock.calls.find((c) => c[1] === 'order.budget_overridden')
+      expect(entry?.[3]).toMatch(/over budget/i)
+    })
+
+    it('names the refusal, so the button that started this can offer the escape (#519)', async () => {
+      // Without the code the control has only the sentence, and matching on prose
+      // is what breaks the first time somebody rewords it.
+      const { order, actor } = await overspentScheduledOrder()
+
+      const outcome = await deployScheduledOrderNow(order.id, { ...actor, role: 'root' }, AT)
+
+      expect(outcome).toMatchObject({ ok: false, status: 409, code: 'budget_blocked' })
+    })
+
+    it('does not waive it for an actor who is not root', async () => {
+      const { order, actor } = await overspentScheduledOrder()
+
+      const outcome = await deployScheduledOrderNow(order.id, { ...actor, role: 'admin' }, AT, {
+        overrideBudget: true,
+      })
+
+      expect(outcome).toMatchObject({ ok: false, status: 409 })
+      expect(vi.mocked(provisionOrderElements)).not.toHaveBeenCalled()
+      expect((await reload(order.id)).status).toBe('scheduled')
+    })
   })
 })

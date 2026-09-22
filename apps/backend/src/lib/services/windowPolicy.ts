@@ -174,7 +174,8 @@ export const deployScheduledOrderNow = async (
   orderId: number,
   actor: { id: number; email: string; role?: Role },
   now: Date,
-): Promise<{ ok: true } | { ok: false; status: number; message: string }> => {
+  options: { overridePolicy?: boolean; overrideBudget?: boolean } = {},
+): Promise<{ ok: true } | { ok: false; status: number; message: string; code?: string }> => {
   /*
    * The gates, before the claim (#511): root deploying a scheduled order early
    * is the same commitment as approving it, a day later than the decision, so the
@@ -189,8 +190,15 @@ export const deployScheduledOrderNow = async (
   const gates = await recheckOrderGates(orderId, {
     seam: 'when it was deployed outside its window',
     actor: actor.role ? { id: actor.id, email: actor.email, role: actor.role } : null,
+    // Root's escapes, threaded through from the button that pressed this (#519).
+    // This is the same commitment as an approval a day later — the same gates,
+    // refused on the same conditions — so it is the same two rights.
+    overridePolicy: options.overridePolicy,
+    overrideBudget: options.overrideBudget,
   })
-  if (!gates.ok) return { ok: false, status: gates.status, message: gates.message }
+  // `code` travels with the sentence so the control that started this can offer
+  // the escape the refusal names instead of matching on prose (#509, #519).
+  if (!gates.ok) return { ok: false, status: gates.status, message: gates.message, code: gates.code }
 
   /*
    * The claim and its audit entry in ONE transaction.

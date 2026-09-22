@@ -464,6 +464,11 @@ log, names the cost centre, and the orderer is still told the order went through
 over budget. A hard block with no way past it becomes an outage during the one
 incident where somebody genuinely needs to provision.
 
+The same right is available at each of the two later moments the budget is asked
+again — approving an order, and deploying a scheduled one early — where it is
+offered as a button on the refusal itself rather than as a consequence of the
+order being placed.
+
 **Reaching it.** The order form answers a refusal with the reason and, for a root
 operator, a **Place anyway** button beside it — which is what the escape is for
 and the last place anybody wants to be typing a JSON body into an API client. The
@@ -578,6 +583,14 @@ which provisions it immediately. It is written to the
 audit log as `order.window_overridden`, naming you and the window that was
 skipped.
 
+Deploying early asks the same two gates an approval asks (5b, and cost-centre
+budgets): the order is approved and waiting, but the budget may have been lowered
+or a rule added since. A refusal is named, and root is offered the same two
+waivers as on the approval — **Deploy anyway**. A waiver is written to the audit
+log too (`order.budget_overridden` / `order.policy_overridden`), so one action
+leaves two entries: that the window was skipped, and that a gate was waived in
+order to skip it.
+
 ---
 
 ## 5b. Policy as Code (OPA)
@@ -658,7 +671,9 @@ and it can be approved again. Root may waive either refusal at that moment — t
 policy as `order.policy_overridden`, naming the rule that was waived, and the
 budget as `order.budget_overridden`, naming the cost centre and its state — and
 both are reachable from the row that showed the refusal, with a **Place anyway**
-control. Not root: the reason, and nothing else.
+control. On a scheduled order the same two are offered as **Deploy anyway** when
+the **Deploy now** button is refused, which is the same commitment taken earlier
+rather than a smaller one. Not root: the reason, and nothing else.
 
 **An order waiting for its deployment window counts against its budget.** It has
 been approved and its cost is committed, so the room it needs is not available to
@@ -709,9 +724,9 @@ Logged action types (this list has grown since the feature was first documented 
 | `cost_center.created` / `cost_center.updated` | A cost centre is added or edited |
 | `cost_center.budget_set` / `cost_center.budget_cleared` | A cost centre's budget is set, changed or removed (5.1) |
 | `order.budget_warning` | An order went through with its cost centre's budget already spent, under a `warn` budget |
-| `order.budget_overridden` | Root placed — or approved — an order against a spent `block` budget |
+| `order.budget_overridden` | Root placed, approved, or deployed early, an order against a spent `block` budget |
 | `order.policy_warning` | An order went through that the policy engine allowed with a warning (5b) |
-| `order.policy_overridden` | Root placed (or approved) an order a policy refused, naming the rule that was waived (5b) |
+| `order.policy_overridden` | Root placed, approved, or deployed early, an order a policy refused, naming the rule that was waived (5b) |
 | `order.policy_needs_approval` | An order was held for an approval because a policy rule asked for one — an admin's order waits in the queue instead of provisioning (5b) |
 | `order.policy_denied` | A policy refused an order as it was about to be built — at an approval, or when a deployment window opened (5b) |
 | `order.budget_denied` | A cost centre's budget no longer covered an order as it was about to be built, so the approval or the window release was refused (5.1) |

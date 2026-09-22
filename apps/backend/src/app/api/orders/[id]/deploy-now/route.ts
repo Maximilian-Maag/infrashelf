@@ -26,9 +26,29 @@ export async function POST(
   const orderId = parseRouteId(id)
   if (orderId === null) return invalidId('order id')
 
-  const outcome = await deployScheduledOrderNow(orderId, session, new Date())
+  /*
+   * Root's escapes at this moment (#519).
+   *
+   * Same reading as the approve route: one decision with the action itself —
+   * "deploy it now, and waive the rule that refuses it" — and whether this caller
+   * may use either is decided in the service against the session's role, never by
+   * the body. Parsed leniently, because `DeployNow` posts no body at all until a
+   * refusal has been shown.
+   */
+  const body = ((await req.json().catch(() => null)) ?? {}) as {
+    overridePolicy?: unknown
+    overrideBudget?: unknown
+  }
+
+  const outcome = await deployScheduledOrderNow(orderId, session, new Date(), {
+    overridePolicy: body.overridePolicy === true,
+    overrideBudget: body.overrideBudget === true,
+  })
   if (!outcome.ok) {
-    return NextResponse.json({ error: outcome.message }, { status: outcome.status })
+    return NextResponse.json(
+      { error: outcome.message, ...(outcome.code ? { code: outcome.code } : {}) },
+      { status: outcome.status },
+    )
   }
   return NextResponse.json({ success: true })
 }
