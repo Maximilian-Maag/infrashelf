@@ -678,7 +678,9 @@ An approval can also get past both gates and then fail to start — the window
 policy unreadable, or not one element provisioned. That attempt is given back to
 **pending** as well, and the waiver is not recorded: an entry appears once the
 order it belongs to was actually approved, so it can be retried without the log
-filling with waivers for approvals that did not happen.
+filling with waivers for approvals that did not happen. The release itself is
+recorded as `order.released`, naming what went wrong, so the queue does not simply
+look as it did before somebody tried.
 
 **An order waiting for its deployment window counts against its budget.** It has
 been approved and its cost is committed, so the room it needs is not available to
@@ -711,6 +713,7 @@ Logged action types (this list has grown since the feature was first documented 
 | `order.provisioning` | An Admin/Root places an order directly (no approval step) |
 | `order.approved` | An Admin approves a pending order |
 | `order.rejected` | An Admin rejects a pending order |
+| `order.released` | An approval or a window release was given back — the deployment window could not be read, or not one element could be started — and the order went back to the queue, where it looks as it did before the attempt (#528) |
 | `order.completed` | A CI/CD pipeline completes successfully |
 | `order.failed` | A CI/CD pipeline fails |
 | `order.comment_added` / `order.comment_internal_added` | A comment is added to an order (the internal variant logs when it is marked internal) |

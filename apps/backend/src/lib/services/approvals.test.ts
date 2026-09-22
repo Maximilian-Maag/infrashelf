@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type { SessionUser } from '@infrashelf/types'
 import type * as WindowPolicyService from '@/lib/services/windowPolicy'
+import type * as OrdersService from '@/lib/services/orders'
 
 vi.mock('@/lib/notification', () => ({
   sendOrderApproved: vi.fn().mockResolvedValue(undefined),
@@ -17,7 +18,19 @@ vi.mock('@/lib/services/windowPolicy', async (importOriginal) => ({
   whenMayItDeploy: vi.fn(),
 }))
 
+/*
+ * Provisioning is mocked through to the real function by default, so a test can
+ * stand in for the one failure the real one cannot be made to produce on demand:
+ * a throw from the bracket that CLOSES the run, which arrives with pipelines
+ * already recorded (#528).
+ */
+vi.mock('@/lib/services/orders', async (importOriginal) => ({
+  ...(await importOriginal<typeof OrdersService>()),
+  provisionOrderElements: vi.fn(),
+}))
+
 import { listApprovals, approveOrder, rejectOrder } from './approvals'
+import { provisionOrderElements } from '@/lib/services/orders'
 import { createIntegration } from '@/lib/services/admin/integrations'
 import { sendOrderApproved, sendOrderRejected } from '@/lib/notification'
 import { triggerProductWebhooksTracked } from '@/lib/ci/webhooks'
@@ -53,7 +66,11 @@ const mockedWebhooks = vi.mocked(triggerProductWebhooksTracked)
 const mockedApproved = vi.mocked(sendOrderApproved)
 const mockedRejected = vi.mocked(sendOrderRejected)
 
-beforeEach(() => {
+beforeEach(async () => {
+  // Delegates to the real function: only the tests that need a failure the real
+  // one cannot produce on demand replace it (#528).
+  const real = await vi.importActual<typeof OrdersService>('@/lib/services/orders')
+  vi.mocked(provisionOrderElements).mockReset().mockImplementation(real.provisionOrderElements)
   mockedWebhooks.mockReset().mockResolvedValue({ pipelineIds: ['pipe-42'], failures: [] })
   mockedApproved.mockReset().mockResolvedValue(undefined)
   mockedRejected.mockReset().mockResolvedValue(undefined)
@@ -764,6 +781,61 @@ describe('approveOrder — auditing a delegation in use', () => {
 
     const [row] = await db.select().from(orders).where(eq(orders.id, order.id))
     expect(row.status, 'the order is stranded: nothing can claim it and no sweep looks at it').toBe('pending')
+
+    /*
+     * And the release is recorded (#528).
+     *
+     * It is the transition an operator most needs to see: the order is back in the
+     * queue looking exactly as it did before somebody tried to approve it, with
+     * nothing but `updatedAt` to say the attempt happened.
+     */
+    const released = await db.select().from(auditLog).where(eq(auditLog.action, 'order.released'))
+    expect(released).toHaveLength(1)
+    expect(released[0].entityId).toBe(order.id)
+    expect(released[0].details).toContain('deployment window')
+  })
+
+  it('records the release when provisioning could not be started (#528)', async () => {
+    const { admin, pm, product, env, project } = await setup()
+    const order = await seedOrder(project.id, product.id, env.id, pm.id, { status: 'pending' })
+    vi.mocked(triggerProductWebhooksTracked).mockRejectedValueOnce(new Error('CI unreachable'))
+
+    await expect(approveOrder(makeSession(admin), order.id)).rejects.toThrow('CI unreachable')
+
+    const [row] = await db.select().from(orders).where(eq(orders.id, order.id))
+    expect(row.status).toBe('pending')
+    const released = await db.select().from(auditLog).where(eq(auditLog.action, 'order.released'))
+    expect(released).toHaveLength(1)
+    expect(released[0].details, 'the reason belongs in the entry').toContain('CI unreachable')
+    const approved = await db.select().from(auditLog).where(eq(auditLog.action, 'order.approved'))
+    expect(approved, 'nothing was approved, so nothing may say it was').toEqual([])
+  })
+
+  /*
+   * The counter-case, and the trap a release here would set: a throw from the
+   * bracket that CLOSES the run arrives with pipelines already running, so the
+   * order must stay in 'provisioning' — back in the queue, a second approval
+   * would provision the same infrastructure a second time.
+   */
+  it('leaves an approval provisioning when its pipelines had already started (#528)', async () => {
+    const { admin, pm, product, env, project } = await setup()
+    const order = await seedOrder(project.id, product.id, env.id, pm.id, { status: 'pending' })
+    // The closing bracket: pipelines are recorded, THEN the run fails to close.
+    vi.mocked(provisionOrderElements).mockImplementation(async () => {
+      await db.update(orders).set({ pipelineId: ['pipe-1'] }).where(eq(orders.id, order.id))
+      throw new Error('finishOrderTriggerRun exploded')
+    })
+
+    await expect(approveOrder(makeSession(admin), order.id)).rejects.toThrow(
+      'deploy the same infrastructure twice',
+    )
+
+    const [row] = await db.select().from(orders).where(eq(orders.id, order.id))
+    expect(row.status, 'back in the queue, a second approval would deploy it twice').toBe('provisioning')
+    expect(
+      await db.select().from(auditLog).where(eq(auditLog.action, 'order.released')),
+      'nothing was released, so nothing may say it was',
+    ).toEqual([])
   })
 })
 

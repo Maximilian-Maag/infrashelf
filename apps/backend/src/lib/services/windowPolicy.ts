@@ -142,13 +142,14 @@ const trialDurationFor = async (productId: number, environmentId: number): Promi
  * at the end, so it is a truthful answer even from inside a failure — which is
  * what makes it usable as the guard below.
  *
- * The question matters because an order put back to 'scheduled' with its
- * `scheduled_for` still due is an order the sweep will provision again.
+ * The question matters because an order put back in a queue is an order
+ * something will provision again: the sweep for one returned to 'scheduled' with
+ * `scheduled_for` still due, a second approval for one returned to 'pending'.
  * `provisionOrderElements` throws only when NOTHING started (it deletes its own
  * element rows on that path), but a throw from the bracket that CLOSES the run
  * arrives with pipelines already running — and that one must not be retried.
  */
-const anythingStarted = async (orderId: number): Promise<boolean> => {
+export const anythingStarted = async (orderId: number): Promise<boolean> => {
   const [row] = await db.select({ pipelineId: orders.pipelineId }).from(orders).where(eq(orders.id, orderId))
   return (row?.pipelineId ?? []).length > 0
 }
@@ -302,7 +303,23 @@ export const deployScheduledOrderNow = async (
      */
     const started = await anythingStarted(order.id)
     if (!started) {
-      await db.update(orders).set({ status: 'scheduled', updatedAt: new Date() }).where(eq(orders.id, order.id))
+      /*
+       * Recorded with the release (#528), in one transaction: the override above
+       * says root decided to step over the window, and this says the decision
+       * came to nothing this time — the order is waiting for its window again as
+       * if the click had not happened, which is otherwise invisible.
+       */
+      await db.transaction(async (tx) => {
+        await tx.update(orders).set({ status: 'scheduled', updatedAt: new Date() }).where(eq(orders.id, order.id))
+        await logAuditWith(
+          tx,
+          actor.id,
+          'order.released',
+          order.id,
+          `${actor.email} tried to deploy order #${order.id} without waiting for its window, but nothing could be ` +
+            `started (${e instanceof Error ? e.message : String(e)}). It is waiting for its window again (#528)`,
+        )
+      })
     }
     return {
       ok: false,
@@ -422,7 +439,25 @@ export const releaseDueScheduledOrders = async (
       const started = await anythingStarted(order.id)
 
       if (!started) {
-        await db.update(orders).set({ status: 'scheduled', updatedAt: new Date() }).where(eq(orders.id, order.id))
+        /*
+         * Recorded with the release (#528). The sweep retries by itself, so this
+         * is the entry that explains why an order the sweep was due to deploy is
+         * still sitting in the queue afterwards: CI blinked, nothing started, and
+         * it will be tried again when the window is next due. No actor — the
+         * sweep is nobody's click (`order.failed` is written the same way).
+         */
+        await db.transaction(async (tx) => {
+          await tx.update(orders).set({ status: 'scheduled', updatedAt: new Date() }).where(eq(orders.id, order.id))
+          await logAuditWith(
+            tx,
+            null,
+            'order.released',
+            order.id,
+            `The window release of order #${order.id} started nothing (${
+              e instanceof Error ? e.message : String(e)
+            }). It is waiting for its window again (#528)`,
+          )
+        })
       }
       failed.push({
         orderId: order.id,

@@ -17,7 +17,7 @@ import { activeDelegationsHeldBy, type DelegationRow } from '@/lib/services/dele
 import { provisionOrderElements } from '@/lib/services/orders'
 import { attachBudgets } from '@/lib/services/budgets'
 import { recheckOrderGates, logWaivers } from '@/lib/services/commitGates'
-import { whenMayItDeploy } from '@/lib/services/windowPolicy'
+import { anythingStarted, whenMayItDeploy } from '@/lib/services/windowPolicy'
 import { productNameSql } from '@/lib/db/productText'
 
 export interface ApprovalRow {
@@ -317,10 +317,18 @@ export const approveOrder = async (
      * it only looks at 'scheduled'. Nothing has been provisioned at this point,
      * so the same undo the provisioning failure below performs is the right one.
      */
-    await db
-      .update(orders)
-      .set({ status: 'pending', updatedAt: new Date() })
-      .where(eq(orders.id, orderId))
+    await db.transaction(async (tx) => {
+      await tx.update(orders).set({ status: 'pending', updatedAt: new Date() }).where(eq(orders.id, orderId))
+      await logAuditWith(
+        tx,
+        session.id,
+        'order.released',
+        orderId,
+        `Approval of order #${orderId} given back: the deployment window could not be read (${
+          e instanceof Error ? e.message : String(e)
+        }). The order is pending again and can be approved once that is fixed (#528)`,
+      )
+    })
     throw e
   }
 
@@ -403,13 +411,43 @@ export const approveOrder = async (
       trialDurationMinutes,
     })
   } catch (e) {
-    // Not one element could be started, so nothing is provisioned — release the
-    // claim and let the approval be retried.
-    await db
-      .update(orders)
-      .set({ status: 'pending', updatedAt: new Date() })
-      .where(eq(orders.id, orderId))
-    throw e
+    /*
+     * Did anything start? `provisionOrderElements` throws only when NOTHING
+     * started — it deletes the element rows it had inserted on that path — but a
+     * throw from the bracket that CLOSES the run arrives with pipelines already
+     * running. Releasing THAT one hands the order back to a second approval that
+     * provisions the same infrastructure again, which is why the window paths ask
+     * the same question before they requeue (windowPolicy.ts).
+     *
+     * So the claim comes off, and the release is recorded, only when this is
+     * genuinely nothing-started; otherwise the order stays in 'provisioning' and
+     * the failure is reported as it is.
+     */
+    const started = await anythingStarted(orderId)
+    if (!started) {
+      // Not one element could be started, so nothing is provisioned — release the
+      // claim and let the approval be retried. Recorded with the release (#528):
+      // the order comes back to the queue looking exactly as it did before the
+      // attempt, so without an entry the attempt leaves no trace at all.
+      await db.transaction(async (tx) => {
+        await tx.update(orders).set({ status: 'pending', updatedAt: new Date() }).where(eq(orders.id, orderId))
+        await logAuditWith(
+          tx,
+          session.id,
+          'order.released',
+          orderId,
+          `Approval of order #${orderId} given back: not one element could be started (${
+            e instanceof Error ? e.message : String(e)
+          }). The order is pending again and can be approved once that is fixed (#528)`,
+        )
+      })
+    }
+    throw started
+      ? new Error(
+          `${e instanceof Error ? e.message : String(e)} — the order was left provisioning: its pipelines had ` +
+            'already started, so returning it to the queue would deploy the same infrastructure twice',
+        )
+      : e
   }
 
   // Past the last statement that can release the claim (#527): provisioning has

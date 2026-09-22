@@ -308,6 +308,15 @@ describe('releaseDueScheduledOrders', () => {
     expect(row.status).toBe('scheduled')
     // Still due, so the next sweep picks it up.
     expect(row.scheduledFor).not.toBeNull()
+    /*
+     * Recorded (#528): the sweep retries by itself, so without this the order is
+     * still in the queue with nothing to say why it was not deployed when its
+     * window opened.
+     */
+    const [released] = await db.select().from(auditLog).where(eq(auditLog.action, 'order.released'))
+    expect(released.entityId).toBe(order.id)
+    expect(released.details).toContain('CI unreachable')
+    expect(released.details).toContain('window release')
   })
 
   /*
@@ -327,6 +336,8 @@ describe('releaseDueScheduledOrders', () => {
     expect(out.released).toEqual([])
     expect(out.failed[0].reason).toContain('deploy the same infrastructure twice')
     expect((await reload(order.id)).status).toBe('provisioning')
+    // Not a release, so no release entry (#528): the pipelines are running.
+    expect(await db.select().from(auditLog).where(eq(auditLog.action, 'order.released'))).toEqual([])
   })
 
   /*
@@ -565,6 +576,14 @@ describe('deployScheduledOrderNow', () => {
     const row = await reload(order.id)
     expect(row.status, 'nothing started, so it goes back in the queue').toBe('scheduled')
     expect(row.windowOverrideBy).toBe(actor.id)
+    /*
+     * The release is recorded too (#528): the override says root stepped over the
+     * window, this says the step came to nothing and the order is waiting again —
+     * otherwise the queue looks exactly as it did before the click.
+     */
+    const [released] = await db.select().from(auditLog).where(eq(auditLog.action, 'order.released'))
+    expect(released.entityId).toBe(order.id)
+    expect(released.details).toContain('CI unreachable')
   })
 
   /*
