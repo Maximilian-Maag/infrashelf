@@ -5,7 +5,7 @@ import {
 } from '@/lib/db/schema'
 import { isWithinWindow, nextWindowStart, type WindowPolicy } from './deploymentWindows'
 import { logAudit, logAuditWith } from '@/lib/audit'
-import { recheckOrderGates } from '@/lib/services/commitGates'
+import { recheckOrderGates, logWaivers } from '@/lib/services/commitGates'
 import type { Role } from '@infrashelf/types'
 import { holidayGuard } from './holidayFeed'
 
@@ -202,6 +202,11 @@ export const deployScheduledOrderNow = async (
     return { ok: false, status: gates.status, message: gates.message, ...(gates.code ? { code: gates.code } : {}) }
   }
 
+  // Root's escapes, accepted by the gates and written with the claim they authorise (#521).
+  // Lifted out of the result here because the narrowing has to hold inside the
+  // transaction callback below.
+  const gateWaivers = gates.data.waivers
+
   /*
    * The claim and its audit entry in ONE transaction.
    *
@@ -237,7 +242,15 @@ export const deployScheduledOrderNow = async (
      * over the guardrail was made either way. An override recorded only on
      * success would leave the least explicable case — root forced a deployment
      * out of hours and it broke — as the one with no audit entry.
+     *
+     * The escapes the gates accepted (#521) are written with it, and this is the
+     * reason they are returned to the caller rather than written where they were
+     * decided: the gates run BEFORE this claim, which is conditional on
+     * 'scheduled', so a waiver can be accepted for an order somebody else took in
+     * the meantime. Written here, both entries exist exactly when the claim that
+     * they authorised landed.
      */
+    await logWaivers(tx, actor.id, rows[0].id, gateWaivers)
     await logAuditWith(
       tx,
       actor.id,
