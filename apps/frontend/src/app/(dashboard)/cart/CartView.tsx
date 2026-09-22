@@ -231,26 +231,44 @@ export function CartView({
             </div>
           )}
           {warnings.length > 0 && (
-            <div className="mt-4">
+            <div className="mt-4 space-y-3">
               {/* `warning`, not `error`: the orders were placed. Still
                   role="alert", because it replaces a navigation the user was
-                  expecting and has to be heard. */}
-              <Alert tone="warning">
-                <p className="font-medium">{t('budgetOverBudgetNotice', lang)}</p>
-                <ul className="mt-1 list-disc list-inside text-sm">
-                  {warnings.map((w) => (
-                    <li key={w.orderId}>#{w.orderId} — {w.message}</li>
-                  ))}
-                </ul>
-                <div className="mt-3">
-                  <Link
-                    href="/orders"
-                    className="inline-flex min-h-11 items-center rounded-md px-3 text-sm font-medium underline"
-                  >
-                    {t('orders', lang)}
-                  </Link>
-                </div>
-              </Alert>
+                  expecting and has to be heard.
+
+                  One list per gate (#516). Both gates can let an order through
+                  with something to say, and until #516 the whole list carried the
+                  budget's heading — so a policy remark was introduced as a
+                  statement about the cost centre being over budget, which nothing
+                  in the cart supported and which the policy's own sentence
+                  contradicted directly underneath it. */}
+              {(
+                [
+                  { kind: 'budget', heading: 'budgetOverBudgetNotice' },
+                  { kind: 'policy', heading: 'policyWarningNotice' },
+                ] as const
+              ).map(({ kind, heading }) => {
+                const notices = warnings.filter((w) => w.kind === kind)
+                if (notices.length === 0) return null
+                return (
+                  <Alert key={kind} tone="warning">
+                    <p className="font-medium">{t(heading, lang)}</p>
+                    <ul className="mt-1 list-disc list-inside text-sm">
+                      {notices.map((w) => (
+                        <li key={w.orderId}>#{w.orderId} — {w.message}</li>
+                      ))}
+                    </ul>
+                  </Alert>
+                )
+              })}
+              <div className="mt-3">
+                <Link
+                  href="/orders"
+                  className="inline-flex min-h-11 items-center rounded-md px-3 text-sm font-medium underline"
+                >
+                  {t('orders', lang)}
+                </Link>
+              </div>
             </div>
           )}
 

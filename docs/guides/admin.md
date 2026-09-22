@@ -64,6 +64,13 @@ straight to the orders list. The cart is empty at that point; the notice is
 information, not a failure to retry. A **block** budget refuses the order
 instead, and the message says which cost centre and by how much.
 
+**A policy that let the order through with a warning** (#110) is shown the same
+way, on its own notice under its own heading (#516): a policy `warn`, or an
+engine that could not be asked under a best-effort integration, has nothing to do
+with the budget, and the two conditions can both be true of one checkout. Each
+list names the orders it applies to, so an order under the policy heading is not
+read as a cost centre over its limit.
+
 ### 2.4 Favourites
 
 Click the star on any catalog card to add or remove a product from your favourites (`GET /api/favorites`; `PUT` and `DELETE` on `/api/favorites/{productId}`). Favourited products appear in a shelf at the top of the catalog page independent of pagination/filtering, so a favourite stays reachable even if it would otherwise be on a later page.

@@ -348,6 +348,16 @@ export interface CheckoutFailure {
   message: string
 }
 
+/**
+ * A checkout notice: something a gate said about an order that went through.
+ *
+ * `kind` names the gate (#516), because the cart heads each list with its own and
+ * a policy remark under an over-budget heading is a statement about money that was
+ * never in question — and a contradiction of the policy's own words printed
+ * directly beneath it.
+ */
+export type CheckoutWarning = { orderId: number; message: string; kind: 'budget' | 'policy' }
+
 export interface CheckoutResult {
   orderIds: number[]
   /** Items whose orders could not be created after validation passed. */
@@ -362,7 +372,7 @@ export interface CheckoutResult {
    * One entry per order rather than one for the checkout: a cart can span two
    * projects' cost centres, and "something was over budget" does not say which.
    */
-  warnings: { orderId: number; message: string }[]
+  warnings: CheckoutWarning[]
   /**
    * Orders a policy held for somebody else's approval (#110).
    *
@@ -543,7 +553,7 @@ export const checkoutCart = async (
   // Phase two: create. Past this point failures are per item and cannot be undone.
   const orderIds: number[] = []
   const failed: CheckoutFailure[] = []
-  const warnings: { orderId: number; message: string }[] = []
+  const warnings: CheckoutWarning[] = []
   /**
    * Orders policy sent to the approvals queue instead of provisioning (#110).
    *
@@ -560,13 +570,14 @@ export const checkoutCart = async (
       if (created.ok) {
         orderIds.push(created.data.id)
         if (created.data.budgetWarning) {
-          warnings.push({ orderId: created.data.id, message: created.data.budgetWarning })
+          warnings.push({ orderId: created.data.id, message: created.data.budgetWarning, kind: 'budget' })
         }
         // The policy warning travels with the order for the same reason: a
         // checkout that says nothing about a rule that almost refused the order
-        // is indistinguishable from one where nothing was wrong (#110).
+        // is indistinguishable from one where nothing was wrong (#110). Tagged
+        // with the gate, because the cart heads each list with its own (#516).
         if (created.data.policyWarning) {
-          warnings.push({ orderId: created.data.id, message: created.data.policyWarning })
+          warnings.push({ orderId: created.data.id, message: created.data.policyWarning, kind: 'policy' })
         }
         // And the order policy held back travels too, on its own list (#110): the
         // shopper is the one who will notice it never provisioned.
