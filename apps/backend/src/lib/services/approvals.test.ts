@@ -781,6 +781,119 @@ describe('approveOrder — the gates are re-asked at the point of commitment', (
     return { ...base, root, order }
   }
 
+  /** A pending order whose ceiling moved under it, and the same engine to point at it. */
+  const overspent = async () => {
+    /*
+     * The only way to reach this state is for the ceiling to MOVE while the order
+     * waits (#325): the budget check at creation already refuses an order that
+     * would not fit, and the advisory lock means two creations cannot race past it.
+     */
+    const base = await setup()
+    const root = await createUser({ role: 'root', email: 'root-521@test.dev', name: 'Root' })
+    await linkProductEnvironment(base.product.id, base.env.id, { price: '400.00', currency: 'EUR' })
+    const centre = await createCostCenter()
+    await db
+      .update(costCenters)
+      .set({
+        budgetAmount: '500.00',
+        budgetCurrency: 'EUR',
+        budgetPeriod: 'total',
+        budgetBehaviour: 'block',
+      })
+      .where(eq(costCenters.id, centre.id))
+    await db.update(projects).set({ costCenterId: centre.id }).where(eq(projects.id, base.project.id))
+    const order = await seedOrder(base.project.id, base.product.id, base.env.id, base.pm.id, {
+      status: 'pending',
+    })
+    await createIntegration(root.id, {
+      kind: 'opa',
+      name: 'Policy engine',
+      baseUrl: 'https://opa.example.com',
+      authType: 'none',
+      failureMode: 'blocking',
+    })
+    // Root lowers the ceiling under the waiting order.
+    await db.update(costCenters).set({ budgetAmount: '100.00' }).where(eq(costCenters.id, centre.id))
+    return { ...base, root, centre, order }
+  }
+
+  /*
+   * A waiver that led to nothing (#521).
+   *
+   * The gate that accepts a waiver used to write its audit entry where it
+   * decided, and the gate BEHIND it can still refuse — the budget is asked
+   * before the policy, so root waiving the ceiling can be refused by a rule a
+   * moment later. The order goes back to 'pending', nothing is built, and the
+   * audit log already says root stepped over the ceiling for it. The same entry
+   * was written again on the retry, so one decision could leave several.
+   */
+  it('writes no waiver when the gate behind it refuses (#521)', async () => {
+    const base = await overspent()
+    deny()
+
+    // Root waives the budget, and the policy refuses the order anyway.
+    const result = await approveOrder(makeSession(base.root), base.order.id, { overrideBudget: true })
+
+    expect(result.ok).toBe(false)
+    const [row] = await db.select().from(orders).where(eq(orders.id, base.order.id))
+    expect(row.status).toBe('pending')
+    // Nothing was committed, so nothing may claim the ceiling was waived.
+    const waived = await db
+      .select()
+      .from(auditLog)
+      .where(eq(auditLog.action, 'order.budget_overridden'))
+    expect(waived).toEqual([])
+  })
+
+  it('writes the waiver once when a retry does commit the order (#521)', async () => {
+    const base = await overspent()
+    deny()
+    // Refused, after the budget waiver was accepted...
+    await approveOrder(makeSession(base.root), base.order.id, { overrideBudget: true })
+    // ...then the rule is changed, and the same waiver commits the order.
+    allow()
+    const retry = await approveOrder(makeSession(base.root), base.order.id, { overrideBudget: true })
+
+    expect(retry.ok).toBe(true)
+    // One decision, one entry: the refused attempt must not have left one behind
+    // for the successful one to be mistaken for a second waiver.
+    const waived = await db
+      .select()
+      .from(auditLog)
+      .where(eq(auditLog.action, 'order.budget_overridden'))
+    expect(waived).toHaveLength(1)
+    expect(waived[0].details).toContain('when it was approved')
+  })
+
+  it('carries a budget waiver through a policy refusal of the same attempt (#521)', async () => {
+    /*
+     * Both escapes in one attempt: the budget gate accepts first and the policy
+     * gate refuses, so the budget's waiver has to travel with the verdict rather
+     * than being written at the gate it was decided at. It is the shape a
+     * regression in this refactor takes — the final `ok` forgetting what the
+     * earlier gate collected — so it is pinned here.
+     */
+    const base = await overspent()
+    deny()
+
+    const result = await approveOrder(makeSession(base.root), base.order.id, {
+      overrideBudget: true,
+      overridePolicy: true,
+    })
+
+    expect(result.ok).toBe(true)
+    const waived = await db
+      .select()
+      .from(auditLog)
+      .where(eq(auditLog.action, 'order.budget_overridden'))
+    expect(waived).toHaveLength(1)
+    const overridden = await db
+      .select()
+      .from(auditLog)
+      .where(eq(auditLog.action, 'order.policy_overridden'))
+    expect(overridden).toHaveLength(1)
+  })
+
   it('refuses the approval when a policy denies the order by then', async () => {
     /*
      * #110's own open question — "what happens to an order that policy would

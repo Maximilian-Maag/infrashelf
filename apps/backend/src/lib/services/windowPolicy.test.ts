@@ -704,9 +704,17 @@ describe('deployScheduledOrderNow', () => {
 
       expect(outcome).toEqual({ ok: true })
       expect(vi.mocked(provisionOrderElements)).toHaveBeenCalled()
-      const waived = vi.mocked(logAudit).mock.calls.filter((c) => c[1] === 'order.budget_overridden')
+      // Read out of the TABLE, like the window override below: the waiver is
+      // written with the claim it authorised (#521), through `logAuditWith(tx, …)`
+      // — and that is not the mocked `logAudit`. A mock assertion here would pass
+      // whether or not the entry survived a failed commit.
+      expect(vi.mocked(logAudit).mock.calls.filter((c) => c[1] === 'order.budget_overridden')).toHaveLength(0)
+      const waived = await db
+        .select()
+        .from(auditLog)
+        .where(and(eq(auditLog.action, 'order.budget_overridden'), eq(auditLog.entityId, order.id)))
       expect(waived).toHaveLength(1)
-      expect(waived[0][3]).toContain('when it was deployed outside its window')
+      expect(waived[0].details).toContain('when it was deployed outside its window')
       // And the window override is recorded as usual — the two waivers are
       // separate records, not one replacing the other. Read out of the audit log
       // rather than the mock, because the window override is written inside the
@@ -716,6 +724,28 @@ describe('deployScheduledOrderNow', () => {
         .from(auditLog)
         .where(and(eq(auditLog.action, 'order.window_overridden'), eq(auditLog.entityId, order.id)))
       expect(windowOverrides).toHaveLength(1)
+    })
+
+    it('writes no waiver when the claim is lost (#521)', async () => {
+      /*
+       * The gates run BEFORE the claim, so a waiver is decided before the order is
+       * taken — and the claim is conditional on 'scheduled', so it loses to
+       * whoever else got there first: the sweep, or another root clicking. Without
+       * this, the audit log says root stepped over a spent ceiling for an order
+       * this call never committed.
+       */
+      const { order, actor } = await overspentScheduledOrder()
+      // Somebody else took it between the gates and the claim.
+      await db.update(orders).set({ status: 'provisioning' }).where(eq(orders.id, order.id))
+
+      const outcome = await deployScheduledOrderNow(order.id, actor, AT, { overrideBudget: true })
+
+      expect(outcome.ok).toBe(false)
+      expect(vi.mocked(logAudit).mock.calls.filter((c) => c[1] === 'order.budget_overridden')).toHaveLength(0)
+      // Nothing about stepping over the window either: the claim is what records
+      // that, and there was no claim.
+      const rows = await db.select().from(auditLog).where(eq(auditLog.entityId, order.id))
+      expect(rows).toEqual([])
     })
 
     it('names a commit refusal in a code, so a client can offer the right escape', async () => {

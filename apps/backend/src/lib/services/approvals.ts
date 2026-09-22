@@ -16,7 +16,7 @@ import { redactParametersForOrders } from '@/lib/services/parameterRedaction'
 import { activeDelegationsHeldBy, type DelegationRow } from '@/lib/services/delegations'
 import { provisionOrderElements } from '@/lib/services/orders'
 import { attachBudgets } from '@/lib/services/budgets'
-import { recheckOrderGates } from '@/lib/services/commitGates'
+import { recheckOrderGates, logWaivers } from '@/lib/services/commitGates'
 import { whenMayItDeploy } from '@/lib/services/windowPolicy'
 import { productNameSql } from '@/lib/db/productText'
 
@@ -262,6 +262,22 @@ export const approveOrder = async (
   }
 
   const policyWarning = gates.data.policyWarning ?? undefined
+
+  /*
+   * The escapes root exercised, written now that the gates have all passed (#521).
+   *
+   * Here rather than at the gate that accepted them, because the gate behind it
+   * can still refuse — and when it does the claim is released and the order goes
+   * back to `pending`, so an entry written there would name a waiver for an order
+   * nothing committed (and be written again on the retry). Nothing can refuse
+   * after this point: the claim has landed and the order is leaving 'pending'.
+   *
+   * Through `logAudit` rather than a transaction: there is no statement left to
+   * pair it with — the claim IS the commit, and it happened before the gates were
+   * asked so that this caller is the one deciding. The window override below
+   * takes the same view of a decision that was already made.
+   */
+  await logWaivers(db, session.id, order.id, gates.data.waivers)
 
   /*
    * Does a window have to open first (#330)?

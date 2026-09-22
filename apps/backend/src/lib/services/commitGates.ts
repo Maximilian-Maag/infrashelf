@@ -5,7 +5,7 @@ import { orders, projects, users } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
 import { loadBudgetState } from '@/lib/services/budgets'
 import { evaluateOrderPolicy } from '@/lib/policy/gate'
-import { logAudit } from '@/lib/audit'
+import { logAudit, logAuditWith } from '@/lib/audit'
 import { ok, err, type Result } from '@/lib/services/result'
 
 /**
@@ -70,9 +70,48 @@ export interface CommitVerdict {
    * `policyWarning` on the ordering path.
    */
   policyWarning: string | null
+  /**
+   * The escapes this evaluation accepted, for the CALLER to write (#521).
+   *
+   * Returned rather than written here because asking is not committing: the gates
+   * are asked in order, and the one BEHIND an accepted waiver can still refuse —
+   * the budget is asked before the policy, so root waiving a spent ceiling can be
+   * refused by a rule a moment later, and the order goes back to `pending` with
+   * nothing built. An entry written here would say root stepped over a ceiling
+   * for an order that was never committed, and the retry would write a second
+   * one. Written by the caller where it commits the order — inside the same
+   * transaction, where it has one, as the ordering path does — an entry means
+   * what it says.
+   */
+  waivers: CommitWaiver[]
 }
 
-const noWarnings: CommitVerdict = { policyWarning: null }
+/** One escape root exercised, in the shape `logWaivers` writes it. */
+export interface CommitWaiver {
+  /** The action the ordering path records the same privilege under. */
+  action: 'order.budget_overridden' | 'order.policy_overridden'
+  /** The sentence the entry carries: who, which order, and which seam. */
+  details: string
+}
+
+/**
+ * Write the waivers an evaluation accepted, against the executor that commits the
+ * order.
+ *
+ * Pass the transaction where there is one (`logAuditWith(tx, …)`): the entry and
+ * the order it describes have to commit or roll back together, which is the whole
+ * point of returning them rather than writing them at the gate (#521).
+ */
+export const logWaivers = async (
+  executor: Parameters<typeof logAuditWith>[0],
+  actorId: number | null,
+  orderId: number,
+  waivers: readonly CommitWaiver[],
+): Promise<void> => {
+  for (const waiver of waivers) {
+    await logAuditWith(executor, actorId, waiver.action, orderId, waiver.details)
+  }
+}
 
 /** The refusal naming the cost centre and the state, in the approver's words. */
 const overBudgetMessage = (state: BudgetState): string => {
@@ -136,6 +175,11 @@ export const recheckOrderGates = async (
    */
   const costCenterId = row.costCenterId ?? row.projectCostCenterId ?? null
   const budget = costCenterId === null ? null : await loadBudgetState(costCenterId)
+  /*
+   * The escapes accepted so far (#521). Collected, not written: see
+   * `CommitVerdict.waivers` — the policy gate below can still refuse this order.
+   */
+  const waivers: CommitWaiver[] = []
   if (budget && budget.amount !== null && budget.behaviour === 'block' && budget.committed > budget.amount) {
     const message = overBudgetMessage(budget)
     /*
@@ -155,12 +199,10 @@ export const recheckOrderGates = async (
       // sentence (#509's plumbing, extended to the commit gates by #514).
       return err(409, message, 'budget_blocked')
     }
-    await logAudit(
-      context.actor?.id ?? null,
-      'order.budget_overridden',
-      orderId,
-      `${context.actor?.email} waived the budget refusal on order #${orderId} ${context.seam}: ${message}`,
-    )
+    waivers.push({
+      action: 'order.budget_overridden',
+      details: `${context.actor?.email} waived the budget refusal on order #${orderId} ${context.seam}: ${message}`,
+    })
   }
 
   /*
@@ -225,14 +267,13 @@ export const recheckOrderGates = async (
       return err(409, verdict.message ?? 'This order is not permitted by policy.', 'policy_denied')
     }
 
-    await logAudit(
-      context.actor?.id ?? null,
-      'order.policy_overridden',
-      orderId,
-      `${context.actor?.email} waived the policy refusal on order #${orderId} ${context.seam}: ` +
+    waivers.push({
+      action: 'order.policy_overridden',
+      details:
+        `${context.actor?.email} waived the policy refusal on order #${orderId} ${context.seam}: ` +
         `${verdict.message ?? 'refused by policy'}`,
-    )
-    return ok(noWarnings)
+    })
+    return ok({ policyWarning: null, waivers })
   }
 
   if (verdict.outcome === 'warn') {
@@ -254,8 +295,11 @@ export const recheckOrderGates = async (
         (verdict.rule ? ` (rule: ${verdict.rule})` : '') +
         `: ${verdict.message ?? '(no message)'}`,
     )
-    return ok({ policyWarning: verdict.message })
+    return ok({ policyWarning: verdict.message, waivers })
   }
 
-  return ok(noWarnings)
+  // Anything accepted along the way travels with the verdict, even when both
+  // gates had nothing else to say (#521): the budget's escape is decided before
+  // the policy is asked at all.
+  return ok({ policyWarning: null, waivers })
 }

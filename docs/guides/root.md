@@ -716,7 +716,7 @@ Logged action types (this list has grown since the feature was first documented 
 | `cost_center.created` / `cost_center.updated` | A cost centre is added or edited |
 | `cost_center.budget_set` / `cost_center.budget_cleared` | A cost centre's budget is set, changed or removed (5.1) |
 | `order.budget_warning` | An order went through with its cost centre's budget already spent, under a `warn` budget |
-| `order.budget_overridden` | Root placed — or approved, or deployed early — an order against a spent `block` budget |
+| `order.budget_overridden` | Root placed — or approved, or deployed early — an order against a spent `block` budget. Written with the order it committed, so a waiver on an attempt that was then refused, or that lost the order to somebody else, leaves no entry (#521) |
 | `order.policy_warning` | An order went through that the policy engine allowed with a warning (5b) |
 | `order.policy_overridden` | Root placed (or approved) an order a policy refused, naming the rule that was waived (5b) |
 | `order.policy_needs_approval` | An order was held for an approval because a policy rule asked for one — an admin's order waits in the queue instead of provisioning (5b) |
