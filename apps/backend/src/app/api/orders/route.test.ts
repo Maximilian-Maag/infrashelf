@@ -460,4 +460,38 @@ describe('POST /api/orders — the overrides reach the service', () => {
     )
     expect(allowed.status).toBe(201)
   })
+
+  /*
+   * #509. The form can only offer the escape the refusal actually names, and the
+   * two refusals are the same 409 with different prose. The code is the part a
+   * client can switch on; this pins it to the wire, at the route, where a client
+   * would read it.
+   */
+  it('codes each refusal, so a client knows which escape applies (#509)', async () => {
+    // The budget half first: the policy engine below is portal-wide, so an engine
+    // installed ahead of this would refuse the order before the budget gate is
+    // reached and this would assert the wrong refusal.
+    const budget = await ready()
+    const centre = await createCostCenter()
+    await db.update(projects).set({ costCenterId: centre.id }).where(eq(projects.id, budget.project.id))
+    await db
+      .update(costCenters)
+      .set({ budgetAmount: '0.00', budgetCurrency: 'EUR', budgetPeriod: 'total', budgetBehaviour: 'block' })
+      .where(eq(costCenters.id, centre.id))
+
+    const budgetRefusal = await POST(
+      makeReq('http://localhost/api/orders', bodyFor(budget), await makeAuthHeader(budget.root)),
+    )
+    expect(budgetRefusal.status).toBe(409)
+    expect(((await budgetRefusal.json()) as { code?: string }).code).toBe('budget_blocked')
+
+    const policy = await ready()
+    await policyEngine(policy.root.id)
+    deny()
+    const policyRefusal = await POST(
+      makeReq('http://localhost/api/orders', bodyFor(policy), await makeAuthHeader(policy.root)),
+    )
+    expect(policyRefusal.status).toBe(409)
+    expect(((await policyRefusal.json()) as { code?: string }).code).toBe('policy_denied')
+  })
 })

@@ -4,7 +4,14 @@ import type { Result } from '@/lib/services/result'
 export const toResponse = <T>(result: Result<T>, successStatus = 200): NextResponse =>
   result.ok
     ? NextResponse.json(result.data ?? { success: true }, { status: successStatus })
-    : NextResponse.json({ error: result.message }, { status: result.status })
+    : NextResponse.json(
+        // `code` is spelled out through the spread rather than set to undefined,
+        // so a refusal that carries one is the only shape that changes. A client
+        // switching on it is asking "is this the refusal I can answer", and an
+        // absent key answers that the same way `undefined` does (#509).
+        { error: result.message, ...(result.code ? { code: result.code } : {}) },
+        { status: result.status },
+      )
 
 /**
  * A path segment as a positive database id, or null if it is not one.

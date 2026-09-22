@@ -11,8 +11,9 @@ import {
   type Order,
   type InfrastructureElement,
   type InfrastructurePage,
+  type Role,
 } from '@infrashelf/types'
-import { post, get } from '@/lib/api'
+import { post, get, ApiError } from '@/lib/api'
 import { Button } from '@/components/ui/Button'
 import { Alert } from '@/components/ui/Alert'
 import { Select } from '@/components/ui/Select'
@@ -32,6 +33,16 @@ interface OrderFormProps {
   exchangeRates?: Record<string, number>
   localeCurrency?: string
   /**
+   * Who is ordering (#509).
+   *
+   * Only root is offered the escape from a refusal, and the backend re-checks the
+   * role — this decides whether the control is rendered at all, not whether the
+   * order is allowed. Defaulted to the role that gets no escape, so a caller that
+   * forgets to pass it fails closed rather than showing a control that would be
+   * refused.
+   */
+  role?: Role
+  /**
    * Quick reorder (issue #39): the infrastructure element to copy parameters
    * from, plus its project. The project has to come along — the template list is
    * loaded per project, so without it there is nothing to match the id against.
@@ -47,6 +58,7 @@ export function OrderForm({
   lang = 'en',
   exchangeRates = {},
   localeCurrency = 'EUR',
+  role = 'project_manager',
   fromInfraId,
   initialProjectId,
 }: OrderFormProps) {
@@ -63,6 +75,29 @@ export function OrderForm({
   const [paramValues, setParamValues] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  /*
+   * The refusal this order just came back with, when there is an escape from it
+   * (#509). A code rather than a boolean, because which escape applies is which
+   * refusal came back — the budget and the policy are two separate rights, and
+   * sending the wrong one waives nothing (or, worse, waives the other).
+   */
+  const [refusal, setRefusal] = useState<'budget_blocked' | 'policy_denied' | null>(null)
+  /*
+   * The waivers already exercised in this refusal chain.
+   *
+   * A policy refusal HIDES the budget one — `createPreparedOrder` asks the policy
+   * first and returns on a deny — so root waiving the policy can uncover a budget
+   * refusal underneath it. Retrying with only the flag for the refusal in hand
+   * would then re-send the order without the waiver already made, the policy would
+   * refuse it again, and the two would alternate for ever with no way through.
+   *
+   * Cleared on an ordinary submit: a fresh attempt is a fresh question, and a
+   * waiver kept from a previous one would grant something nobody was asked about.
+   */
+  const [retryOverrides, setRetryOverrides] = useState<{
+    overrideBudget?: boolean
+    overridePolicy?: boolean
+  }>({})
   const [success, setSuccess] = useState(false)
 
   const [templates, setTemplates] = useState<InfrastructureElement[]>([])
@@ -255,27 +290,31 @@ export function OrderForm({
     if (String(tpl.environmentId) !== envId) setEnvId(String(tpl.environmentId))
   }
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    if (!envId || !projectId) {
-      setError(t('selectEnvProject', lang))
-      return
-    }
-    if (needsSize && !sizeCode) {
-      setError(t('selectSize', lang))
-      return
-    }
-    // Refused here rather than by disabling the button. Clearing the field makes
-    // `Number('')` zero, and a disabled <button> is not focusable — so the form
-    // used to become unsubmittable in silence, and a screen-reader user tabbing
-    // to the end found no submit control at all and nothing saying why (WCAG
-    // 3.3.1 — #186). Every other refusal in this form goes through `Alert`.
-    if (!quantityValid) {
-      setError(quantityMessage)
-      return
-    }
+  /**
+   * Place the order, optionally waiving the refusal that came back (#509).
+   *
+   * `overrides` is what the "place anyway" control sends, and it is deliberately
+   * the only way in: the two refusals are two separate rights, so a body claiming
+   * both would waive whatever the server asked next as well as what it refused.
+   *
+   * The refusal is read off the error's `code`, never off its message: the message
+   * is written for a person and is reworded freely, and a form that branched on the
+   * sentence would offer the wrong escape — or none — the first time it changed.
+   */
+  async function place(overrides: { overrideBudget?: boolean; overridePolicy?: boolean } = {}) {
+    /*
+     * A retry carries the waivers already made in this chain; an ordinary submit
+     * carries none. See `retryOverrides` for why the chain needs them — the policy
+     * gate hides the budget one, so the flags have to accumulate rather than
+     * replace.
+     */
+    const carried = Object.keys(overrides).length > 0 ? { ...retryOverrides, ...overrides } : {}
+    setRetryOverrides(carried)
     setLoading(true)
     setError(null)
+    // Cleared first: this attempt is the answer to the last one, and leaving the
+    // old refusal beside its own retry reads as a second, simultaneous failure.
+    setRefusal(null)
     try {
       // Merge defaultValue in for any parameter the user did not touch — the
       // Input placeholder already displays the default, so users expect it to
@@ -308,6 +347,7 @@ export function OrderForm({
         // Only sent when the selected environment offers a trial: switching
         // environments after ticking the box must not smuggle the flag through.
         ...(trialAvailable && trial ? { trial: true } : {}),
+        ...carried,
       }
       await post<Order>('/api/orders', body)
       setSuccess(true)
@@ -315,9 +355,48 @@ export function OrderForm({
       router.refresh()
     } catch (err) {
       setError(err instanceof Error ? err.message : t('orderError', lang))
+      const code = err instanceof ApiError ? err.code : undefined
+      // Root, and only for the two refusals that HAVE an escape — a code the form
+      // does not know is not an invitation to guess at one.
+      setRefusal(
+        role === 'root' && (code === 'budget_blocked' || code === 'policy_denied') ? code : null,
+      )
     } finally {
       setLoading(false)
     }
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    if (!envId || !projectId) {
+      setError(t('selectEnvProject', lang))
+      return
+    }
+    if (needsSize && !sizeCode) {
+      setError(t('selectSize', lang))
+      return
+    }
+    // Refused here rather than by disabling the button. Clearing the field makes
+    // `Number('')` zero, and a disabled <button> is not focusable — so the form
+    // used to become unsubmittable in silence, and a screen-reader user tabbing
+    // to the end found no submit control at all and nothing saying why (WCAG
+    // 3.3.1 — #186). Every other refusal in this form goes through `Alert`.
+    if (!quantityValid) {
+      setError(quantityMessage)
+      return
+    }
+    await place()
+  }
+
+  /**
+   * Root's escape from the refusal just shown (#509, #325).
+   *
+   * The flag follows the refusal that produced it. Both are audited server-side,
+   * with the rule or the budget that was waived — so the honest thing to say
+   * beside the control is that it is recorded, which is what the hint does.
+   */
+  async function placeAnyway() {
+    await place(refusal === 'budget_blocked' ? { overrideBudget: true } : { overridePolicy: true })
   }
 
   function formatPrice(price: string, currency: string): string {
@@ -360,6 +439,25 @@ export function OrderForm({
       {error && (
         <Alert>
           {error}
+          {/* The escape, and only where there is one to offer (#509). Rendered
+              inside the alert rather than as a second message: it is the answer to
+              this refusal, and the live region that announced the refusal should
+              carry its remedy too. */}
+          {refusal && (
+            <div className="mt-3">
+              <p className="text-sm">{t('placeAnywayHint', lang)}</p>
+              <Button
+                type="button"
+                variant="danger"
+                size="sm"
+                className="mt-2"
+                disabled={loading}
+                onClick={placeAnyway}
+              >
+                {t('placeAnyway', lang)}
+              </Button>
+            </div>
+          )}
         </Alert>
       )}
 

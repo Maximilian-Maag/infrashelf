@@ -1099,6 +1099,15 @@ export interface CreateOrderRequest {
    * needs an admin to approve it.
    */
   trial?: boolean
+  /**
+   * Place the order even though the cost centre's budget is spent (#325), or
+   * even though a policy refused it (#110). Two separate rights, both root-only:
+   * an approval says "this order is wanted", an override says "this rule does not
+   * apply here". The server checks the role — sending either sends a request to
+   * waive something, never the waiver itself (#509).
+   */
+  overrideBudget?: boolean
+  overridePolicy?: boolean
 }
 
 // ─── Costs (issue #32) ────────────────────────────────────────────────────────

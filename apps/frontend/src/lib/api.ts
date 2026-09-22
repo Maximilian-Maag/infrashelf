@@ -74,6 +74,14 @@ export class ApiError extends Error {
   constructor(
     public readonly status: number,
     message: string,
+    /**
+     * The backend's machine-readable refusal code, when it sent one (#509).
+     *
+     * The message is what to show; this is what to ACT on. Two refusals that need
+     * different handling arrive as the same 409 with different prose, and a UI that
+     * branches on the sentence breaks silently the first time somebody rewords it.
+     */
+    public readonly code?: string,
   ) {
     super(message)
   }
@@ -155,7 +163,9 @@ export const apiRequest = async <T>(
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }))
     if (res.status === 401) await endExpiredSession()
-    throw new ApiError(res.status, err.error ?? res.statusText)
+    // Read as a string rather than cast: the body comes from over there, and a
+    // `code` that is not a string is a code no caller can switch on safely.
+    throw new ApiError(res.status, err.error ?? res.statusText, typeof err.code === 'string' ? err.code : undefined)
   }
 
   if (res.status === 204) return undefined as T

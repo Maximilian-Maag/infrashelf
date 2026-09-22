@@ -1229,6 +1229,20 @@ registry.registerPath({
                 'The pipeline receives TRIAL=true and TRIAL_DURATION_MINUTES, and the element is scheduled ' +
                 'for automatic decommissioning once provisioning starts.',
             }),
+            overrideBudget: z.boolean().optional().openapi({
+              description:
+                '[root] Place the order even though the cost centre\'s budget is spent (#325). Two ' +
+                'refusals can come back as a 409 and only this one answers `code: "budget_blocked"`; ' +
+                'sending it for a policy refusal waives nothing. The role is checked server-side, so ' +
+                'this is a request to waive, never the waiver itself. Recorded as ' +
+                '`order.budget_overridden` (#509).',
+            }),
+            overridePolicy: z.boolean().optional().openapi({
+              description:
+                '[root] Place the order even though a policy denied it (#110), a separate right from ' +
+                '`overrideBudget`. Answers `code: "policy_denied"`; recorded as ' +
+                '`order.policy_overridden`, naming the rule that was waived.',
+            }),
           }),
         },
       },

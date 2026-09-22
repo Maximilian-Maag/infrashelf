@@ -345,6 +345,7 @@ export default async function ProductDetailPage({ params, searchParams }: Props)
             projects={projects.data}
             costCenters={costCenters.data}
             lang={lang}
+            role={role}
             exchangeRates={ratesMap}
             localeCurrency={localeCurrency}
             fromInfraId={fromInfraId}
