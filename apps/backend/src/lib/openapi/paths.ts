@@ -364,10 +364,18 @@ const productEnvironmentSchema = z.object({
 })
 
 const exchangeRateSchema = z.object({
-  id: z.number(),
-  currencyCode: z.string(),
-  rateToEur: z.string(),
-  updatedAt: z.string().nullable(),
+  currencyCode: z.string().openapi({
+    description: 'Three-letter ISO-4217 code, and the primary key — a rate is per currency, not per row.',
+  }),
+  rate: z.string().openapi({
+    description:
+      'How much of this currency one unit of the rate feed\'s base currency buys, kept as a STRING: ' +
+      'the column is NUMERIC, and parsing it into a number here would round money. Convert with a ' +
+      'decimal-aware type, not parseFloat.',
+  }),
+  updatedAt: z.string().openapi({
+    description: 'When this rate was last read from the feed. Never null — the column has a default.',
+  }),
 })
 
 // ─── System ───────────────────────────────────────────────────────────────────
