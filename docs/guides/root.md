@@ -629,6 +629,19 @@ An integration bound to an environment answers for that environment; a
 portal-wide one answers everywhere else. Each integration has a **Test
 connection** button, which checks the engine's own `/health` endpoint.
 
+**The engine is asked twice.** Policies and budgets are asked when an order is
+*requested*, and again when it is *committed* — when an admin approves it, or
+when its deployment window opens. Between the two, a rule can be added that
+would have refused the order and a ceiling can be lowered, and the second ask is
+the last moment either can change the outcome. An approval refused this way
+leaves the order **pending**, not rejected: raise the budget, or change the rule,
+and it can be approved again. Root may waive a policy refusal at that moment too,
+recorded as `order.policy_overridden` with the rule that was waived.
+
+**An order waiting for its deployment window counts against its budget.** It has
+been approved and its cost is committed, so the room it needs is not available to
+anyone else while it waits.
+
 ## 6. User Management
 
 Under **Administration → Users**:
@@ -676,7 +689,9 @@ Logged action types (this list has grown since the feature was first documented 
 | `order.budget_warning` | An order went through with its cost centre's budget already spent, under a `warn` budget |
 | `order.budget_overridden` | Root placed an order against a spent `block` budget |
 | `order.policy_warning` | An order went through that the policy engine allowed with a warning (5b) |
-| `order.policy_overridden` | Root placed an order a policy refused, naming the rule that was waived (5b) |
+| `order.policy_overridden` | Root placed (or approved) an order a policy refused, naming the rule that was waived (5b) |
+| `order.policy_denied` | A policy refused an order as it was about to be built — at an approval, or when a deployment window opened (5b) |
+| `order.budget_denied` | A cost centre's budget no longer covered an order as it was about to be built, so the approval or the window release was refused (5.1) |
 | `order.policy_unavailable` | The policy engine could not be asked — recorded whether the order was then refused (`blocking`) or allowed (`best_effort`), because an unevaluated order is the outcome nobody would otherwise see (5b) |
 | `project.created` / `project.updated` | A project is added or edited |
 | `user.created` / `user.updated` | An account is created, or its role/details change |

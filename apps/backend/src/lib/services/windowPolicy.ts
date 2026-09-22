@@ -5,6 +5,8 @@ import {
 } from '@/lib/db/schema'
 import { isWithinWindow, nextWindowStart, type WindowPolicy } from './deploymentWindows'
 import { logAudit, logAuditWith } from '@/lib/audit'
+import { recheckOrderGates } from '@/lib/services/commitGates'
+import type { Role } from '@infrashelf/types'
 import { holidayGuard } from './holidayFeed'
 
 /**
@@ -170,9 +172,26 @@ const anythingStarted = async (orderId: number): Promise<boolean> => {
  */
 export const deployScheduledOrderNow = async (
   orderId: number,
-  actor: { id: number; email: string },
+  actor: { id: number; email: string; role?: Role },
   now: Date,
 ): Promise<{ ok: true } | { ok: false; status: number; message: string }> => {
+  /*
+   * The gates, before the claim (#511): root deploying a scheduled order early
+   * is the same commitment as approving it, a day later than the decision, so the
+   * budget and the policy are asked again here too.
+   *
+   * Before the claim rather than after, because the claim writes the window
+   * override and its audit entry in one transaction: refusing afterwards would
+   * either have to roll that record back — losing the fact that root tried — or
+   * leave an order provisioned against a spent budget. Asking first costs one
+   * engine call on a button a human presses.
+   */
+  const gates = await recheckOrderGates(orderId, {
+    seam: 'when it was deployed outside its window',
+    actor: actor.role ? { id: actor.id, email: actor.email, role: actor.role } : null,
+  })
+  if (!gates.ok) return { ok: false, status: gates.status, message: gates.message }
+
   /*
    * The claim and its audit entry in ONE transaction.
    *
@@ -310,6 +329,36 @@ export const releaseDueScheduledOrders = async (
     if (claimed.length === 0) continue
 
     const order = claimed[0]
+
+    /*
+     * The gates, asked again (#511). The sweep is where an order installs
+     * itself hours or days after anybody looked at it, and it asked nothing:
+     * the budget can have been lowered and the policy changed in between.
+     *
+     * On a refusal the order goes back to 'pending' rather than to 'scheduled'.
+     * A gate that refuses is a decision for a person, and 'scheduled' would put
+     * it straight back where the next sweep picks it up — retrying, and
+     * re-logging, every minute until somebody notices. 'pending' is the queue
+     * an admin is looking at, and it is also where the order is approvable again
+     * once the budget is raised or the rule changed.
+     */
+    const gates = await recheckOrderGates(order.id, { seam: 'when its deployment window opened' })
+    if (!gates.ok) {
+      /*
+       * `scheduledFor` is cleared with the status, and not only for tidiness:
+       * `orders_scheduled_consistency` refuses a `pending` order that still
+       * carries a release time — "a row carrying either without the other is a
+       * bug that surfaces as an order the sweep picks up for ever". The
+       * database caught this before the test suite did.
+       */
+      await db
+        .update(orders)
+        .set({ status: 'pending', scheduledFor: null, updatedAt: now })
+        .where(eq(orders.id, order.id))
+      failed.push({ orderId: order.id, reason: gates.message })
+      continue
+    }
+
     try {
       const { provisionOrderElements } = await import('@/lib/services/orders')
       await provisionOrderElements({
