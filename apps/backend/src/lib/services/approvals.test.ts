@@ -744,10 +744,26 @@ describe('approveOrder — auditing a delegation in use', () => {
  * did.
  */
 describe('approveOrder — the gates are re-asked at the point of commitment', () => {
-  afterEach(() => vi.restoreAllMocks())
+  /*
+   * `restoreAllMocks` undoes spies but leaves a module-level `vi.fn()` exactly as
+   * the last test left it, so a `mockResolvedValue` for the deployment window
+   * leaked into the next test and scheduled an order that should have provisioned
+   * immediately (#527).
+   */
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.mocked(whenMayItDeploy).mockReset()
+  })
 
+  /*
+   * A fresh Response per call, not `mockResolvedValue` of one instance: a body
+   * can only be read once, so a test that asks the gates twice (a refusal and
+   * then the retry) had its second evaluation fail with "Body is unusable" and
+   * the engine read as unreachable — a mock artefact that looked exactly like an
+   * engine outage.
+   */
   const deny = () =>
-    vi.spyOn(global, 'fetch').mockResolvedValue(
+    vi.spyOn(global, 'fetch').mockImplementation(async () =>
       new Response(
         JSON.stringify({
           result: { decision: 'deny', rule: 'quota/vm-count', message: 'This project is at its limit' },
@@ -757,7 +773,7 @@ describe('approveOrder — the gates are re-asked at the point of commitment', (
     )
 
   const allow = () =>
-    vi.spyOn(global, 'fetch').mockResolvedValue(
+    vi.spyOn(global, 'fetch').mockImplementation(async () =>
       new Response(JSON.stringify({ result: { decision: 'allow', rule: 'baseline' } }), {
         status: 200,
         headers: { 'content-type': 'application/json' },
@@ -892,6 +908,79 @@ describe('approveOrder — the gates are re-asked at the point of commitment', (
       .from(auditLog)
       .where(eq(auditLog.action, 'order.policy_overridden'))
     expect(overridden).toHaveLength(1)
+  })
+
+  /*
+   * A waiver that outlives the approval it was for (#527).
+   *
+   * #521 moved the waiver out of the gate that decided it, but the caller wrote
+   * it before its own last point of no return: the window read and the
+   * provisioning below both release the claim and put the order back to
+   * 'pending'. The entry then says root waived a ceiling "when it was approved"
+   * for an approval that was undone — and the retry writes it again.
+   */
+  it('writes no waiver for an approval the window read then released (#527)', async () => {
+    const base = await overspent()
+    allow()
+    vi.mocked(whenMayItDeploy).mockRejectedValueOnce(new Error('deployment_windows is unreadable'))
+
+    await expect(
+      approveOrder(makeSession(base.root), base.order.id, { overrideBudget: true }),
+    ).rejects.toThrow('unreadable')
+
+    const [row] = await db.select().from(orders).where(eq(orders.id, base.order.id))
+    expect(row.status, 'the claim comes back off, so nothing was approved').toBe('pending')
+    const waived = await db
+      .select()
+      .from(auditLog)
+      .where(eq(auditLog.action, 'order.budget_overridden'))
+    expect(waived, 'no entry may claim root waived a ceiling for an order that went back to pending').toEqual([])
+  })
+
+  it('writes the waiver once when the retry after a released claim commits (#527)', async () => {
+    const base = await overspent()
+    allow()
+    vi.mocked(whenMayItDeploy).mockRejectedValueOnce(new Error('deployment_windows is unreadable'))
+    await expect(
+      approveOrder(makeSession(base.root), base.order.id, { overrideBudget: true }),
+    ).rejects.toThrow('unreadable')
+
+    const retry = await approveOrder(makeSession(base.root), base.order.id, { overrideBudget: true })
+
+    expect(retry.ok).toBe(true)
+    const waived = await db
+      .select()
+      .from(auditLog)
+      .where(eq(auditLog.action, 'order.budget_overridden'))
+    expect(waived, 'one approval, one entry').toHaveLength(1)
+  })
+
+  it('writes the waiver in the commit that schedules the order (#527)', async () => {
+    /*
+     * The other half of the placement (#527). An approval that has to wait for a
+     * window commits by becoming 'scheduled', and that is the last statement in
+     * the function — so the entry and the transition go in together. Nothing
+     * here has to be given back afterwards.
+     */
+    const base = await overspent()
+    allow()
+    vi.mocked(whenMayItDeploy).mockResolvedValue({ scheduledFor: new Date('2026-10-01T02:00:00Z') })
+
+    const result = await approveOrder(makeSession(base.root), base.order.id, { overrideBudget: true })
+
+    expect(result.ok).toBe(true)
+    const [row] = await db.select().from(orders).where(eq(orders.id, base.order.id))
+    expect(row.status, 'the approval committed by scheduling it').toBe('scheduled')
+    const waived = await db
+      .select()
+      .from(auditLog)
+      .where(eq(auditLog.action, 'order.budget_overridden'))
+    expect(waived).toHaveLength(1)
+    const scheduled = await db
+      .select()
+      .from(auditLog)
+      .where(eq(auditLog.action, 'order.scheduled'))
+    expect(scheduled).toHaveLength(1)
   })
 
   it('refuses the approval when a policy denies the order by then', async () => {

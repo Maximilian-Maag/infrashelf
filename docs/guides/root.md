@@ -667,6 +667,12 @@ budget as `order.budget_overridden`, naming the cost centre and its state — an
 both are reachable from the row that showed the refusal, with a **Place anyway**
 control. Not root: the reason, and nothing else.
 
+An approval can also get past both gates and then fail to start — the window
+policy unreadable, or not one element provisioned. That attempt is given back to
+**pending** as well, and the waiver is not recorded: an entry appears once the
+order it belongs to was actually approved, so it can be retried without the log
+filling with waivers for approvals that did not happen.
+
 **An order waiting for its deployment window counts against its budget.** It has
 been approved and its cost is committed, so the room it needs is not available to
 anyone else while it waits.
@@ -716,7 +722,7 @@ Logged action types (this list has grown since the feature was first documented 
 | `cost_center.created` / `cost_center.updated` | A cost centre is added or edited |
 | `cost_center.budget_set` / `cost_center.budget_cleared` | A cost centre's budget is set, changed or removed (5.1) |
 | `order.budget_warning` | An order went through with its cost centre's budget already spent, under a `warn` budget |
-| `order.budget_overridden` | Root placed — or approved, or deployed early — an order against a spent `block` budget. Written with the order it committed, so a waiver on an attempt that was then refused, or that lost the order to somebody else, leaves no entry (#521) |
+| `order.budget_overridden` | Root placed — or approved, or deployed early — an order against a spent `block` budget. Written with the order it committed, so a waiver on an attempt that was then refused, that lost the order to somebody else, or that was given back because provisioning could not start, leaves no entry (#521, #527) |
 | `order.policy_warning` | An order went through that the policy engine allowed with a warning (5b) |
 | `order.policy_overridden` | Root placed (or approved) an order a policy refused, naming the rule that was waived (5b) |
 | `order.policy_needs_approval` | An order was held for an approval because a policy rule asked for one — an admin's order waits in the queue instead of provisioning (5b) |

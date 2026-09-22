@@ -8,7 +8,7 @@ import {
   productEnvironments,
 } from '@/lib/db/schema'
 import { eq, and, sql } from 'drizzle-orm'
-import { logAudit } from '@/lib/audit'
+import { logAudit, logAuditWith } from '@/lib/audit'
 import { sendOrderApproved, sendOrderRejected } from '@/lib/notification'
 import { findProductName, findUserEmail } from '@/lib/db/queries'
 import { ok, err, type Result } from '@/lib/services/result'
@@ -264,20 +264,20 @@ export const approveOrder = async (
   const policyWarning = gates.data.policyWarning ?? undefined
 
   /*
-   * The escapes root exercised, written now that the gates have all passed (#521).
+   * The escapes root exercised are written further down, with the commit (#521,
+   * #527), and not here — even though the gates have now all passed.
    *
-   * Here rather than at the gate that accepted them, because the gate behind it
-   * can still refuse — and when it does the claim is released and the order goes
-   * back to `pending`, so an entry written there would name a waiver for an order
-   * nothing committed (and be written again on the retry). Nothing can refuse
-   * after this point: the claim has landed and the order is leaving 'pending'.
+   * The gates accepted them, but two statements below this point release the
+   * claim and put the order back to 'pending': the window policy failing to
+   * read, and provisioning failing to start. Written here, an entry would say
+   * root waived a ceiling "when it was approved" for an approval that was undone
+   * and then be written again on the retry.
    *
-   * Through `logAudit` rather than a transaction: there is no statement left to
-   * pair it with — the claim IS the commit, and it happened before the gates were
-   * asked so that this caller is the one deciding. The window override below
-   * takes the same view of a decision that was already made.
+   * So they travel with the transition that ends the question: with
+   * 'scheduled' for an order that goes to a window, and after
+   * `provisionOrderElements` returns for one that provisions. Both are past the
+   * last way this function can give the order back.
    */
-  await logWaivers(db, session.id, order.id, gates.data.waivers)
 
   /*
    * Does a window have to open first (#330)?
@@ -312,17 +312,26 @@ export const approveOrder = async (
   }
 
   if (wait) {
-    await db
-      .update(orders)
-      .set({ status: 'scheduled', scheduledFor: wait.scheduledFor, updatedAt: new Date() })
-      .where(eq(orders.id, order.id))
+    /*
+     * One transaction: the order becomes scheduled and root's escapes are
+     * recorded in the same commit (#527). This is the last statement in the
+     * function, so an entry here can never describe an approval that was undone.
+     */
+    await db.transaction(async (tx) => {
+      await tx
+        .update(orders)
+        .set({ status: 'scheduled', scheduledFor: wait.scheduledFor, updatedAt: new Date() })
+        .where(eq(orders.id, order.id))
 
-    await logAudit(
-      session.id,
-      'order.scheduled',
-      order.id,
-      `Approved, waiting for a deployment window at ${wait.scheduledFor.toISOString()}`,
-    )
+      await logWaivers(tx, session.id, order.id, gates.data.waivers)
+      await logAuditWith(
+        tx,
+        session.id,
+        'order.scheduled',
+        order.id,
+        `Approved, waiting for a deployment window at ${wait.scheduledFor.toISOString()}`,
+      )
+    })
 
     return ok({
       success: true as const,
@@ -390,6 +399,11 @@ export const approveOrder = async (
     throw e
   }
 
+  // Past the last statement that can release the claim (#527): provisioning has
+  // returned, so this approval is not going back to 'pending' and the entry
+  // describes an order that really was approved. Written with `order.approved`
+  // below, which says the same thing in the same breath.
+  await logWaivers(db, session.id, order.id, gates.data.waivers)
   await logAudit(
     session.id,
     'order.approved',
