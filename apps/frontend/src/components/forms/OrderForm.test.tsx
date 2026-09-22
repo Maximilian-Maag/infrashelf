@@ -646,4 +646,52 @@ describe('OrderForm offers root the escape from a refusal (#509)', () => {
     // rather than leaving the refusal and its own remedy on screen together.
     expect(await screen.findByRole('status')).toHaveTextContent(/successfully/i)
   })
+
+  /*
+   * The policy gate is asked BEFORE the budget one, so a policy refusal hides a
+   * budget refusal underneath it. Waiving the policy uncovers the budget one — and
+   * a retry that sent only the flag for the refusal in hand would drop the waiver
+   * already made, be refused by the policy again, and alternate for ever. (Found
+   * by review on the pull request, not by the tests above.)
+   */
+  it('carries an earlier waiver into the next retry, so the chain can finish', async () => {
+    const user = await fillOrder()
+    mockedPost.mockRejectedValueOnce(new ApiError(409, 'Refused by rule quota/vm-count.', 'policy_denied'))
+    mockedPost.mockRejectedValueOnce(new ApiError(409, 'Over budget.', 'budget_blocked'))
+
+    await user.click(screen.getByRole('button', { name: /place order/i }))
+    await user.click(await screen.findByRole('button', { name: /place anyway/i }))
+    // The second refusal names the gate that was hidden behind the first, so the
+    // form offers that escape instead. Waited for by its MESSAGE: the control is
+    // cleared and re-set across a retry, so finding the button alone would let this
+    // click the previous refusal's, still disabled, and pass nothing on.
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/over budget/i))
+    await user.click(screen.getByRole('button', { name: /place anyway/i }))
+
+    await waitFor(() => expect(mockedPost).toHaveBeenCalledTimes(3))
+    const body = mockedPost.mock.calls[2][1] as Record<string, unknown>
+    expect(body.overridePolicy).toBe(true)
+    expect(body.overrideBudget).toBe(true)
+  })
+
+  it('forgets a waiver when the form is submitted afresh', async () => {
+    // A fresh attempt is a fresh question. Keeping the waiver would place an order
+    // against a rule the user had not just been refused by.
+    const user = await fillOrder()
+    mockedPost.mockRejectedValueOnce(new ApiError(409, 'Refused by rule quota/vm-count.', 'policy_denied'))
+    await user.click(screen.getByRole('button', { name: /place order/i }))
+    mockedPost.mockRejectedValueOnce(new ApiError(409, 'Refused by rule quota/vm-count.', 'policy_denied'))
+    await user.click(await screen.findByRole('button', { name: /place anyway/i }))
+
+    mockedPost.mockRejectedValueOnce(new ApiError(409, 'Refused by rule quota/vm-count.', 'policy_denied'))
+    // Enabled means the retry has settled, so this click cannot land while the
+    // previous one is still in flight and be swallowed by the disabled button.
+    await waitFor(() => expect(screen.getByRole('button', { name: /place order/i })).toBeEnabled())
+    await user.click(screen.getByRole('button', { name: /place order/i }))
+
+    await waitFor(() => expect(mockedPost).toHaveBeenCalledTimes(3))
+    const body = mockedPost.mock.calls[2][1] as Record<string, unknown>
+    expect(body.overridePolicy).toBeUndefined()
+    expect(body.overrideBudget).toBeUndefined()
+  })
 })

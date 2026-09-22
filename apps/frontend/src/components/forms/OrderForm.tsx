@@ -82,6 +82,22 @@ export function OrderForm({
    * sending the wrong one waives nothing (or, worse, waives the other).
    */
   const [refusal, setRefusal] = useState<'budget_blocked' | 'policy_denied' | null>(null)
+  /*
+   * The waivers already exercised in this refusal chain.
+   *
+   * A policy refusal HIDES the budget one — `createPreparedOrder` asks the policy
+   * first and returns on a deny — so root waiving the policy can uncover a budget
+   * refusal underneath it. Retrying with only the flag for the refusal in hand
+   * would then re-send the order without the waiver already made, the policy would
+   * refuse it again, and the two would alternate for ever with no way through.
+   *
+   * Cleared on an ordinary submit: a fresh attempt is a fresh question, and a
+   * waiver kept from a previous one would grant something nobody was asked about.
+   */
+  const [retryOverrides, setRetryOverrides] = useState<{
+    overrideBudget?: boolean
+    overridePolicy?: boolean
+  }>({})
   const [success, setSuccess] = useState(false)
 
   const [templates, setTemplates] = useState<InfrastructureElement[]>([])
@@ -286,6 +302,14 @@ export function OrderForm({
    * sentence would offer the wrong escape — or none — the first time it changed.
    */
   async function place(overrides: { overrideBudget?: boolean; overridePolicy?: boolean } = {}) {
+    /*
+     * A retry carries the waivers already made in this chain; an ordinary submit
+     * carries none. See `retryOverrides` for why the chain needs them — the policy
+     * gate hides the budget one, so the flags have to accumulate rather than
+     * replace.
+     */
+    const carried = Object.keys(overrides).length > 0 ? { ...retryOverrides, ...overrides } : {}
+    setRetryOverrides(carried)
     setLoading(true)
     setError(null)
     // Cleared first: this attempt is the answer to the last one, and leaving the
@@ -323,7 +347,7 @@ export function OrderForm({
         // Only sent when the selected environment offers a trial: switching
         // environments after ticking the box must not smuggle the flag through.
         ...(trialAvailable && trial ? { trial: true } : {}),
-        ...overrides,
+        ...carried,
       }
       await post<Order>('/api/orders', body)
       setSuccess(true)
