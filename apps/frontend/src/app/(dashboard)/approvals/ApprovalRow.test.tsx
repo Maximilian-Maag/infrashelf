@@ -359,12 +359,12 @@ describe('ApprovalRow offers root the escapes from a refusal (#514)', () => {
   })
 
   it('carries an earlier waiver into the next retry, so the chain can finish', async () => {
-    // Waiving the policy can uncover a budget refusal underneath it, because the
-    // policy gate is asked first. Retrying with only the flag in hand would drop
+    // Waiving the budget can uncover a policy refusal underneath it, because the
+    // budget gate is asked first. Retrying with only the flag in hand would drop
     // the waiver already made and the two would alternate for ever.
     const user = userEvent.setup()
-    mockedPost.mockRejectedValueOnce(new ApiError(409, 'Refused by rule quota/vm-count.', 'policy_denied'))
     mockedPost.mockRejectedValueOnce(new ApiError(409, 'Over budget.', 'budget_blocked'))
+    mockedPost.mockRejectedValueOnce(new ApiError(409, 'Refused by rule quota/vm-count.', 'policy_denied'))
     render(<ApprovalRow order={order()} currentUserId={99} role="root" />)
 
     await user.click(screen.getByRole('button', { name: /^approve$/i }))
@@ -372,11 +372,11 @@ describe('ApprovalRow offers root the escapes from a refusal (#514)', () => {
     // Waited for by its MESSAGE: the control is cleared and re-set across a retry,
     // so finding the button alone could click the previous refusal's, still
     // disabled, and pass nothing on.
-    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/over budget/i))
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/quota\/vm-count/i))
     await user.click(screen.getByRole('button', { name: /place anyway/i }))
 
     await waitFor(() => expect(mockedPost).toHaveBeenCalledTimes(3))
-    expect(mockedPost.mock.calls[2][1]).toEqual({ overridePolicy: true, overrideBudget: true })
+    expect(mockedPost.mock.calls[2][1]).toEqual({ overrideBudget: true, overridePolicy: true })
   })
 
   it('offers an admin nothing, even for the same refusal', async () => {

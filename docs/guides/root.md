@@ -578,6 +578,13 @@ which provisions it immediately. It is written to the
 audit log as `order.window_overridden`, naming you and the window that was
 skipped.
 
+It asks the same two gates an approval asks, because approving and deploying are
+the same commitment taken at different moments: if a ceiling has been lowered or a
+rule added since, the button refuses. That refusal carries the reason and a
+**Deploy anyway** control, which retries it with the waiver the refusal named —
+recorded in the audit log in its own right, so one action leaves two entries: that
+the window was skipped, and that a gate was waived in order to skip it.
+
 ---
 
 ## 5b. Policy as Code (OPA)
