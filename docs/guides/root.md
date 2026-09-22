@@ -472,6 +472,11 @@ server, so the flag it sends is a request to waive something, never the waiver.
 The two refusals carry different codes (`budget_blocked`, `policy_denied`) and the
 button sends the matching flag only: a 409 with neither code offers nothing.
 
+Both flags are on `POST /orders` and on `POST /approvals/{id}/approve`, and the
+contract at `/api/docs` states them on both, together with the 409 each answers.
+An API client written from that document is not expected to guess: this section is
+what the buttons do, the spec is what the endpoints accept.
+
 **Where the check bites.** At order creation, which both checkout and approval go
 through — so an order approved next week cannot spend a budget that is already
 gone. A `warn` budget shows on the approvals queue row as well, because the gate

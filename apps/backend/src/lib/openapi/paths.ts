@@ -1261,6 +1261,27 @@ registry.registerPath({
     },
     400: { description: 'Bad request' },
     401: { description: 'Unauthorized' },
+    /*
+     * Both refusals the two override flags above exist to answer. Spelled out
+     * because `code` is what a client switches on to decide which waiver to offer,
+     * and because this endpoint was documented without them for as long as it could
+     * refuse (#529).
+     */
+    409: {
+      description:
+        'Refused by the budget (exhausted) or by policy (denied). The order was not created. ' +
+        'Root can retry with the matching override flag; anybody else cannot answer it.',
+      content: {
+        'application/json': {
+          schema: z.object({
+            error: z.string().openapi({ description: 'The refusal, as a sentence to show.' }),
+            code: z.enum(['budget_blocked', 'policy_denied']).openapi({
+              description: 'Which waiver answers this refusal. Each is a separate root right.',
+            }),
+          }),
+        },
+      },
+    },
   },
 })
 
@@ -1315,29 +1336,103 @@ registry.registerPath({
   description:
     'Nobody approves their own order, delegation or not: the check compares the ACTOR with the ' +
     'orderer, and a delegation never changes who the actor is. A delegation held at the time of ' +
-    'the decision is recorded in the audit log (`order.approved` and `approval_delegation.used`).',
+    'the decision is recorded in the audit log (`order.approved` and `approval_delegation.used`). ' +
+    'The gates are asked AGAIN here, at the moment of commitment (#511): an order that was placed ' +
+    'cleanly can still be refused with a 409, because the budget moved or a rule changed while it ' +
+    'waited. A refusal releases the claim rather than leaving the order half-approved, so the ' +
+    'order is pending again afterwards and can be approved again once the waiver is sent.',
   tags: ['Approvals'],
   security: bearerAuth,
   request: {
     params: z.object({ id: z.string() }),
-  },
-  responses: {
-    200: {
-      description: 'Order approved',
+    body: {
       content: {
         'application/json': {
           schema: z.object({
-            success: z.boolean(),
-            infraId: z.number(),
-            pipelineIds: z.array(z.string()),
+            overrideBudget: z.boolean().optional().openapi({
+              description:
+                '[root] Approve and waive the budget ceiling the commit gate refused on (#514). ' +
+                'The same right as on `POST /orders`, and separate from `overridePolicy`; the role ' +
+                'is checked server-side, so this is a request to waive, never the waiver itself. ' +
+                'Answers `code: "budget_blocked"` and is recorded as `order.budget_overridden`. ' +
+                'Waiving the budget does not waive a rule: if policy also refuses, that is a ' +
+                'second refusal with its own flag.',
+            }),
+            overridePolicy: z.boolean().optional().openapi({
+              description:
+                '[root] Approve and waive the policy denial the commit gate refused on (#110). ' +
+                'A separate right from `overrideBudget` and the same as on `POST /orders`. ' +
+                'Answers `code: "policy_denied"` and is recorded as `order.policy_overridden`, ' +
+                'naming the rule that was waived.',
+            }),
           }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description:
+        'Order approved. `scheduled` discriminates the two outcomes: `false` means the order was ' +
+        'provisioned now, `true` means it waits for its deployment window, in which case no ' +
+        'infrastructure exists yet and there is no `infraId` or `pipelineIds` to report.',
+      content: {
+        'application/json': {
+          schema: z.union([
+            z.object({
+              success: z.boolean(),
+              scheduled: z.literal(false).openapi({
+                description: 'Provisioned now: the infrastructure and pipelines below exist.',
+              }),
+              infraId: z.number().openapi({
+                description:
+                  'The first element of `infraIds`, for callers written when an order had exactly one.',
+              }),
+              infraIds: z.array(z.number()),
+              pipelineIds: z.array(z.string()),
+              policyWarning: z.string().optional().openapi({
+                description:
+                  'What policy said when it allowed the commit with something to report (#110). ' +
+                  'The approval went through; this is the verdict the approver should pass on.',
+              }),
+            }),
+            z.object({
+              success: z.boolean(),
+              scheduled: z.literal(true),
+              scheduledFor: z.string().datetime({ offset: true }).openapi({
+                description: 'When the deployment window opens and provisioning will happen.',
+              }),
+              policyWarning: z.string().optional(),
+            }),
+          ]),
         },
       },
     },
     400: { description: 'Order is not pending' },
     401: { description: 'Unauthorized' },
-    403: { description: 'Forbidden' },
+    403: { description: 'Forbidden: not an admin, or approving your own order' },
     404: { description: 'Order not found' },
+    /*
+     * The one refusal a client has to be able to tell apart, so this 409 spells out
+     * the body as well as the sentence. `code` is what a UI switches on to offer the
+     * matching waiver (#509, #514); the gates answer `budget_blocked` and
+     * `policy_denied` and nothing else does.
+     */
+    409: {
+      description:
+        'Refused at the commit gate. Nothing was built and the order is pending again. ' +
+        'Root can retry with the matching override flag; anybody else cannot answer it.',
+      content: {
+        'application/json': {
+          schema: z.object({
+            error: z.string().openapi({ description: 'The refusal, as a sentence to show.' }),
+            code: z.enum(['budget_blocked', 'policy_denied']).openapi({
+              description: 'Which waiver answers this refusal. Each is a separate root right.',
+            }),
+          }),
+        },
+      },
+    },
   },
 })
 
@@ -2481,6 +2576,11 @@ registry.registerPath({
                 'Link to the product documentation. Must start with http:// or https://; null or ' +
                 'empty clears it.',
             }),
+            changelog: z.string().max(2000).optional().openapi({
+              description:
+                'Free text describing this change, shown against the product version (#38). ' +
+                'Absent leaves the changelog alone, which is not the same as empty.',
+            }),
           }),
         },
       },
@@ -3247,7 +3347,16 @@ registry.registerPath({
             scope: z.enum(['global', 'category', 'product']),
             scopeId: z.number().int().optional(),
             environmentId: z.number().int().positive().nullable().optional(),
+            projectIds: z.array(z.number().int().positive()).optional().openapi({
+              description:
+                'The projects this parameter is narrowed to (#275). Absent means all projects on a ' +
+                'create; `[]` clears the narrowing. Positive ids only, because 0 is the "no scope" ' +
+                'sentinel `scopeId` uses.',
+            }),
             name: z.string().min(1),
+            label: z.string().optional().openapi({
+              description: 'Human-readable name for the order form. Defaults to empty.',
+            }),
             type: z.enum(['string', 'number', 'bool', 'dropdown', 'size']),
             sizeValues: z.record(z.string(), z.string()).optional(),
             description: z.string().optional(),
@@ -3283,6 +3392,7 @@ registry.registerPath({
         'application/json': {
           schema: z.object({
             name: z.string().min(1).optional(),
+            label: z.string().optional(),
             type: z.enum(['string', 'number', 'bool', 'dropdown', 'size']).optional(),
             sizeValues: z.record(z.string(), z.string()).optional(),
             description: z.string().optional(),
@@ -3290,6 +3400,11 @@ registry.registerPath({
             required: z.boolean().optional(),
             sensitive: z.boolean().optional(),
             environmentId: z.number().int().positive().nullable().optional(),
+            projectIds: z.array(z.number().int().positive()).optional().openapi({
+              description:
+                'The projects this parameter is narrowed to (#275). Absent leaves the narrowing ' +
+                'alone, which is not the same as `[]`, which clears it.',
+            }),
           }),
         },
       },
@@ -3841,6 +3956,11 @@ registry.registerPath({
             ciSourceId: z.number().int().positive().optional(),
             webhookUrl: z.string().url().optional(),
             webhookToken: z.string().min(1).optional(),
+            respectsDeploymentWindows: z.boolean().optional().openapi({
+              description:
+                'Whether an approved order for this environment waits for a deployment window ' +
+                'before it is provisioned (#330). Off means it is built as soon as it is approved.',
+            }),
           }),
         },
       },
