@@ -246,6 +246,36 @@ describe('CartView', () => {
     expect(screen.getByRole('link', { name: /orders/i })).toHaveAttribute('href', '/orders')
   })
 
+  it('holds on an order policy sent to the approvals queue (#110)', async () => {
+    /*
+     * The one case where a shopper has to be told something did not happen as
+     * they expected: an admin's order provisions the moment it is placed, and a
+     * `needs-approval` rule stops that. Navigating to /orders would show a row
+     * that looks like every other order and says nothing about why it is not
+     * building.
+     */
+    const user = userEvent.setup()
+    mockedPost.mockResolvedValue({
+      orderIds: [41],
+      failed: [],
+      approvalRequired: [
+        { orderId: 41, message: 'Production needs a second pair of eyes. (rule: sod/production)' },
+      ],
+    } as CheckoutResponse as never)
+    renderCart([item()], [projects[0]])
+
+    await user.click(screen.getByRole('button', { name: /check out/i }))
+
+    expect(await screen.findByText(/needs approval before it is provisioned/i)).toBeInTheDocument()
+    expect(screen.getByText(/#41/)).toBeInTheDocument()
+    expect(screen.getByText(/sod\/production/)).toBeInTheDocument()
+    expect(push).not.toHaveBeenCalled()
+    // And the queue they can go and look at is one click away (WCAG 2.4.4 is
+    // satisfied by the nav, but a notice about a queue that does not link to it
+    // is a notice that ends in a dead end).
+    expect(screen.getByRole('link', { name: /approvals/i })).toHaveAttribute('href', '/approvals')
+  })
+
   it('navigates as usual when no order went over budget', async () => {
     const user = userEvent.setup()
     mockedPost.mockResolvedValue({ orderIds: [31], failed: [], warnings: [] } as CheckoutResponse as never)

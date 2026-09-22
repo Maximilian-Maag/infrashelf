@@ -136,6 +136,42 @@ describe('evaluateOrderPolicy — no engine, or a permissive one', () => {
   })
 })
 
+describe('evaluateOrderPolicy — a policy that asks for a person', () => {
+  it('carries a needs-approval verdict through, naming the rule that asked', async () => {
+    /*
+     * #110's third answer. It is not a refusal and not a warning: the order is
+     * permitted, but not to whoever asked for it — somebody else has to say yes.
+     * The verdict has to be its own outcome rather than a `deny` the portal
+     * chooses to treat gently, because the two travel to different places: a
+     * denial is shown as a refusal, this one becomes a row in the approvals
+     * queue.
+     */
+    await withEngine({ failureMode: 'best_effort' })
+    vi.spyOn(global, 'fetch').mockResolvedValue(
+      decision({ decision: 'needs-approval', rule: 'sod/production', message: 'Production needs a second pair of eyes.' }),
+    )
+
+    const verdict = await evaluateOrderPolicy(source(), session())
+
+    expect(verdict.outcome).toBe('needs-approval')
+    expect(verdict.rule).toBe('sod/production')
+    expect(verdict.message).toContain('Production needs a second pair of eyes.')
+    expect(verdict.message).toContain('sod/production')
+    // Nothing was refused, so nothing is written as a refusal.
+    expect(await auditActions()).toEqual([])
+  })
+
+  it('has a sentence of its own for a rule that asked without words', async () => {
+    await withEngine({ failureMode: 'best_effort' })
+    vi.spyOn(global, 'fetch').mockResolvedValue(decision({ decision: 'needs-approval', rule: 'sod/production' }))
+
+    const verdict = await evaluateOrderPolicy(source(), session())
+
+    expect(verdict.message).toContain('sod/production')
+    expect(verdict.message).not.toContain('undefined')
+  })
+})
+
 describe('evaluateOrderPolicy — a refusal that teaches something', () => {
   it('names the rule that refused the order', async () => {
     await withEngine()

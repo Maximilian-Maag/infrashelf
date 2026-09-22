@@ -67,6 +67,13 @@ export function CartView({
   const [partial, setPartial] = useState<CheckoutResponse['failed']>([])
   /** Orders that were created over budget (#325), shown instead of navigating. */
   const [warnings, setWarnings] = useState<NonNullable<CheckoutResponse['warnings']>>([])
+  /**
+   * Orders policy held for an approval (#110), shown the same way and for the
+   * same reason: the order exists but did not provision, and navigating away
+   * would replace the explanation with a list of rows that look like every other
+   * order.
+   */
+  const [held, setHeld] = useState<NonNullable<CheckoutResponse['approvalRequired']>>([])
 
   // One fetch per item, on first render of that item's card. Failures degrade to an
   // unlabelled card rather than blocking checkout — the server validates anyway.
@@ -136,6 +143,7 @@ export function CartView({
     setError(null)
     setPartial([])
     setWarnings([])
+    setHeld([])
     try {
       const body: CheckoutRequest = {
         projectId: Number(projectId),
@@ -155,8 +163,10 @@ export function CartView({
        * setting warnings after it discarded exactly the case where the orders
        * that DID get placed are the ones somebody needs to be told about.
        */
-      setWarnings(result.warnings ?? [])
-
+      const freshWarnings = result.warnings ?? []
+      const freshHeld = result.approvalRequired ?? []
+      setWarnings(freshWarnings)
+      setHeld(freshHeld)
       if (result.failed.length > 0) {
         // Some orders exist and their pipelines may already be running, so this is
         // not an error to retry wholesale — say which items are still in the cart.
@@ -170,15 +180,17 @@ export function CartView({
       }
       publishCartCount(0)
       /*
-       * An over-budget order does not navigate away from its own warning (#325).
+       * An over-budget order does not navigate away from its own warning (#325),
+       * and neither does one policy held back (#110).
        *
-       * The orders it created exist and the cart is empty either way — the only
-       * difference is whether the person who placed them is told. Pushing to
-       * /orders here would replace the message with a list of rows that look
-       * exactly like every other order, which is the outcome a `warn` budget
-       * exists to prevent. They leave when they have read it.
+       * The orders exist and the cart is empty either way — the only difference
+       * is whether the person who placed them is told. Pushing to /orders here
+       * would replace the message with a list of rows that look exactly like
+       * every other order, which is the outcome a `warn` budget exists to prevent
+       * and the outcome an approval request would hide entirely. They leave when
+       * they have read it.
        */
-      if (result.warnings && result.warnings.length > 0) {
+      if (freshWarnings.length > 0 || freshHeld.length > 0) {
         setItems([])
         return
       }
@@ -236,6 +248,32 @@ export function CartView({
                     className="inline-flex min-h-11 items-center rounded-md px-3 text-sm font-medium underline"
                   >
                     {t('orders', lang)}
+                  </Link>
+                </div>
+              </Alert>
+            </div>
+          )}
+
+          {held.length > 0 && (
+            <div className="mt-4">
+              {/* The heading reuses the catalogue's existing `approvalRequired`
+                  key rather than adding a 26th translation of the same sentence
+                  to twenty-five language tables (#110 slice 6). It reads as the
+                  statement it is: these orders need an approval before they are
+                  built, and the policy's own words say which rule asked. */}
+              <Alert tone="warning">
+                <p className="font-medium">{t('approvalRequired', lang)}</p>
+                <ul className="mt-1 list-disc list-inside text-sm">
+                  {held.map((h) => (
+                    <li key={h.orderId}>#{h.orderId} — {h.message}</li>
+                  ))}
+                </ul>
+                <div className="mt-3">
+                  <Link
+                    href="/approvals"
+                    className="inline-flex min-h-11 items-center rounded-md px-3 text-sm font-medium underline"
+                  >
+                    {t('approvals', lang)}
                   </Link>
                 </div>
               </Alert>

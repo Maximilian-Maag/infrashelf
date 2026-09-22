@@ -611,9 +611,18 @@ everywhere else it shows them.
 { "result": { "decision": "allow", "rule": "quota/vm-count", "message": "…" } }
 ```
 
-`decision` is one of `allow`, `warn` or `deny`. **`deny` refuses the order and
-names the rule**, so the requester learns something; `warn` places the order and
-shows the policy's own message to the person who placed it. Anything else — no
+`decision` is one of `allow`, `warn`, `deny` or `needs-approval`. **`deny`
+refuses the order and names the rule**, so the requester learns something;
+`warn` places the order and shows the policy's own message to the person who
+placed it. **`needs-approval` places the order where an approval is needed**,
+whatever the requester's role is: an admin's order normally provisions the moment
+it is placed, and this is the rule that stops it and puts the order in the
+approvals queue instead. Somebody *other* than the person who placed it has to
+approve it — the queue has never allowed self-approval — so a rule written this
+way is a separation of duties rather than a note on a row. The requester is told
+which rule asked, and the entry `order.policy_needs_approval` records it. The
+same verdict at the moment of commitment is satisfied by the approval itself,
+which is what the person clicking **Approve** is giving. Anything else — no
 answer, a redirect, a body that is not this shape, a rule that is not loaded — is
 treated as *the engine could not be asked*, which is what the integration's
 **failure mode** decides:
@@ -700,6 +709,7 @@ Logged action types (this list has grown since the feature was first documented 
 | `order.budget_overridden` | Root placed an order against a spent `block` budget |
 | `order.policy_warning` | An order went through that the policy engine allowed with a warning (5b) |
 | `order.policy_overridden` | Root placed (or approved) an order a policy refused, naming the rule that was waived (5b) |
+| `order.policy_needs_approval` | An order was held for an approval because a policy rule asked for one — an admin's order waits in the queue instead of provisioning (5b) |
 | `order.policy_denied` | A policy refused an order as it was about to be built — at an approval, or when a deployment window opened (5b) |
 | `order.budget_denied` | A cost centre's budget no longer covered an order as it was about to be built, so the approval or the window release was refused (5.1) |
 | `order.policy_unavailable` | The policy engine could not be asked — recorded whether the order was then refused (`blocking`) or allowed (`best_effort`), because an unevaluated order is the outcome nobody would otherwise see (5b) |

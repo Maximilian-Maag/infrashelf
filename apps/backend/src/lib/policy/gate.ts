@@ -31,6 +31,17 @@ import type { SessionUser } from '@infrashelf/types'
  *           over-budget order that passes silently is indistinguishable from one
  *           inside its budget, so a warning has to travel with the order.
  *   deny  → the order is refused, naming the rule that refused it.
+ *   needs-approval → the order is PERMITTED but not to whoever asked for it: it
+ *           is held for somebody else's approval, naming the rule that asked.
+ *           This is the one outcome that changes who may commit an order, which
+ *           is why the verdict carries it as its own outcome rather than a
+ *           `deny` the caller is expected to soften — the two travel to
+ *           different places (a refusal is shown, this becomes a queue row), and
+ *           a caller that had to remember which is which would eventually not.
+ *
+ * The first three answers are the budget gate's, which is not a coincidence: the
+ * two gates sit on the same seam and a person reading an order's history should
+ * not have to hold two vocabularies.
  *
  * ── Failure semantics, which is #111's fifth bullet rather than a guess here ──
  *
@@ -47,7 +58,7 @@ import type { SessionUser } from '@infrashelf/types'
  * returns `ok` silently — the same reading `resolveIntegration` gives Foreman.
  */
 
-export type PolicyOutcome = 'ok' | 'warn' | 'deny'
+export type PolicyOutcome = 'ok' | 'warn' | 'deny' | 'needs-approval'
 
 export interface PolicyVerdict {
   outcome: PolicyOutcome
@@ -128,6 +139,14 @@ export const evaluateOrderPolicy = async (
     }
   }
 
+  if (answer.decision === 'needs-approval') {
+    return {
+      outcome: 'needs-approval',
+      rule: answer.rule,
+      message: needsApprovalMessage(answer.rule, answer.message),
+    }
+  }
+
   if (answer.decision === 'warn') {
     return {
       outcome: 'warn',
@@ -160,3 +179,22 @@ export const warnMessage = (rule: string | null): string =>
   rule === null
     ? 'Policy allowed this order with a warning.'
     : `Policy allowed this order with a warning (rule: ${rule}).`
+
+/**
+ * The sentence for an order a policy has held back for somebody else's approval.
+ *
+ * It is a sentence on the ORDER rather than a refusal or a queue-row-only note:
+ * the person who placed it is the one who needs to know the order was accepted
+ * and is now waiting, and — like a denial — which rule decided that. A rule that
+ * only ever appears inside the approvals queue leaves the requester watching an
+ * order that never starts with nothing to read.
+ *
+ * Same treatment of the policy's own words as `denyMessage`, and for the same
+ * reason: the policy author owns the sentence and this only adds the frame.
+ */
+export const needsApprovalMessage = (rule: string | null, message: string | null): string => {
+  const reason = (message ?? 'Policy requires this order to be approved before it is built').trim()
+  const sentence = /[.!?]$/.test(reason) ? reason : `${reason}.`
+  const asked = rule === null ? '' : ` (rule: ${rule})`
+  return `${sentence}${asked} Somebody other than the person who placed it has to approve it.`
+}

@@ -1266,6 +1266,16 @@ export interface CheckoutResponse {
    * cost centres and "something was over budget" does not say which.
    */
   warnings?: { orderId: number; message: string }[]
+  /**
+   * Orders a policy held for somebody else's approval instead of building them
+   * (#110).
+   *
+   * Not failures, and not warnings either: the orders exist and are in the
+   * approvals queue. A list of its own because an admin's order provisions
+   * immediately, so this is the one case where a shopper is owed an explanation
+   * for something that did not happen as they expected.
+   */
+  approvalRequired?: { orderId: number; message: string }[]
 }
 
 /**
