@@ -1258,14 +1258,22 @@ export interface CheckoutResponse {
    */
   failed: { cartItemId: number; message: string }[]
   /**
-   * Orders that went through with their cost centre over budget (#325).
+   * Orders that went through with something to say — from either gate (#325,
+   * #110, #516).
    *
-   * Not failures — these orders exist. A `warn` budget says "tell me, do not
-   * refuse me", and a warning the orderer never sees is the setting doing
-   * nothing at all. One entry per order, because a cart can span two projects'
-   * cost centres and "something was over budget" does not say which.
+   * Not failures — these orders exist. A `warn` budget, or a policy that allowed
+   * the order with a remark, says "tell me, do not refuse me", and a warning the
+   * orderer never sees is the setting doing nothing at all. One entry per order,
+   * because a cart can span two projects' cost centres and "something was over
+   * budget" does not say which.
+   *
+   * `kind` names the gate that said it, because the two sentences explain two
+   * different things: a spending limit on a cost centre, and a rule about what
+   * may be built. The cart heads each list with its own gate (#516) — heading a
+   * policy remark "over budget" tells the reader about money that was never in
+   * question.
    */
-  warnings?: { orderId: number; message: string }[]
+  warnings?: { orderId: number; message: string; kind: 'budget' | 'policy' }[]
   /**
    * Orders a policy held for somebody else's approval instead of building them
    * (#110).

@@ -229,7 +229,7 @@ describe('CartView', () => {
     mockedPost.mockResolvedValue({
       orderIds: [31],
       failed: [],
-      warnings: [{ orderId: 31, message: 'IT-4711 — Platform is over budget: 1400.00 of 1000.00 EUR committed' }],
+      warnings: [{ orderId: 31, message: 'IT-4711 — Platform is over budget: 1400.00 of 1000.00 EUR committed', kind: 'budget' }],
     } as CheckoutResponse as never)
     renderCart([item()], [projects[0]])
 
@@ -276,6 +276,58 @@ describe('CartView', () => {
     expect(screen.getByRole('link', { name: /approvals/i })).toHaveAttribute('href', '/approvals')
   })
 
+  it('heads a policy warning as the policy’s, not as an over-budget notice (#516)', async () => {
+    /*
+     * The bug: one heading for a list both gates write into. A shopper whose
+     * order passed policy with a remark was told their cost centre was over
+     * budget — about money that was never in question, and contradicting the
+     * policy's own sentence printed underneath it.
+     */
+    const user = userEvent.setup()
+    mockedPost.mockResolvedValue({
+      orderIds: [41],
+      failed: [],
+      warnings: [
+        { orderId: 41, message: 'This project is near its VM limit.', kind: 'policy' },
+      ],
+    } as CheckoutResponse as never)
+    renderCart([item()], [projects[0]])
+
+    await user.click(screen.getByRole('button', { name: /check out/i }))
+
+    expect(await screen.findByText(/went through with a policy warning/i)).toBeInTheDocument()
+    expect(screen.getByText(/near its VM limit/i)).toBeInTheDocument()
+    // The budget's sentence, and the heading it prints, must not appear at all:
+    // there was no cost centre over budget to report.
+    expect(screen.queryByText(/cost centre over budget/i)).not.toBeInTheDocument()
+    // Still a notice rather than a silent navigation.
+    expect(push).not.toHaveBeenCalled()
+  })
+
+  it('heads each gate’s notices separately when both warned (#516)', async () => {
+    // A cart can span two projects' cost centres and both gates can speak: two
+    // conditions, two headings, and neither list under the other's title.
+    const user = userEvent.setup()
+    mockedPost.mockResolvedValue({
+      orderIds: [31, 41],
+      failed: [],
+      warnings: [
+        { orderId: 31, message: 'IT-4711 — Platform is over budget: 1400.00 of 1000.00 EUR committed', kind: 'budget' },
+        { orderId: 41, message: 'This project is near its VM limit.', kind: 'policy' },
+      ],
+    } as CheckoutResponse as never)
+    renderCart([item(), item({ id: 2 })], [projects[0]])
+
+    await user.click(screen.getByRole('button', { name: /check out/i }))
+
+    expect(await screen.findByText(/went through with the cost centre over budget/i)).toBeInTheDocument()
+    expect(screen.getByText(/went through with a policy warning/i)).toBeInTheDocument()
+    // Each order under its own gate's heading, not both under one.
+    expect(screen.getByText(/#31/)).toBeInTheDocument()
+    expect(screen.getByText(/#41/)).toBeInTheDocument()
+    expect(push).not.toHaveBeenCalled()
+  })
+
   it('navigates as usual when no order went over budget', async () => {
     const user = userEvent.setup()
     mockedPost.mockResolvedValue({ orderIds: [31], failed: [], warnings: [] } as CheckoutResponse as never)
@@ -293,7 +345,7 @@ describe('CartView', () => {
     mockedPost.mockResolvedValue({
       orderIds: [31],
       failed: [{ cartItemId: 2, message: 'CI unreachable' }],
-      warnings: [{ orderId: 31, message: 'IT-4711 — Platform is over budget: 1400.00 of 1000.00 EUR committed' }],
+      warnings: [{ orderId: 31, message: 'IT-4711 — Platform is over budget: 1400.00 of 1000.00 EUR committed', kind: 'budget' }],
     } as CheckoutResponse as never)
     renderCart([item(), item({ id: 2 })], [projects[0]])
 

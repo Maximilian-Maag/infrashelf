@@ -410,6 +410,9 @@ describe('checkoutCart', () => {
     // "something was over budget" does not say which.
     expect(result.data.warnings[0].orderId).toBe(result.data.orderIds[0])
     expect(result.data.warnings[0].message).toMatch(/over budget/i)
+    // Tagged with the gate that said it (#516): the cart heads each list with the
+    // gate it came from, and "over budget" is the budget's sentence, not policy's.
+    expect(result.data.warnings[0].kind).toBe('budget')
   })
 
   it('warns about nothing when every order was inside its budget (#325)', async () => {
@@ -697,6 +700,38 @@ describe('checkoutCart — policy (#110)', () => {
         headers: { 'content-type': 'application/json' },
       }),
     )
+
+  it('tags a policy warning as the policy’s, not the budget’s (#516)', async () => {
+    /*
+     * Both gates can let an order through with something to say, and until #516
+     * the cart headed the whole list with the budget's sentence — telling a
+     * shopper their cost centre was over budget when no budget was involved, and
+     * contradicting the policy's own words in the list underneath.
+     */
+    const ctx = await stocked()
+    await withEngine()
+    decides({
+      decision: 'warn',
+      rule: 'quota/near-limit',
+      message: 'This project is near its VM limit.',
+    })
+
+    const result = await checkoutCart(makeSession(ctx.admin), {
+      projectId: ctx.project.id,
+      items: [{ cartItemId: ctx.first.id, parameters: {} }],
+    })
+
+    expect(result.ok, result.ok ? '' : `checkout refused: ${result.message}`).toBe(true)
+    if (!result.ok) return
+    expect(result.data.warnings).toHaveLength(1)
+    expect(result.data.warnings[0].kind).toBe('policy')
+    // The engine's own words, and nothing about a cost centre: the message is the
+    // policy's, which is exactly what the heading above it has to match.
+    expect(result.data.warnings[0].message).toContain('near its VM limit')
+    expect(result.data.warnings[0].message).not.toMatch(/budget/i)
+    // And the order really was placed: a `warn` says "tell me", not "refuse me".
+    expect(result.data.orderIds).toHaveLength(1)
+  })
 
   it('reports an order policy held for approval on its own list, not as a warning (#110)', async () => {
     /*
