@@ -464,6 +464,14 @@ log, names the cost centre, and the orderer is still told the order went through
 over budget. A hard block with no way past it becomes an outage during the one
 incident where somebody genuinely needs to provision.
 
+**Reaching it.** The order form answers a refusal with the reason and, for a root
+operator, a **Place anyway** button beside it — which is what the escape is for
+and the last place anybody wants to be typing a JSON body into an API client. The
+form decides whether to *show* the control; the role is checked again on the
+server, so the flag it sends is a request to waive something, never the waiver.
+The two refusals carry different codes (`budget_blocked`, `policy_denied`) and the
+button sends the matching flag only: a 409 with neither code offers nothing.
+
 **Where the check bites.** At order creation, which both checkout and approval go
 through — so an order approved next week cannot spend a budget that is already
 gone. A `warn` budget shows on the approvals queue row as well, because the gate
@@ -623,7 +631,9 @@ a portal with no policies has nothing to enforce.
 **Root can override a refusal** with `overridePolicy`, which is a *separate*
 right from the budget override: an approval says "this order is wanted", an
 override says "this rule does not apply here". The audit entry names the rule that
-was waived.
+was waived. Both overrides are reachable from the order form itself: a refusal
+comes back with the reason and, for root, the **Place anyway** control that
+resubmits it with the matching flag.
 
 An integration bound to an environment answers for that environment; a
 portal-wide one answers everywhere else. Each integration has a **Test

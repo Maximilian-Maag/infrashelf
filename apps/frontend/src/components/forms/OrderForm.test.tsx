@@ -7,13 +7,16 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
 }))
 
-vi.mock('@/lib/api', () => ({
-  get: vi.fn(),
-  post: vi.fn(),
-}))
+vi.mock('@/lib/api', async () => {
+  // `ApiError` is kept real: the form asks `instanceof` about what the server sent,
+  // so a mocked module without the class would not test the branch at all. Reacted
+  // through `unknown` rather than `typeof import(...)`, which the lint bans.
+  const actual = (await vi.importActual('@/lib/api')) as { ApiError: unknown }
+  return { get: vi.fn(), post: vi.fn(), ApiError: actual.ApiError }
+})
 
 import { OrderForm } from './OrderForm'
-import { get, post } from '@/lib/api'
+import { get, post, ApiError } from '@/lib/api'
 
 const mockedGet = vi.mocked(get)
 const mockedPost = vi.mocked(post)
@@ -556,5 +559,91 @@ describe('OrderForm resolves parameters for the selected project (#406)', () => 
     // The value that matters: Billing's default, not the one the form was still
     // rendering when the button was clicked.
     expect(body.parameters.REGION).toBe('northeurope')
+  })
+})
+
+/*
+ * #509. The override was reachable only from a test: the backend honoured
+ * `overrideBudget` and `overridePolicy` and no client could send either, so a root
+ * operator facing an exhausted cost centre during an incident — the exact failure
+ * the escape exists to prevent — had no way to place the order.
+ */
+describe('OrderForm offers root the escape from a refusal (#509)', () => {
+  const projects = [{ id: 5, name: 'Proj', costCenterId: null }] as never
+
+  async function fillOrder(role: 'root' | 'admin' = 'root') {
+    const user = userEvent.setup()
+    render(<OrderForm product={product} projects={projects} costCenters={[]} role={role} />)
+    await user.selectOptions(screen.getByLabelText(/environment/i), '1')
+    await user.selectOptions(await screen.findByLabelText(/project/i), '5')
+    return user
+  }
+
+  it('offers the budget escape after a budget refusal, and sends overrideBudget', async () => {
+    const user = await fillOrder()
+    mockedPost.mockRejectedValueOnce(new ApiError(409, 'This cost centre is over budget.', 'budget_blocked'))
+
+    await user.click(screen.getByRole('button', { name: /place order/i }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/over budget/i)
+    await user.click(screen.getByRole('button', { name: /place anyway/i }))
+
+    await waitFor(() => expect(mockedPost).toHaveBeenCalledTimes(2))
+    const body = mockedPost.mock.calls[1][1] as Record<string, unknown>
+    expect(body.overrideBudget).toBe(true)
+    // Not the other right: waiving the policy as well would be a second, unasked
+    // -for privilege exercised off the back of a budget refusal.
+    expect(body.overridePolicy).toBeUndefined()
+  })
+
+  it('offers the policy escape after a policy refusal, and not the budget one', async () => {
+    const user = await fillOrder()
+    mockedPost.mockRejectedValueOnce(
+      new ApiError(409, 'Refused by rule quota/vm-count.', 'policy_denied'),
+    )
+
+    await user.click(screen.getByRole('button', { name: /place order/i }))
+    await user.click(await screen.findByRole('button', { name: /place anyway/i }))
+
+    await waitFor(() => expect(mockedPost).toHaveBeenCalledTimes(2))
+    const body = mockedPost.mock.calls[1][1] as Record<string, unknown>
+    expect(body.overridePolicy).toBe(true)
+    expect(body.overrideBudget).toBeUndefined()
+  })
+
+  it('offers an admin nothing, even for the same refusal', async () => {
+    // The role is a decision this form makes about what to SHOW; the server
+    // re-checks it. Without this, a refusal would advertise a control that comes
+    // back 403 — or, worse, imply the app thinks an admin can waive it.
+    const user = await fillOrder('admin')
+    mockedPost.mockRejectedValueOnce(new ApiError(409, 'This cost centre is over budget.', 'budget_blocked'))
+
+    await user.click(screen.getByRole('button', { name: /place order/i }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/over budget/i)
+    expect(screen.queryByRole('button', { name: /place anyway/i })).not.toBeInTheDocument()
+  })
+
+  it('offers nothing for a 409 it has no escape for', async () => {
+    // The cart's validation gate answers 409 too. A refusal with no code the form
+    // knows is not an invitation to guess at a flag.
+    const user = await fillOrder()
+    mockedPost.mockRejectedValueOnce(new ApiError(409, 'The environment was removed.'))
+
+    await user.click(screen.getByRole('button', { name: /place order/i }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/removed/i)
+    expect(screen.queryByRole('button', { name: /place anyway/i })).not.toBeInTheDocument()
+  })
+
+  it('clears the escape once the order goes through with it', async () => {
+    const user = await fillOrder()
+    mockedPost.mockRejectedValueOnce(new ApiError(409, 'Over budget.', 'budget_blocked'))
+    await user.click(screen.getByRole('button', { name: /place order/i }))
+    await user.click(await screen.findByRole('button', { name: /place anyway/i }))
+
+    // The second call resolves (the mock's default), so the form reports success
+    // rather than leaving the refusal and its own remedy on screen together.
+    expect(await screen.findByRole('status')).toHaveTextContent(/successfully/i)
   })
 })

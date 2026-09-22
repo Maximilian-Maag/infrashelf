@@ -1200,7 +1200,9 @@ export const createPreparedOrder = async (
   const policyOverridden = policy.outcome === 'deny' && session.role === 'root' && overridePolicy === true
 
   if (policy.outcome === 'deny' && !policyOverridden) {
-    return err(409, policy.message ?? 'This order is not permitted by policy.')
+    // The code is what lets a client offer root the escape above instead of
+    // matching on this sentence (#509).
+    return err(409, policy.message ?? 'This order is not permitted by policy.', 'policy_denied')
   }
 
   /*
@@ -1347,7 +1349,7 @@ export const createPreparedOrder = async (
     return { kind: 'placed' as const, order, budget }
   })
 
-  if (placement.kind === 'blocked') return err(409, placement.message)
+  if (placement.kind === 'blocked') return err(409, placement.message, 'budget_blocked')
   const { order, budget } = placement
 
   /*

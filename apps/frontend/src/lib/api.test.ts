@@ -105,6 +105,33 @@ describe('apiRequest', () => {
     expect(err).toBeInstanceOf(ApiError)
     expect(err.status).toBe(503)
   })
+
+  /*
+   * #509. The backend's refusal code has to survive the trip through the proxy
+   * intact, because it is the only part of a 409 a caller can act on: the message
+   * beside it is prose written for a person.
+   */
+  it('carries the refusal code from the body onto the error', async () => {
+    mockFetch.mockResolvedValueOnce(
+      makeResponse({ error: 'This cost centre is over budget.', code: 'budget_blocked' }, 409),
+    )
+    const err = await apiRequest('/orders').catch((e) => e) as ApiError
+    expect(err.status).toBe(409)
+    expect(err.code).toBe('budget_blocked')
+    expect(err.message).toBe('This cost centre is over budget.')
+  })
+
+  it('leaves the code undefined when the body has none, or has a non-string', async () => {
+    mockFetch.mockResolvedValueOnce(makeResponse({ error: 'Nope' }, 409))
+    const withoutCode = await apiRequest('/orders').catch((e) => e) as ApiError
+    expect(withoutCode.code).toBeUndefined()
+
+    // A caller switching on the code must not have to defend against a number, so
+    // anything that is not a string is not a code.
+    mockFetch.mockResolvedValueOnce(makeResponse({ error: 'Nope', code: 7 }, 409))
+    const numeric = await apiRequest('/orders').catch((e) => e) as ApiError
+    expect(numeric.code).toBeUndefined()
+  })
 })
 
 describe('convenience helpers', () => {
