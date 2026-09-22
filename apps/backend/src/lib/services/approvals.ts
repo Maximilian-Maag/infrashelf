@@ -195,14 +195,16 @@ export type ApprovalOutcome =
 /**
  * Approve a pending order, re-asking the gates before anything is built (#511).
  *
- * `overridePolicy` is root's escape from a policy refusal at this moment, the
- * same right as on the ordering path (#110) and checked in `recheckOrderGates`:
- * a rule with no way past it turns a policy mistake into an outage.
+ * `overridePolicy` and `overrideBudget` are root's escapes from the two refusals
+ * at this moment, the same rights as on the ordering path (#110, #325) and checked
+ * in `recheckOrderGates`: a rule with no way past it turns a policy mistake into an
+ * outage, and a ceiling that moved while the order waited would otherwise have no
+ * answer but an edit to the budget itself (#514).
  */
 export const approveOrder = async (
   session: SessionUser,
   orderId: number,
-  options: { overridePolicy?: boolean } = {},
+  options: { overridePolicy?: boolean; overrideBudget?: boolean } = {},
 ): Promise<Result<ApprovalOutcome>> => {
   const separation = await assertNotOwnOrder(session, orderId)
   if (!separation.ok) return separation
@@ -248,6 +250,7 @@ export const approveOrder = async (
     seam: 'when it was approved',
     actor: { id: session.id, email: session.email, role: session.role },
     overridePolicy: options.overridePolicy,
+    overrideBudget: options.overrideBudget,
   })
 
   if (!gates.ok) {

@@ -91,8 +91,9 @@ is already spent, the row says so before you decide — the cost centre, what is
 committed against what limit, and which of the two behaviours root configured:
 
 - **"approving this will be refused at the gate"** — the budget is set to
-  **block**. Approving will fail; the order stays pending. Only root can place an
-  order against a spent block budget, and it is recorded when they do.
+  **block**. Approving will fail; the order stays pending. Root can place an order
+  against a spent block budget, and approve one too — either way it is recorded
+  when they do.
 - **"approving this goes through and is recorded"** — the budget is set to
   **warn**. Approving works normally and the audit log gets an
   `order.budget_warning` entry.
@@ -108,6 +109,13 @@ policy added that would have refused the order. So the budget and the policy are
 both asked once more at the moment of commitment, and if either refuses, the
 approval is refused with the reason — the order stays **pending**, and can be
 approved again once the budget is raised or the rule changed.
+
+**Root can override either refusal from the row that showed it** (#514): the
+refusal appears with a **Place anyway** control, which re-approves the order with
+the waiver the refusal names — the budget or the policy, never both at once. An
+approver who is not root is shown only the reason. The role is a decision about
+what to display; the backend checks it again, and both waivers are recorded
+(`order.budget_overridden`, `order.policy_overridden`).
 
 The same applies when a deployment window opens: an order that waited for its
 window is re-checked before it deploys, and one that no longer passes goes back

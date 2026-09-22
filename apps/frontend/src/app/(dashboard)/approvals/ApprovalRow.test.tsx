@@ -5,10 +5,15 @@ import type { Order } from '@infrashelf/types'
 
 const refresh = vi.fn()
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh }) }))
-vi.mock('@/lib/api', () => ({ post: vi.fn() }))
+vi.mock('@/lib/api', async () => {
+  // `ApiError` stays real: the row asks `instanceof` about what the server sent, so
+  // a mocked module without the class would not exercise the branch at all.
+  const actual = (await vi.importActual('@/lib/api')) as { ApiError: unknown }
+  return { post: vi.fn(), ApiError: actual.ApiError }
+})
 
 import { ApprovalRow } from './ApprovalRow'
-import { post } from '@/lib/api'
+import { post, ApiError } from '@/lib/api'
 
 const mockedPost = vi.mocked(post)
 
@@ -312,5 +317,100 @@ describe('ApprovalRow budget notice (#325)', () => {
   it('stays quiet when the cost centre has no budget at all', () => {
     render(<ApprovalRow order={order({ budget: null })} currentUserId={99} />)
     expect(screen.queryByText(/Over budget/i)).not.toBeInTheDocument()
+  })
+})
+
+/*
+ * #514. The escapes existed on the ordering path (#509) and, at the commit, only
+ * in the service signature: `ApprovalRow` posted an empty body and offered
+ * nothing after a refusal, so a root operator refused at the gate — on the screen
+ * where the money is actually spent — had no way past it.
+ */
+describe('ApprovalRow offers root the escapes from a refusal (#514)', () => {
+  it('offers the policy escape, and sends overridePolicy on the retry', async () => {
+    const user = userEvent.setup()
+    mockedPost.mockRejectedValueOnce(new ApiError(409, 'Refused by rule quota/vm-count.', 'policy_denied'))
+    render(<ApprovalRow order={order()} currentUserId={99} role="root" />)
+
+    await user.click(screen.getByRole('button', { name: /^approve$/i }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/quota\/vm-count/i)
+    await user.click(screen.getByRole('button', { name: /place anyway/i }))
+
+    await waitFor(() => expect(mockedPost).toHaveBeenCalledTimes(2))
+    expect(mockedPost.mock.calls[1]).toEqual([
+      '/api/approvals/412/approve',
+      { overridePolicy: true },
+    ])
+  })
+
+  it('offers the budget escape for a budget refusal, and not the policy one', async () => {
+    // The two are separate rights. Sending both would waive whatever the server
+    // asks next as well as what it refused.
+    const user = userEvent.setup()
+    mockedPost.mockRejectedValueOnce(new ApiError(409, 'Over budget: 600.00 of 100.00 committed in total.', 'budget_blocked'))
+    render(<ApprovalRow order={order()} currentUserId={99} role="root" />)
+
+    await user.click(screen.getByRole('button', { name: /^approve$/i }))
+    await user.click(await screen.findByRole('button', { name: /place anyway/i }))
+
+    await waitFor(() => expect(mockedPost).toHaveBeenCalledTimes(2))
+    expect(mockedPost.mock.calls[1][1]).toEqual({ overrideBudget: true })
+  })
+
+  it('carries an earlier waiver into the next retry, so the chain can finish', async () => {
+    // Waiving the policy can uncover a budget refusal underneath it, because the
+    // policy gate is asked first. Retrying with only the flag in hand would drop
+    // the waiver already made and the two would alternate for ever.
+    const user = userEvent.setup()
+    mockedPost.mockRejectedValueOnce(new ApiError(409, 'Refused by rule quota/vm-count.', 'policy_denied'))
+    mockedPost.mockRejectedValueOnce(new ApiError(409, 'Over budget.', 'budget_blocked'))
+    render(<ApprovalRow order={order()} currentUserId={99} role="root" />)
+
+    await user.click(screen.getByRole('button', { name: /^approve$/i }))
+    await user.click(await screen.findByRole('button', { name: /place anyway/i }))
+    // Waited for by its MESSAGE: the control is cleared and re-set across a retry,
+    // so finding the button alone could click the previous refusal's, still
+    // disabled, and pass nothing on.
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/over budget/i))
+    await user.click(screen.getByRole('button', { name: /place anyway/i }))
+
+    await waitFor(() => expect(mockedPost).toHaveBeenCalledTimes(3))
+    expect(mockedPost.mock.calls[2][1]).toEqual({ overridePolicy: true, overrideBudget: true })
+  })
+
+  it('offers an admin nothing, even for the same refusal', async () => {
+    // The row decides what to SHOW; the backend re-checks the role. Without this
+    // the queue would advertise a control that comes back 409 for an admin.
+    const user = userEvent.setup()
+    mockedPost.mockRejectedValueOnce(new ApiError(409, 'Over budget.', 'budget_blocked'))
+    render(<ApprovalRow order={order()} currentUserId={99} role="admin" />)
+
+    await user.click(screen.getByRole('button', { name: /^approve$/i }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/over budget/i)
+    expect(screen.queryByRole('button', { name: /place anyway/i })).not.toBeInTheDocument()
+  })
+
+  it('offers nothing for a refusal it has no escape for', async () => {
+    const user = userEvent.setup()
+    mockedPost.mockRejectedValueOnce(new ApiError(409, 'Order is not pending'))
+    render(<ApprovalRow order={order()} currentUserId={99} role="root" />)
+
+    await user.click(screen.getByRole('button', { name: /^approve$/i }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/not pending/i)
+    expect(screen.queryByRole('button', { name: /place anyway/i })).not.toBeInTheDocument()
+  })
+
+  it('sends no overrides on an ordinary approval', async () => {
+    // The body every existing caller posts, unchanged: an empty object, not an
+    // object full of undefined flags.
+    const user = userEvent.setup()
+    render(<ApprovalRow order={order()} currentUserId={99} role="root" />)
+
+    await user.click(screen.getByRole('button', { name: /^approve$/i }))
+
+    expect(mockedPost).toHaveBeenCalledWith('/api/approvals/412/approve', {})
   })
 })

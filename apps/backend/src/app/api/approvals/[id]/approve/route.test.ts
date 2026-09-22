@@ -23,11 +23,13 @@ import {
   createOrder,
   makeAuthHeader,
   createProductWebhook,
+  createCostCenter,
+  linkProductEnvironment,
 } from '@/test/helpers'
 import { sendOrderApproved } from '@/lib/notification'
 import { createIntegration } from '@/lib/services/admin/integrations'
 import { db } from '@/lib/db/client'
-import { infrastructureElements, orders } from '@/lib/db/schema'
+import { costCenters, infrastructureElements, orders, projects } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
 
 const makeReq = (url: string, auth?: string, body?: unknown) =>
@@ -144,6 +146,73 @@ describe('POST /api/approvals/[id]/approve — the policy override', () => {
       expect(res.status, `body ${JSON.stringify(body)} was not handled leniently: ${text}`).toBe(200)
       await db.update(orders).set({ status: 'pending' }).where(eq(orders.id, base.order.id))
     }
+  })
+})
+
+/*
+ * The budget half of the same wire (#514).
+ *
+ * The escape existed at creation and not at the commit, which is backwards —
+ * the approval is where the money is spent, and the path where a ceiling that
+ * moved while an order waited shows up at all. Same rule as the policy flag: it
+ * has to reach the service, and the service decides whether the caller may use
+ * it.
+ */
+describe('POST /api/approvals/[id]/approve — the budget override (#514)', () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  const overspent = async () => {
+    const root = await createUser({ role: 'root' })
+    const pm = await createUser({ role: 'project_manager' })
+    const admin = await createUser({ role: 'admin' })
+    const cat = await createCategory()
+    const product = await createProduct(cat.id)
+    const ci = await createCiSource()
+    const env = await createEnvironment(ci.id)
+    await linkProductEnvironment(product.id, env.id, { price: '400.00', currency: 'EUR' })
+    await createProductWebhook(product.id, env.id)
+    const project = await createProject(pm.id)
+    const centre = await createCostCenter()
+    await db
+      .update(costCenters)
+      .set({ budgetAmount: '100.00', budgetCurrency: 'EUR', budgetPeriod: 'total', budgetBehaviour: 'block' })
+      .where(eq(costCenters.id, centre.id))
+    await db.update(projects).set({ costCenterId: centre.id }).where(eq(projects.id, project.id))
+    const order = await createOrder(project.id, product.id, env.id, pm.id, { status: 'pending' })
+    return { root, admin, order }
+  }
+
+  it('codes the budget refusal, and lets root approve anyway with overrideBudget', async () => {
+    const base = await overspent()
+    const auth = await makeAuthHeader(base.root)
+
+    const refused = await POST(makeReq('http://localhost/api/approvals/1/approve', auth), {
+      params: Promise.resolve({ id: String(base.order.id) }),
+    })
+    expect(refused.status).toBe(409)
+    const body = (await refused.json()) as { error: string; code?: string }
+    expect(body.error).toMatch(/over budget/i)
+    // Named, so the queue row can offer the escape that answers it rather than
+    // matching on this sentence.
+    expect(body.code).toBe('budget_blocked')
+
+    const waived = await POST(
+      makeReq('http://localhost/api/approvals/1/approve', auth, { overrideBudget: true }),
+      { params: Promise.resolve({ id: String(base.order.id) }) },
+    )
+    expect(waived.status).toBe(200)
+  })
+
+  it('does not let the budget flag stand in for the role either', async () => {
+    const base = await overspent()
+    const res = await POST(
+      makeReq('http://localhost/api/approvals/1/approve', await makeAuthHeader(base.admin), {
+        overrideBudget: true,
+      }),
+      { params: Promise.resolve({ id: String(base.order.id) }) },
+    )
+
+    expect(res.status).toBe(409)
   })
 })
 
