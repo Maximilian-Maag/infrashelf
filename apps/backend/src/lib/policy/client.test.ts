@@ -88,8 +88,12 @@ describe('queryPolicy — the request', () => {
 })
 
 describe('queryPolicy — the answer', () => {
-  it('returns each of the three decisions with the rule that made it', async () => {
-    for (const d of ['allow', 'warn', 'deny'] as const) {
+  it('returns each of the four decisions with the rule that made it', async () => {
+    // Four, not three: `needs-approval` is #110's third answer ("allow / deny /
+    // needs-approval" in the issue), added as the portal grew the approval path
+    // to carry it. A word the portal does not know is refused, so this list is
+    // also what keeps the Rego side honest.
+    for (const d of ['allow', 'warn', 'deny', 'needs-approval'] as const) {
       vi.spyOn(global, 'fetch').mockResolvedValue(
         decision({ decision: d, rule: `quota/${d}`, message: `because ${d}` }),
       )

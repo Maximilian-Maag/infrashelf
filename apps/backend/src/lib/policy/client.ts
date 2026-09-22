@@ -20,7 +20,7 @@ import {
  *
  * ── The answer ───────────────────────────────────────────────────────────────
  *
- *     { "result": { "decision": "allow" | "warn" | "deny",
+ *     { "result": { "decision": "allow" | "warn" | "deny" | "needs-approval",
  *                   "rule":     "quota/vm-count",      // which rule decided
  *                   "message":  "…"                    // what to tell a person
  *                 } }
@@ -55,14 +55,21 @@ export const ORDER_DECISION_PATH = '/v1/data/infrashelf/order/decision'
  */
 export const POLICY_TIMEOUT_MS = 5_000
 
-export type PolicyDecision = 'allow' | 'warn' | 'deny'
+export type PolicyDecision = 'allow' | 'warn' | 'deny' | 'needs-approval'
 
 export type PolicyQueryResult =
   | { ok: true; decision: PolicyDecision; rule: string | null; message: string | null }
   | { ok: false; error: string }
 
+/**
+ * The four words the portal understands, and the whole of them.
+ *
+ * `needs-approval` is #110's third answer — the issue names the set as "allow /
+ * deny / needs-approval" — and it is hyphenated exactly as the issue writes it,
+ * because it is a wire word: the policy repository spells it, not this file.
+ */
 const isDecision = (value: unknown): value is PolicyDecision =>
-  value === 'allow' || value === 'warn' || value === 'deny'
+  value === 'allow' || value === 'warn' || value === 'deny' || value === 'needs-approval'
 
 const asText = (value: unknown): string | null =>
   typeof value === 'string' && value.trim() !== '' ? value : null

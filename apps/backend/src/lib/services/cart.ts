@@ -363,6 +363,15 @@ export interface CheckoutResult {
    * projects' cost centres, and "something was over budget" does not say which.
    */
   warnings: { orderId: number; message: string }[]
+  /**
+   * Orders a policy held for somebody else's approval (#110).
+   *
+   * Not failures and not warnings: the orders exist and are in the approvals
+   * queue. Its own list because a warning means the order went through, and this
+   * one says it did not — an admin's order provisions immediately, so it is the
+   * shopper who has to be told why this one is waiting.
+   */
+  approvalRequired: { orderId: number; message: string }[]
 }
 
 /**
@@ -535,6 +544,15 @@ export const checkoutCart = async (
   const orderIds: number[] = []
   const failed: CheckoutFailure[] = []
   const warnings: { orderId: number; message: string }[] = []
+  /**
+   * Orders policy sent to the approvals queue instead of provisioning (#110).
+   *
+   * Its own list rather than an entry in `warnings`: a warning says the order
+   * went through anyway, and this one did not — an admin's order provisions
+   * immediately, so this is the case where the shopper has to be told that
+   * something they expected to happen did not.
+   */
+  const approvalRequired: { orderId: number; message: string }[] = []
 
   for (const { cartItemId, order } of prepared) {
     try {
@@ -549,6 +567,11 @@ export const checkoutCart = async (
         // is indistinguishable from one where nothing was wrong (#110).
         if (created.data.policyWarning) {
           warnings.push({ orderId: created.data.id, message: created.data.policyWarning })
+        }
+        // And the order policy held back travels too, on its own list (#110): the
+        // shopper is the one who will notice it never provisioned.
+        if (created.data.policyApprovalRequired) {
+          approvalRequired.push({ orderId: created.data.id, message: created.data.policyApprovalRequired })
         }
       } else {
         failed.push({ cartItemId, message: created.message })
@@ -577,7 +600,7 @@ export const checkoutCart = async (
     return err(502, `No order could be created: ${failed.map((f) => f.message).join('; ')}`)
   }
 
-  return ok({ orderIds, failed, warnings })
+  return ok({ orderIds, failed, warnings, approvalRequired })
 }
 
 /** Whether the caller's cart contains anything, for badging the navigation. */

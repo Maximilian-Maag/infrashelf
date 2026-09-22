@@ -802,6 +802,41 @@ describe('approveOrder — the gates are re-asked at the point of commitment', (
     expect(result.status).toBe(409)
   })
 
+  it('commits an order whose policy now asks for an approval, because the approval is it', async () => {
+    /*
+     * #110's third answer, at the commit seam. A rule that asks for a person is
+     * SATISFIED by the person: the order would not be here if they had not
+     * clicked Approve, so refusing it as though the rule were unmet would make
+     * such a rule deadlock the queue — approvable by nobody, refusable by the
+     * engine forever.
+     *
+     * The ordering path is where the rule does its work (the order is written
+     * `pending`), which is why nothing is expected of the commit beyond letting
+     * it through.
+     */
+    const base = await waiting()
+    vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          result: {
+            decision: 'needs-approval',
+            rule: 'sod/production',
+            message: 'Production needs a second pair of eyes.',
+          },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
+    )
+
+    const result = await approveOrder(makeSession(base.admin), base.order.id)
+
+    expect(result.ok).toBe(true)
+    const [row] = await db.select().from(orders).where(eq(orders.id, base.order.id))
+    expect(row.status).toBe('provisioning')
+    const denied = await db.select().from(auditLog).where(eq(auditLog.action, 'order.policy_denied'))
+    expect(denied).toHaveLength(0)
+  })
+
   it('still approves what policy still allows', async () => {
     const base = await waiting()
     allow()

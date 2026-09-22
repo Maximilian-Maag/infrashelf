@@ -200,6 +200,17 @@ export interface CreatedOrder {
    * indistinguishable from no warning.
    */
   policyWarning?: string
+  /**
+   * Set when policy held the order for somebody else's approval (#110). The
+   * order exists and is in the approvals queue — this says which rule asked, so
+   * the person who placed it is not left watching an order that never starts.
+   *
+   * Separate from `policyWarning` because it is not a warning: the order did not
+   * proceed as it otherwise would have (an admin's order provisions immediately,
+   * and this one does not), and a caller that had to read the outcome off the
+   * message would eventually get it wrong.
+   */
+  policyApprovalRequired?: string
 }
 
 /**
@@ -1206,6 +1217,28 @@ export const createPreparedOrder = async (
   }
 
   /*
+   * `needs-approval` is the fourth answer, and the only one that changes WHO may
+   * commit the order.
+   *
+   * Everything below turns on `isAdmin`: an admin's order is provisioned here,
+   * everybody else's waits for an approval. So a rule that asks for a person has
+   * to be able to take that away, or it does nothing at all for precisely the
+   * role it was written about — an admin would place the order and policy would
+   * have said nothing.
+   *
+   * It goes to the same place a project manager's order goes: `pending`, where
+   * `approveOrder`'s self-approval guard means somebody ELSE has to approve it.
+   * A verdict that only produced a note on the queue row would be satisfied by
+   * the very person the rule wanted checked.
+   *
+   * `provisionNow` rather than clearing `isAdmin`: the role still decides what
+   * the order looks like in every other way (who is mailed, which audit entry is
+   * written), and only the commit is taken away.
+   */
+  const approvalRequired = policy.outcome === 'needs-approval'
+  const provisionNow = isAdmin && !approvalRequired
+
+  /*
    * The budget gate, at the single point both paths go through (#325), and the
    * check and the insert are ONE transaction, serialised per cost centre (#403).
    *
@@ -1273,9 +1306,10 @@ export const createPreparedOrder = async (
         environmentId,
         userId: session.id,
         // The admin path provisions immediately; everyone else waits for an
-        // approval. The only difference between the two inserts, which is why
-        // they are one insert now.
-        status: isAdmin ? 'provisioning' : 'pending',
+        // approval — and an admin's order goes the same way when policy asked
+        // for one (`provisionNow`, above). The only difference between the two
+        // inserts, which is why they are one insert now.
+        status: provisionNow ? 'provisioning' : 'pending',
         parameters,
         costCenterId: resolvedCostCenterId,
         // Carried to approval time, which is where the trial is actually
@@ -1344,6 +1378,23 @@ export const createPreparedOrder = async (
           (policy.rule ? ` (rule: ${policy.rule})` : '') +
           `: ${policy.message ?? '(no message)'}`,
       )
+    } else if (approvalRequired) {
+      /*
+       * An order policy held back is written with the order it describes, like
+       * the two entries above and for the same reason: this is the record of why
+       * an order that would have provisioned immediately did not. Without it the
+       * queue row looks like any other request, and the question a month later —
+       * "why was this admin's order waiting" — has no answer anywhere.
+       */
+      await logAuditWith(
+        tx,
+        session.id,
+        'order.policy_needs_approval',
+        order.id,
+        `${session.email}'s order was held for approval, which policy required` +
+          (policy.rule ? ` (rule: ${policy.rule})` : '') +
+          `: ${policy.message ?? '(no message)'}`,
+      )
     }
 
     return { kind: 'placed' as const, order, budget }
@@ -1365,7 +1416,7 @@ export const createPreparedOrder = async (
    * the transaction, with the order they describe.
    */
 
-  if (isAdmin) {
+  if (provisionNow) {
     // One order, N elements: the fan-out lives in provisionOrderElements so the
     // approval path cannot derive the state keys differently.
     let provisioned: Awaited<ReturnType<typeof provisionOrderElements>>
@@ -1447,7 +1498,18 @@ export const createPreparedOrder = async (
     return ok({
       ...(order as CreatedOrder),
       ...(budget.message ? { budgetWarning: budget.message } : {}),
-      ...(policy.message ? { policyWarning: policy.message } : {}),
+      /*
+       * A `needs-approval` verdict is not a warning: the order did not proceed
+       * as it would have, it is waiting for somebody else. So it goes out on its
+       * own field, which is what lets a caller — the cart, the form — say that
+       * rather than style it as "your order was placed".
+       *
+       * Read off the OUTCOME, not off the message: only a needs-approval verdict
+       * produces one, and a caller that had to tell the two apart by their
+       * sentences would be broken by a policy that wrote a similar one.
+       */
+      ...(approvalRequired && policy.message ? { policyApprovalRequired: policy.message } : {}),
+      ...(policy.outcome === 'warn' && policy.message ? { policyWarning: policy.message } : {}),
     })
   }
 }

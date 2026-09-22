@@ -179,6 +179,14 @@ export const recheckOrderGates = async (
     role: row.requesterRole,
   })
 
+  /*
+   * `needs-approval` deliberately falls through to the `ok` at the end of this
+   * function: the person clicking Approve IS the approval that rule asked for
+   * (#110), and the deployment-window sweep only ever sees an order somebody has
+   * already approved. A verdict refused here would deadlock the queue — the order
+   * approvable by nobody, the engine refusing it for ever. The rule did its work
+   * where the order was placed, which is where it sent it to this queue.
+   */
   if (verdict.outcome === 'deny') {
     const waived = context.overridePolicy === true && context.actor?.role === 'root'
     if (!waived) {

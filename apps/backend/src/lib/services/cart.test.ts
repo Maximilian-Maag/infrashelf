@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type { SessionUser } from '@infrashelf/types'
 
 vi.mock('@/lib/notification', () => ({
@@ -23,6 +23,7 @@ import {
   MAX_CART_ITEMS,
 } from './cart'
 import { triggerProductWebhooksTracked } from '@/lib/ci/webhooks'
+import { createIntegration } from '@/lib/services/admin/integrations'
 import { db } from '@/lib/db/client'
 import { cartItems, orders, parameters, products, productEnvironments, auditLog, costCenters, projects } from '@/lib/db/schema'
 import { and, eq } from 'drizzle-orm'
@@ -655,5 +656,93 @@ describe('checkoutCart', () => {
     if (!result.ok) expect(result.message).toMatch(/not offered/i)
     // The gate held: the still-valid second item was not ordered either.
     expect(await db.select().from(orders)).toHaveLength(0)
+  })
+})
+
+/*
+ * Policy enforcement at the checkout (#110).
+ *
+ * What these cover is the WIRING through the cart: the gate itself lives in
+ * `lib/policy/gate.test.ts`, and the order it produces is `orders.ts`'s. The one
+ * thing only the cart can get wrong is telling the shopper what happened — an
+ * order policy held back provisions nothing, and a checkout that says nothing
+ * about it looks exactly like one where the order is building.
+ */
+describe('checkoutCart — policy (#110)', () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  const stocked = async () => {
+    const ctx = await setup()
+    const admin = ctx.admin
+    const a = await addToCart(makeSession(admin), { productId: ctx.nginx.id, environmentId: ctx.env.id })
+    if (!a.ok) throw new Error('setup failed')
+    return { ...ctx, admin, first: a.data }
+  }
+
+  const withEngine = async () => {
+    const root = await createUser({ role: 'root', email: 'cart-root@test.dev', name: 'Root' })
+    await createIntegration(root.id, {
+      kind: 'opa',
+      name: 'Policy engine',
+      baseUrl: 'https://opa.example.com',
+      authType: 'none',
+      failureMode: 'blocking',
+    })
+  }
+
+  const decides = (payload: Record<string, unknown>) =>
+    vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ result: payload }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    )
+
+  it('reports an order policy held for approval on its own list, not as a warning (#110)', async () => {
+    /*
+     * Two different things, and a shopper has to be able to tell them apart: a
+     * warning says the order went through anyway (over budget), while this one
+     * says it did NOT — an admin's order provisions immediately, and policy is
+     * why this one is sitting in the approvals queue instead.
+     */
+    const ctx = await stocked()
+    await withEngine()
+    decides({
+      decision: 'needs-approval',
+      rule: 'sod/production',
+      message: 'Production needs a second pair of eyes.',
+    })
+
+    const result = await checkoutCart(makeSession(ctx.admin), {
+      projectId: ctx.project.id,
+      items: [{ cartItemId: ctx.first.id, parameters: {} }],
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.data.approvalRequired).toHaveLength(1)
+    expect(result.data.approvalRequired?.[0].orderId).toBe(result.data.orderIds[0])
+    expect(result.data.approvalRequired?.[0].message).toContain('sod/production')
+    // Not in `warnings`: that list means "placed, with something to say", and
+    // the cart styles it as the over-budget notice.
+    expect(result.data.warnings).toEqual([])
+
+    const [row] = await db.select().from(orders).where(eq(orders.id, result.data.orderIds[0]))
+    expect(row.status).toBe('pending')
+  })
+
+  it('says nothing on that list when policy allowed the order', async () => {
+    const ctx = await stocked()
+    await withEngine()
+    decides({ decision: 'allow', rule: 'baseline' })
+
+    const result = await checkoutCart(makeSession(ctx.admin), {
+      projectId: ctx.project.id,
+      items: [{ cartItemId: ctx.first.id, parameters: {} }],
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.data.approvalRequired).toEqual([])
   })
 })

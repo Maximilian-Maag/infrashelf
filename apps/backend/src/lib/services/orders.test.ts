@@ -2288,6 +2288,80 @@ describe('createOrder — policy enforcement (#110)', () => {
     expect(entries[0].details).toContain('quota/near-limit')
   })
 
+  it('holds an admin’s order for approval when a policy asks for a person', async () => {
+    /*
+     * #110's third answer, and the reason it cannot be folded into `allow` or
+     * `deny`: this is the one outcome that changes WHO may commit the order.
+     *
+     * An admin's order provisions immediately (`createPreparedOrder`), so a rule
+     * that asks for an approval has to stop that — otherwise the rule does
+     * nothing at all for exactly the role it was written about. The order is
+     * written `pending`, which puts it in the approvals queue, and
+     * `approveOrder`'s self-approval guard means a DIFFERENT admin has to say
+     * yes — which is what "needs approval" has to mean to be worth having.
+     */
+    const base = await buildBase()
+    await withEngine()
+    vi.spyOn(global, 'fetch').mockResolvedValue(
+      decision({
+        decision: 'needs-approval',
+        rule: 'sod/production',
+        message: 'Production needs a second pair of eyes.',
+      }),
+    )
+
+    const result = await createOrder(makeSession(base.admin), order(base))
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.data.status).toBe('pending')
+    // The requester is told which rule asked, in the policy's own words — the
+    // same reason a refusal names its rule.
+    expect(result.data.policyApprovalRequired).toContain('Production needs a second pair of eyes.')
+    expect(result.data.policyApprovalRequired).toContain('sod/production')
+    // Nothing was built and nothing was started: the order is a request again.
+    expect(mockedTriggerWebhooks).not.toHaveBeenCalled()
+
+    const entries = await db.select().from(auditLog).where(eq(auditLog.action, 'order.policy_needs_approval'))
+    expect(entries).toHaveLength(1)
+    expect(entries[0].details).toContain('sod/production')
+    expect(entries[0].entityId).toBe(result.data.id)
+  })
+
+  it('asks an approver, by mail, for an order policy held back', async () => {
+    // The queue is not the only way an approval is reached: the ordering path
+    // mails every admin, and an order parked by policy must not be the one that
+    // arrives quietly.
+    const base = await buildBase()
+    await withEngine()
+    vi.spyOn(global, 'fetch').mockResolvedValue(
+      decision({ decision: 'needs-approval', rule: 'sod/production' }),
+    )
+
+    const result = await createOrder(makeSession(base.admin), order(base))
+
+    expect(result.ok).toBe(true)
+    expect(mockedSendApprovalRequest).toHaveBeenCalled()
+  })
+
+  it('says which rule asked for an approval when a project manager’s order waits', async () => {
+    // Their order waits for approval either way, so this is not a change of
+    // status — but "why did this one need a person" is a question the requester
+    // would otherwise have to ask someone about.
+    const base = await buildBase()
+    await withEngine()
+    vi.spyOn(global, 'fetch').mockResolvedValue(
+      decision({ decision: 'needs-approval', rule: 'sod/production' }),
+    )
+
+    const result = await createOrder(makeSession(base.pm), order(base))
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.data.status).toBe('pending')
+    expect(result.data.policyApprovalRequired).toContain('sod/production')
+  })
+
   it('lets root through WITH the override, and records the rule that was waived', async () => {
     mockedTriggerWebhooks.mockResolvedValueOnce({ pipelineIds: ['pipe-override'], failures: [] })
     const base = await buildBase()

@@ -114,6 +114,14 @@ window is re-checked before it deploys, and one that no longer passes goes back
 to the approvals queue rather than being built. See the root guide §5b for
 policies and the `order.budget_denied` / `order.policy_denied` audit entries.
 
+**Orders a policy asked to see** (#110). A rule can answer `needs-approval`
+instead of allowing or refusing, and such an order is placed in this queue rather
+than provisioned — including an admin's own order, which would otherwise build
+the moment it was placed. The orderer has been told which rule asked, and
+`order.policy_needs_approval` is in the audit log with it. Approving one works
+like any other approval, and because nobody approves their own order the rule is
+a real second pair of eyes rather than a formality. See §5b of the root guide.
+
 ### 3.2 Rejecting an Order
 
 1. Open an order under **Approvals → Open**
