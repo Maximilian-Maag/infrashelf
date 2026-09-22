@@ -1,10 +1,33 @@
 import { db } from '@/lib/db/client'
 import { countWhere } from '@/lib/db/queries'
-import { costCenters, projects, orders, type CostCenter } from '@/lib/db/schema'
+import { costCenters, projects, orders } from '@/lib/db/schema'
+import type { CostCenter } from '@infrashelf/types'
 import { count, eq } from 'drizzle-orm'
 import { ok, err, type Result } from '@/lib/services/result'
 import { logAudit, logAuditWith, changedFields } from '@/lib/audit'
 import { isEmptyUpdate, EMPTY_UPDATE_MESSAGE } from '@/lib/services/updates'
+
+/**
+ * The four fields a cost centre IS (#539), selected rather than returned as a row.
+ *
+ * #325 put a budget on this table — `budgetAmount`, `budgetCurrency`,
+ * `budgetPeriod`, `budgetBehaviour` — and made every verb that touches it `root`,
+ * on purpose: "a budget is a spending limit, and who may see one is the same
+ * question as who may set it". A bare `select()` or `returning()` here would give
+ * those columns to callers who are not root, and `listCostCenters` is reached by
+ * any signed-in session at all.
+ *
+ * It is also the contract: `CostCenter` in `@infrashelf/types` is these four, and
+ * so is `costCenterSchema` in the spec. Naming the columns keeps a response equal
+ * to the thing it is documented to be — and a column added to the table reaches a
+ * client only if somebody writes it here.
+ */
+const costCenterColumns = {
+  id: costCenters.id,
+  code: costCenters.code,
+  name: costCenters.name,
+  active: costCenters.active,
+}
 
 export interface CreateCostCenterInput {
   code: string
@@ -20,7 +43,7 @@ export interface UpdateCostCenterInput {
 
 export const listCostCenters = async (): Promise<Result<CostCenter[]>> => {
   const rows = await db
-    .select()
+    .select(costCenterColumns)
     .from(costCenters)
     .orderBy(costCenters.code)
 
@@ -34,7 +57,7 @@ export const createCostCenter = async (
   const [cc] = await db
     .insert(costCenters)
     .values({ code: input.code, name: input.name, active: input.active ?? true })
-    .returning()
+    .returning(costCenterColumns)
 
   await logAudit(actorId ?? null, 'cost_center.created', cc.id, `Created cost center ${cc.code}`)
 
@@ -43,7 +66,7 @@ export const createCostCenter = async (
 
 export const getCostCenterById = async (id: number): Promise<Result<CostCenter>> => {
   const rows = await db
-    .select()
+    .select(costCenterColumns)
     .from(costCenters)
     .where(eq(costCenters.id, id))
     .limit(1)
@@ -63,7 +86,7 @@ export const updateCostCenter = async (
     .update(costCenters)
     .set(input)
     .where(eq(costCenters.id, id))
-    .returning()
+    .returning(costCenterColumns)
 
   if (!updated) return err(404, 'Not found')
 

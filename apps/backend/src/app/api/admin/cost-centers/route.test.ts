@@ -1,7 +1,10 @@
 import { describe, it, expect } from 'vitest'
 import { NextRequest } from 'next/server'
+import { eq } from 'drizzle-orm'
 import { GET, POST } from './route'
-import { createUser, makeAuthHeader } from '@/test/helpers'
+import { db } from '@/lib/db/client'
+import { costCenters } from '@/lib/db/schema'
+import { createUser, makeAuthHeader, createCostCenter } from '@/test/helpers'
 
 const makeReq = (url: string, method = 'GET', body?: unknown, auth?: string) =>
   new NextRequest(url, {
@@ -112,5 +115,61 @@ describe('POST /api/admin/cost-centers', () => {
       ),
     )
     expect(res.status).toBe(201)
+  })
+})
+
+/*
+ * The budget landed on the `cost_centers` row in #325, and the budget verbs are
+ * `requireRole('root')` on purpose — "who may see one is the same question as who
+ * may set it". This list is not root's: it needs only a session, so a bare
+ * `select()` here handed a spending limit to a project manager (#539).
+ *
+ * Asserted as the exact key set rather than the absence of four names, so a column
+ * added to the table is caught the same way: nothing reaches a response unless
+ * somebody selected it.
+ */
+describe('a cost centre\'s budget does not ride along (#539)', () => {
+  const withBudget = async () => {
+    const cc = await createCostCenter()
+    await db
+      .update(costCenters)
+      .set({
+        budgetAmount: '100.00',
+        budgetCurrency: 'EUR',
+        budgetPeriod: 'total',
+        budgetBehaviour: 'block',
+      })
+      .where(eq(costCenters.id, cc.id))
+    return cc
+  }
+
+  it('is not handed to a project manager with the list', async () => {
+    const cc = await withBudget()
+
+    const pm = await createUser({ role: 'project_manager' })
+    const res = await GET(
+      makeReq('http://localhost/api/admin/cost-centers', 'GET', undefined, await makeAuthHeader(pm)),
+    )
+    expect(res.status).toBe(200)
+
+    const body = (await res.json()) as Array<Record<string, unknown>>
+    const row = body.find((r) => r.id === cc.id)
+    expect(Object.keys(row ?? {}).sort()).toEqual(['active', 'code', 'id', 'name'])
+  })
+
+  it('is not echoed back by the create', async () => {
+    const admin = await createUser({ role: 'admin' })
+    const res = await POST(
+      makeReq(
+        'http://localhost/api/admin/cost-centers',
+        'POST',
+        { code: 'CC-NOBUDGET', name: 'No Budget' },
+        await makeAuthHeader(admin),
+      ),
+    )
+    expect(res.status).toBe(201)
+
+    const body = (await res.json()) as Record<string, unknown>
+    expect(Object.keys(body).sort()).toEqual(['active', 'code', 'id', 'name'])
   })
 })

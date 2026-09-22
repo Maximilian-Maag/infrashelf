@@ -228,6 +228,10 @@ Under **Projects**:
 - Edit existing projects
 - Change the cost center of a project
 
+Cost centres are managed by root, and so are their budgets: you pick one, and you
+see the effect of its limit — an order refused, or a warning to pass on — but the
+amount itself is not shown to an admin (see §5.1 of the root guide).
+
 ### 6.1 Deleting a Project
 
 1. Open the project under **Projects**
