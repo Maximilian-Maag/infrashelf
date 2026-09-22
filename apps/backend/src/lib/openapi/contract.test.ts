@@ -1,6 +1,8 @@
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { getTableColumns } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
+import { exchangeRates } from '@/lib/db/schema'
 import '@/lib/openapi/paths'
 import { generateOpenApiDocument } from '@/lib/openapi/registry'
 
@@ -245,5 +247,44 @@ describe('the spec documents the waivers and the refusals', () => {
     const refused = JSON.stringify(operation.responses['409'])
     expect(refused).toContain('budget_blocked')
     expect(refused).toContain('policy_denied')
+  })
+})
+
+/**
+ * The half of the contract a client reads to know what it will RECEIVE, which is
+ * the half nothing checked: the exchange-rate row was documented as
+ * `{ id, currencyCode, rateToEur, updatedAt }` while the service returns the row
+ * as stored — `{ currencyCode, rate, updatedAt }` (#537). `id` and `rateToEur` are
+ * both invented, and the spec said nothing about `rate` being a string that must
+ * not be parsed into a float, on a field that is money.
+ *
+ * Bound to the table rather than to a second list: these three operations select
+ * from `exchange_rates` and return the rows unchanged, so the table's columns ARE
+ * the response — a column renamed in the database then fails this test instead of
+ * silently leaving the contract lying about it.
+ *
+ * Narrow on purpose: most other row schemas back services that select and rename
+ * their fields deliberately, where demanding a table's columns would be wrong.
+ */
+describe('the exchange-rate schema names the columns the endpoint returns (#537)', () => {
+  const columns = Object.keys(getTableColumns(exchangeRates)).sort()
+
+  const documentedColumns = (method: string, path: string): string[] => {
+    const operation = (document.paths[path] as Record<string, Record<string, unknown>>)[method]
+    const responses = operation.responses as Record<
+      string,
+      { content: Record<string, { schema: { items?: { properties?: object }; properties?: object } }> }
+    >
+    const schema = responses['200'].content['application/json'].schema
+
+    return Object.keys(schema.items?.properties ?? schema.properties ?? {}).sort()
+  }
+
+  it.each([
+    ['get', '/admin/exchange-rates'],
+    ['post', '/admin/exchange-rates/refresh'],
+    ['get', '/public/exchange-rates'],
+  ])('%s %s documents exactly the columns of exchange_rates', (method, path) => {
+    expect(documentedColumns(method, path)).toEqual(columns)
   })
 })
