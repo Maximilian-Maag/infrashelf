@@ -333,6 +333,15 @@ export const createInfraElement = async (
     stateKeyNamespace?: string | null
     /** `{ "<stackId>": "<stateKeyName>" }`, recorded at provisioning by #200. */
     stateKeys?: Record<string, string>
+    /** What the last drift report said (#108), as the sweep writes it. */
+    lastRefreshOutcome?: string
+    driftDetectedAt?: Date
+    driftSummary?: schema.DriftSummary
+    /** A stored policy verdict (#110 slice 6), as the sweep writes it. */
+    policyCheckedAt?: Date
+    policyOutcome?: string
+    policyRule?: string | null
+    policyMessage?: string | null
   },
 ) => {
   const [el] = await db
@@ -352,6 +361,17 @@ export const createInfraElement = async (
       ...(overrides?.parameters ? { parameters: overrides.parameters } : {}),
       ...(overrides?.deployedAt ? { deployedAt: overrides.deployedAt } : {}),
       ...(overrides?.outputs ? { outputs: overrides.outputs } : {}),
+      ...(overrides?.lastRefreshOutcome !== undefined
+        ? { lastRefreshOutcome: overrides.lastRefreshOutcome as schema.InfrastructureElement['lastRefreshOutcome'] }
+        : {}),
+      ...(overrides?.driftDetectedAt ? { driftDetectedAt: overrides.driftDetectedAt } : {}),
+      ...(overrides?.driftSummary ? { driftSummary: overrides.driftSummary } : {}),
+      ...(overrides?.policyCheckedAt ? { policyCheckedAt: overrides.policyCheckedAt } : {}),
+      ...(overrides?.policyOutcome !== undefined
+        ? { policyOutcome: overrides.policyOutcome as schema.InfrastructureElement['policyOutcome'] }
+        : {}),
+      ...(overrides?.policyRule !== undefined ? { policyRule: overrides.policyRule } : {}),
+      ...(overrides?.policyMessage !== undefined ? { policyMessage: overrides.policyMessage } : {}),
     })
     .returning()
   return el

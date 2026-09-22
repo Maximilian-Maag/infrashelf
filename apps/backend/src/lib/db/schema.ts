@@ -1087,6 +1087,32 @@ export const infrastructureElements = pgTable('infrastructure_elements', {
   /** Set when drift is found and CLEARED when a later report is clean, so it describes current drift. */
   driftDetectedAt: timestamp('drift_detected_at', { withTimezone: true }),
   driftSummary: jsonb('drift_summary').$type<DriftSummary>(),
+  /*
+   * What continuous policy evaluation last said about this element (#110).
+   *
+   * Written by the drift sweep (#108's run, which is the moment the portal
+   * re-reads the estate), never by anything that provisions or tears down: the
+   * verdict is REPORTED, not enforced — an element that is out of compliance is
+   * already running, and neither un-provisioning it nor refusing to render its
+   * page is a sensible answer to a report.
+   *
+   * All nullable, and NULL means "never evaluated", which is deliberately not the
+   * same as "evaluated and compliant" — the distinction `lastRefreshOutcome` draws
+   * for drift, for the reason #108 opens with: an element nothing has checked must
+   * not read as a healthy one.
+   *
+   * `unavailable` is a stored outcome rather than a gap: the engine being
+   * unreachable is a fact about the check, and the page has to be able to say
+   * which of the two it is looking at.
+   */
+  policyCheckedAt: timestamp('policy_checked_at', { withTimezone: true }),
+  policyOutcome: text('policy_outcome', {
+    enum: ['allow', 'warn', 'deny', 'needs-approval', 'unavailable'],
+  }),
+  /** Which rule decided — what makes a verdict actionable rather than a colour. */
+  policyRule: text('policy_rule'),
+  /** The policy's own words, shown as written: the portal cannot phrase a rule it did not write. */
+  policyMessage: text('policy_message'),
   /**
    * Why the LAST attempt to read the Terraform outputs did not produce any (#215).
    *

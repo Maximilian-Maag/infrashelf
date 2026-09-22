@@ -302,6 +302,13 @@
       "when": 1790102160800,
       "tag": "0046_order_policy_warning",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1790115060006,
+      "tag": "0047_element_policy_verdict",
+      "breakpoints": true
     }
   ]
 }

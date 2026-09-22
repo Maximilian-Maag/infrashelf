@@ -307,6 +307,51 @@ const infraSchema = z.object({
   }),
 })
 
+/*
+ * What the DETAIL adds to the list row (#110, slice 6): what the last refresh
+ * found, and what policy last said about the element.
+ *
+ * A separate schema rather than two more fields on `infraSchema`, because the list
+ * query does not select them — documenting them there would promise every row of
+ * {@link infraSchema} a verdict it never carries.
+ *
+ * Every field is nullable and null means NEVER CHECKED, which is the distinction
+ * #108 opens with: an element nothing has looked at must not read as a compliant
+ * one. `driftSummary.resources` is the plan-versus-reality list the report sent.
+ */
+const infraDetailSchema = infraSchema.extend({
+  lastRefreshOutcome: z.enum(['clean', 'drifted', 'locked', 'error']).nullable().openapi({
+    description:
+      'What the last drift report found (#108). null = no report has ever covered this element, ' +
+      'which is NOT the same as a clean one.',
+  }),
+  driftDetectedAt: z.string().nullable().openapi({
+    description: 'When drift was found, or null. Cleared by a later clean report, so it dates current drift.',
+  }),
+  driftSummary: z
+    .object({ resources: z.array(z.object({ address: z.string(), action: z.string() })) })
+    .nullable(),
+  policyCheckedAt: z.string().nullable().openapi({
+    description: 'When policy was last asked about this element. null = never asked.',
+  }),
+  policyOutcome: z
+    .enum(['allow', 'warn', 'deny', 'needs-approval', 'unavailable'])
+    .nullable()
+    .openapi({
+      description:
+        "The engine's verdict, or `unavailable` when it could not be asked — a fact about the check " +
+        'rather than about the element, and deliberately not rendered as agreement.',
+    }),
+  policyRule: z.string().nullable().openapi({
+    description: 'Which rule decided, as the policy names it. null when no verdict was reached.',
+  }),
+  policyMessage: z.string().nullable().openapi({
+    description:
+      "The policy's own words, shown to an operator as written rather than translated: the portal " +
+      'cannot rephrase a rule it did not write.',
+  }),
+})
+
 const auditEntrySchema = z.object({
   id: z.number(),
   userId: z.number().nullable(),
@@ -2322,8 +2367,10 @@ registry.registerPath({
   },
   responses: {
     200: {
-      description: 'The element, with translated product and environment names',
-      content: { 'application/json': { schema: infraSchema } },
+      description:
+        'The element, with translated product and environment names, what the last refresh found and ' +
+        'what policy last said about it',
+      content: { 'application/json': { schema: infraDetailSchema } },
     },
     400: { description: 'The id is not an id' },
     401: { description: 'Unauthorized' },

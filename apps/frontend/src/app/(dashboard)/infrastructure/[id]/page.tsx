@@ -12,6 +12,7 @@ import { Card } from '@/components/ui/Card'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { InfraActions } from '../InfraActions'
 import { RereadOutputs } from './RereadOutputs'
+import { ComplianceCard } from './ComplianceCard'
 import { getLang } from '@/lib/getLang'
 import { t } from '@/lib/i18n'
 
@@ -157,6 +158,11 @@ export default async function InfrastructureDetailPage({ params }: Props) {
           </dl>
         )}
       </Card>
+
+      {/* What the last refresh found, and whether policy still agrees (#110).
+          Below the outputs because those are the day-to-day answer, and above the
+          parameters because a verdict nobody scrolls to is a verdict nobody reads. */}
+      <ComplianceCard element={element} lang={lang} />
 
       <Card title={t('parameters', lang)}>
         {parameters.length === 0 ? (

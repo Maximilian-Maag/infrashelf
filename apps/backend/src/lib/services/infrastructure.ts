@@ -959,6 +959,18 @@ export interface InfraDetail extends InfraRow {
   isTrial: boolean
   /** Names whose values were replaced with the redaction marker. */
   redactedParameters: string[]
+  /**
+   * What the last refresh found (#108), and what policy last said about it (#110,
+   * slice 6). Both nullable, and null means "never checked" — see the select in
+   * `getInfrastructureElement`.
+   */
+  lastRefreshOutcome: 'clean' | 'drifted' | 'locked' | 'error' | null
+  driftDetectedAt: Date | null
+  driftSummary: { resources: { address: string; action: string }[] } | null
+  policyCheckedAt: Date | null
+  policyOutcome: 'allow' | 'warn' | 'deny' | 'needs-approval' | 'unavailable' | null
+  policyRule: string | null
+  policyMessage: string | null
 }
 
 /**
@@ -1105,6 +1117,23 @@ export const getInfrastructureElement = async (
       outputsError: infrastructureElements.outputsError,
       deployedAt: infrastructureElements.deployedAt,
       scheduledDecommissionAt: infrastructureElements.scheduledDecommissionAt,
+      /*
+       * What the last refresh found, and what policy last said about it (#110,
+       * slice 6) — shown on the element beside each other, because they are two
+       * answers to "is this thing still what it should be" and the second one is
+       * unreadable without the first.
+       *
+       * Both NULL means "never checked", which the page says in words rather than
+       * rendering as a clean bill of health: an element nothing has looked at is
+       * not a compliant one (#108).
+       */
+      lastRefreshOutcome: infrastructureElements.lastRefreshOutcome,
+      driftDetectedAt: infrastructureElements.driftDetectedAt,
+      driftSummary: infrastructureElements.driftSummary,
+      policyCheckedAt: infrastructureElements.policyCheckedAt,
+      policyOutcome: infrastructureElements.policyOutcome,
+      policyRule: infrastructureElements.policyRule,
+      policyMessage: infrastructureElements.policyMessage,
       productName: productNameSql,
       environmentName: deploymentEnvironments.name,
       projectName: projects.name,

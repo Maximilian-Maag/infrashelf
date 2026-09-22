@@ -82,7 +82,7 @@ describe('POST /api/internal/drift-report', () => {
     // The counts go back so the pipeline's own log says what the portal made of
     // its report — a run that matched nothing is a state-key convention that has
     // drifted apart, and it should be visible from either end.
-    expect(await res.json()).toEqual({ matched: 1, unclaimed: 0, ignored: 0, stale: 0 })
+    expect(await res.json()).toEqual({ matched: 1, unclaimed: 0, ignored: 0, stale: 0, policyEvaluated: 0, policyUnavailable: 0 })
     const [row] = await db.select().from(infrastructureElements).where(eq(infrastructureElements.id, element.id))
     expect(row.lastRefreshOutcome).toBe('clean')
   })
