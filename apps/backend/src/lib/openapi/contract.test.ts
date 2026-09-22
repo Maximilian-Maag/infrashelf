@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import '@/lib/openapi/paths'
@@ -164,6 +164,67 @@ const REFUSALS: Array<{ method: string; path: string; body: string[]; statuses: 
     statuses: ['200', '400', '401', '403', '404', '409'],
   },
 ]
+
+describe('the OpenAPI spec covers the routes', () => {
+  /**
+   * Deliberately undocumented, and named here so the exclusion is a decision
+   * rather than an omission.
+   *
+   * These are called by the scheduler and by pipelines, not by clients: they
+   * authenticate with an internal token rather than a session, and their bodies
+   * are machine-written reports (a drift report, a sweep result). Publishing them
+   * in a contract meant for clients would document an interface nobody should
+   * call, and the spec has one security scheme — `BearerAuth`, a session JWT —
+   * that would be wrong for them. `GET /internal/drift-targets`,
+   * `POST /internal/drift-report`, `POST /internal/holiday-refresh` and
+   * `POST /internal/deployment-window-sweep` are the whole set; a new one has to
+   * be added here on purpose.
+   */
+  const INTERNAL = ['/internal/']
+
+  const routeFilesOf = (dir: string): string[] => {
+    const found: string[] = []
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name)
+      if (entry.isDirectory()) found.push(...routeFilesOf(full))
+      else if (entry.name === 'route.ts') found.push(full)
+    }
+    return found
+  }
+
+  it('has an entry for every handler in the app', () => {
+    const documented = new Set(
+      Object.entries(document.paths).flatMap(([path, methods]) =>
+        Object.keys(methods as Record<string, unknown>)
+          .filter((method) => ['get', 'post', 'put', 'patch', 'delete'].includes(method))
+          .map((method) => `${method} ${path}`),
+      ),
+    )
+
+    const undocumented: string[] = []
+    for (const file of routeFilesOf(join(process.cwd(), 'src/app/api'))) {
+      const segments = file
+        .slice(join(process.cwd(), 'src/app/api').length + 1)
+        .split('/')
+        .slice(0, -1)
+        // Route groups are not part of the URL.
+        .filter((s) => !(s.startsWith('(') && s.endsWith(')')))
+        .map((s) => s.replace(/^\[(?:\.\.\.)?(\w+)\]$/, '{$1}'))
+      const path = `/${segments.join('/')}`
+
+      for (const [, method] of readFileSync(file, 'utf8').matchAll(
+        /export async function (GET|POST|PUT|PATCH|DELETE)/g,
+      )) {
+        const operation = `${method.toLowerCase()} ${path}`
+        if (documented.has(operation)) continue
+        if (INTERNAL.some((prefix) => path.startsWith(prefix))) continue
+        undocumented.push(operation)
+      }
+    }
+
+    expect(undocumented).toEqual([])
+  })
+})
 
 describe('the spec documents the waivers and the refusals', () => {
   it.each(REFUSALS)('$method $path', ({ method, path, body, statuses }) => {
