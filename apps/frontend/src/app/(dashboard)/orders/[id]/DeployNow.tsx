@@ -79,7 +79,7 @@ export function DeployNow({ orderId }: { orderId: number }) {
             onClick={() => deployNow({ ...waived, ...flagFor(refusal) })}
             disabled={busy}
           >
-            {t('placeAnyway', lang)}
+            {t('deployAnyway', lang)}
           </Button>
           <p className="text-xs text-slate-600">{t('placeAnywayHint', lang)}</p>
         </>

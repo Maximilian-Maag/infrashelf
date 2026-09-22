@@ -82,7 +82,7 @@ describe('DeployNow', () => {
 
     await user.click(screen.getByRole('button', { name: /deploy now/i }))
     await screen.findByText(/over budget/i)
-    await user.click(screen.getByRole('button', { name: /place anyway/i }))
+    await user.click(screen.getByRole('button', { name: /deploy anyway/i }))
 
     await waitFor(() =>
       expect(mockedPost).toHaveBeenLastCalledWith('/api/orders/412/deploy-now', {
@@ -103,7 +103,7 @@ describe('DeployNow', () => {
     await user.click(screen.getByRole('button', { name: /deploy now/i }))
     await screen.findByText(/only a scheduled order/i)
 
-    expect(screen.queryByRole('button', { name: /place anyway/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /deploy anyway/i })).not.toBeInTheDocument()
   })
 
   it('carries the budget waiver with the policy one when the second gate is uncovered', async () => {
@@ -116,9 +116,9 @@ describe('DeployNow', () => {
 
     await user.click(screen.getByRole('button', { name: /deploy now/i }))
     await screen.findByText(/over budget/i)
-    await user.click(screen.getByRole('button', { name: /place anyway/i }))
+    await user.click(screen.getByRole('button', { name: /deploy anyway/i }))
     await screen.findByText(/quota\/vm-count/i)
-    await user.click(screen.getByRole('button', { name: /place anyway/i }))
+    await user.click(screen.getByRole('button', { name: /deploy anyway/i }))
 
     await waitFor(() =>
       expect(mockedPost).toHaveBeenLastCalledWith('/api/orders/412/deploy-now', {
