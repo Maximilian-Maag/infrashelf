@@ -60,6 +60,15 @@ export interface ApprovalRow {
    * front of them, and a `block` one refuses them after they have clicked.
    */
   budget: BudgetState | null
+  /**
+   * What policy said about the order when it was placed (#110, #526) — the
+   * policy's own message, or the reason a `best_effort` engine could not be asked.
+   *
+   * On the row for the same reason `budget` is: the approver is the last person
+   * who can act on a warning, and they decide from this row. Null when policy had
+   * nothing to say.
+   */
+  policyWarning: string | null
 }
 
 export const listApprovals = async (lang = 'en'): Promise<Result<ApprovalRow[]>> => {
@@ -74,6 +83,10 @@ export const listApprovals = async (lang = 'en'): Promise<Result<ApprovalRow[]>>
       parameters: orders.parameters,
       costCenterId: orders.costCenterId,
       rejectionNote: orders.rejectionNote,
+      // What policy said about the order when it was placed (#110, #526). On the
+      // row rather than only on the order's own page: the approver is the last
+      // person who can act on a warning, and they decide from this row.
+      policyWarning: orders.policyWarning,
       pipelineId: orders.pipelineId,
       createdAt: orders.createdAt,
       updatedAt: orders.updatedAt,

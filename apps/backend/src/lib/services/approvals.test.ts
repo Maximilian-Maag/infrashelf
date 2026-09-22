@@ -98,6 +98,41 @@ describe('listApprovals', () => {
     if (result.ok) expect(result.data).toEqual([])
   })
 
+  /*
+   * The approver's half of #526.
+   *
+   * A policy `warn` was returned to the person who placed the order and written to
+   * the audit log, and the queue said nothing about it — so the row that carries
+   * the budget verdict (and says so in its own comment) carried no policy one. The
+   * approver is the last person who can act on a warning.
+   */
+  it('carries the order’s policy warning on the row', async () => {
+    const { pm, product, env, project } = await setup()
+    await seedOrder(project.id, product.id, env.id, pm.id, {
+      status: 'pending',
+      policyWarning: 'This project is near its VM limit.',
+    })
+
+    const result = await listApprovals()
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+
+    expect(result.data[0].policyWarning).toBe('This project is near its VM limit.')
+  })
+
+  it('says nothing on the row for an order policy had nothing to say about', async () => {
+    // Null rather than undefined: the row is the column, and the component reads
+    // it as "no notice to render".
+    const { pm, product, env, project } = await setup()
+    await seedOrder(project.id, product.id, env.id, pm.id, { status: 'pending' })
+
+    const result = await listApprovals()
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+
+    expect(result.data[0].policyWarning).toBeNull()
+  })
+
   /**
    * The approver's half of #325.
    *

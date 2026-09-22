@@ -54,6 +54,12 @@ export interface OrderRow {
   parameters: Record<string, string>
   costCenterId: number | null
   rejectionNote: string | null
+  /**
+   * What policy said about this order when it was placed (#110, #526), or null
+   * when it had nothing to say. Selected on the detail view, where the sentence
+   * is readable long after the person who placed it saw it.
+   */
+  policyWarning: string | null
   pipelineId: string[]
   createdAt: Date
   updatedAt: Date
@@ -196,10 +202,13 @@ export interface CreatedOrder {
   /**
    * Set when policy allowed the order but wanted to say something (#110) — the
    * policy's own message, or the reason a `best_effort` engine could not be
-   * asked. Mirrors `budgetWarning`, for the same reason: a warning nobody sees is
-   * indistinguishable from no warning.
+   * asked.
+   *
+   * `| null` because the order row carries it since #526: the created order is
+   * the row plus the sentences the caller is told about it, and the row's column
+   * is null whenever policy had nothing to say.
    */
-  policyWarning?: string
+  policyWarning?: string | null
   /**
    * Set when policy held the order for somebody else's approval (#110). The
    * order exists and is in the approvals queue — this says which rule asked, so
@@ -369,6 +378,10 @@ export const getOrderById = async (
       parameters: orders.parameters,
       costCenterId: orders.costCenterId,
       rejectionNote: orders.rejectionNote,
+      // #526. Detail view only, like the window fields above: it is a sentence and
+      // the list has nowhere honest to put one — a row is a summary, and the page
+      // is where an order is read.
+      policyWarning: orders.policyWarning,
       pipelineId: orders.pipelineId,
       pipelineStatus: orders.pipelineStatus,
       createdAt: orders.createdAt,
@@ -1320,6 +1333,19 @@ export const createPreparedOrder = async (
         // order, so the approver's single decision has to carry all N elements.
         sizeCode,
         quantity,
+        /*
+         * Policy's own words about this order, on the order (#110, #526).
+         *
+         * Written here because this is the only moment the verdict is in hand:
+         * it was returned to the caller and logged, and the order it described
+         * carried nothing, so an approver a day later saw the budget verdict on
+         * the queue row and nothing about the rule.
+         *
+         * `warn` only. A `needs-approval` verdict is not a warning — the order did
+         * not proceed as it would have — and goes on its own field; a refusal
+         * never reaches this insert.
+         */
+        policyWarning: policy.outcome === 'warn' ? (policy.message ?? null) : null,
       })
       .returning()
 

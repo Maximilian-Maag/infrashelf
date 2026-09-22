@@ -2265,7 +2265,9 @@ describe('createOrder — policy enforcement (#110)', () => {
     const result = await createOrder(makeSession(base.admin), order(base))
     expect(result.ok).toBe(true)
     if (!result.ok) return
-    expect(result.data.policyWarning).toBeUndefined()
+    // Null, not absent: the order row carries the column since #526, and the
+    // created order is the row plus the sentences the caller is told about it.
+    expect(result.data.policyWarning).toBeNull()
   })
 
   it('places a warned order with the policy’s own words on it', async () => {
@@ -2286,6 +2288,66 @@ describe('createOrder — policy enforcement (#110)', () => {
     const entries = await db.select().from(auditLog).where(eq(auditLog.action, 'order.policy_warning'))
     expect(entries).toHaveLength(1)
     expect(entries[0].details).toContain('quota/near-limit')
+  })
+
+  it('writes the warning on the order itself, so it outlives the response (#526)', async () => {
+    // The audit entry says an order was warned about; the column says WHICH order
+    // and in what words. Without it the approval row, the detail page and anybody
+    // reading the order a week later had nothing to read.
+    mockedTriggerWebhooks.mockResolvedValueOnce({ pipelineIds: ['pipe-warn-row'], failures: [] })
+    const base = await buildBase()
+    await withEngine()
+    vi.spyOn(global, 'fetch').mockResolvedValue(
+      decision({ decision: 'warn', rule: 'quota/near-limit', message: 'This project is near its VM limit.' }),
+    )
+
+    const result = await createOrder(makeSession(base.admin), order(base))
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+
+    const [row] = await db.select().from(orders).where(eq(orders.id, result.data.id))
+    expect(row.policyWarning).toBe('This project is near its VM limit.')
+
+    // And the detail view reads it back off that row rather than recomputing it —
+    // the engine may have been reconfigured since.
+    const detail = await getOrderById(makeSession(base.admin), result.data.id)
+    expect(detail.ok).toBe(true)
+    if (!detail.ok) return
+    expect(detail.data.policyWarning).toBe('This project is near its VM limit.')
+  })
+
+  it('writes no warning on an order policy had nothing to say about', async () => {
+    mockedTriggerWebhooks.mockResolvedValueOnce({ pipelineIds: ['pipe-allow-row'], failures: [] })
+    const base = await buildBase()
+    await withEngine()
+    vi.spyOn(global, 'fetch').mockResolvedValue(decision({ decision: 'allow', rule: 'baseline' }))
+
+    const result = await createOrder(makeSession(base.admin), order(base))
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+
+    // Null, not "": the column means "policy had nothing to say", and an empty
+    // string would render as a warning with no words in it.
+    const [row] = await db.select().from(orders).where(eq(orders.id, result.data.id))
+    expect(row.policyWarning).toBeNull()
+  })
+
+  it('does not write a needs-approval verdict as a warning (#517, #526)', async () => {
+    // It is not a warning: the order did not proceed as it would have. Stored as
+    // one it would read, on the queue row, as "this order went through".
+    const base = await buildBase()
+    await withEngine()
+    vi.spyOn(global, 'fetch').mockResolvedValue(
+      decision({ decision: 'needs-approval', rule: 'sod/production', message: 'A second person must approve.' }),
+    )
+
+    const result = await createOrder(makeSession(base.admin), order(base))
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.data.policyApprovalRequired).toContain('sod/production')
+
+    const [row] = await db.select().from(orders).where(eq(orders.id, result.data.id))
+    expect(row.policyWarning).toBeNull()
   })
 
   it('holds an admin’s order for approval when a policy asks for a person', async () => {
@@ -2442,7 +2504,7 @@ describe('createOrder — policy enforcement (#110)', () => {
     const result = await createOrder(makeSession(base.admin), order(base))
     expect(result.ok).toBe(true)
     if (!result.ok) return
-    expect(result.data.policyWarning).toBeUndefined()
+    expect(result.data.policyWarning).toBeNull()
     expect(fetchMock).not.toHaveBeenCalled()
   })
 })

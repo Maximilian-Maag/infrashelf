@@ -644,6 +644,13 @@ order that was never evaluated is the outcome nobody would otherwise see. With
 **no OPA integration configured at all**, orders are placed as they were before —
 a portal with no policies has nothing to enforce.
 
+A warning is written **on the order** (`policy_warning`), not only logged and
+returned: the person who placed it reads it before they leave the form, the
+approver reads it on the queue row — the last moment somebody can act on it — and
+anybody opening the order afterwards reads it beside the order's own details. An
+order policy had nothing to say about carries nothing, which is what the column
+means.
+
 **Root can override a refusal** with `overridePolicy`, which is a *separate*
 right from the budget override: an approval says "this order is wanted", an
 override says "this rule does not apply here". The audit entry names the rule that

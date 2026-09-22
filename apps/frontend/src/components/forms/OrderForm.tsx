@@ -15,6 +15,7 @@ import {
 } from '@infrashelf/types'
 import { post, get, ApiError } from '@/lib/api'
 import { Button } from '@/components/ui/Button'
+import Link from 'next/link'
 import { Alert } from '@/components/ui/Alert'
 import { Select } from '@/components/ui/Select'
 import { Input } from '@/components/ui/Input'
@@ -99,6 +100,13 @@ export function OrderForm({
     overridePolicy?: boolean
   }>({})
   const [success, setSuccess] = useState(false)
+  /*
+   * The verdict the server returned with a placed order, when it had something to
+   * say (#526): the policy's warning, or the rule that put the order in the
+   * approvals queue. Held instead of navigating — the same choice the cart makes,
+   * for the same reason: the message is the whole point of the attempt.
+   */
+  const [placed, setPlaced] = useState<{ warning?: string; held?: string } | null>(null)
 
   const [templates, setTemplates] = useState<InfrastructureElement[]>([])
   const [templateId, setTemplateId] = useState<string>('')
@@ -349,7 +357,25 @@ export function OrderForm({
         ...(trialAvailable && trial ? { trial: true } : {}),
         ...carried,
       }
-      await post<Order>('/api/orders', body)
+      const created = await post<Order>('/api/orders', body)
+      /*
+       * A verdict that changed what happened is shown instead of navigating away
+       * (#526), which is what the cart already does for the same two fields
+       * (#325, #517): the sentence is the only thing that says why the order is
+       * not doing what the person expected, and leaving the page discards it.
+       *
+       * `policyApprovalRequired` is not a warning — the order is in the queue —
+       * so the two read differently here and are not merged into one message.
+       */
+      const placedWarning = created.policyWarning ?? undefined
+      const placedHeld = created.policyApprovalRequired ?? undefined
+      if (placedWarning || placedHeld) {
+        // A fresh placement is a fresh question: the waivers from a previous
+        // refusal chain must not ride along with it.
+        setRetryOverrides({})
+        setPlaced({ warning: placedWarning, held: placedHeld })
+        return
+      }
       setSuccess(true)
       router.push('/orders')
       router.refresh()
@@ -431,6 +457,40 @@ export function OrderForm({
       <Alert tone="success">
         {t('orderSuccess', lang)}
       </Alert>
+    )
+  }
+
+  /*
+   * A placement that came back with something to say (#526).
+   *
+   * Not the success banner: the order was placed, but not as the person expected —
+   * either a rule had something to say about it, or a rule put it in the approvals
+   * queue. Navigating to the list would throw the sentence away, which is what the
+   * cart learned not to do (#325) and what `policyApprovalRequired` exists to
+   * prevent (#517). The link to the orders is here because that is where they were
+   * going to be taken.
+   */
+  if (placed) {
+    return (
+      <div>
+        {placed.held ? (
+          <Alert>
+            <p className="font-medium">{t('approvalRequired', lang)}</p>
+            <p className="mt-1 text-sm">{placed.held}</p>
+          </Alert>
+        ) : (
+          <Alert tone="warning">
+            <p className="font-medium">{t('policyWarningNotice', lang)}</p>
+            <p className="mt-1 text-sm">{placed.warning}</p>
+          </Alert>
+        )}
+        <Link
+          href="/orders"
+          className="mt-3 inline-flex min-h-11 items-center rounded-md px-3 text-sm font-medium underline"
+        >
+          {t('orders', lang)}
+        </Link>
+      </div>
     )
   }
 

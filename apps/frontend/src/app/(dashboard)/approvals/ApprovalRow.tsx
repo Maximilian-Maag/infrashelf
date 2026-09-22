@@ -56,6 +56,26 @@ function BudgetNotice({ budget, lang }: { budget?: BudgetState | null; lang: str
   )
 }
 
+/**
+ * What policy said about this order when it was placed (#110, #526).
+ *
+ * The same argument `BudgetNotice` makes, and it arrives here the same way: the
+ * verdict is on the order, and this row is the last moment somebody can act on
+ * it. The budget notice waits until the room is gone, because before that the
+ * decision does not change; a policy warning is shown whenever there is one,
+ * because it is the rule's own words and there is no threshold at which they
+ * stop being worth reading.
+ */
+function PolicyNotice({ warning, lang }: { warning?: string | null; lang: string }) {
+  if (!warning) return null
+  return (
+    <div className="mt-1">
+      <p className="text-sm font-medium text-amber-700">{t('policyWarningNotice', lang)}</p>
+      <p className="text-sm text-amber-700">{warning}</p>
+    </div>
+  )
+}
+
 export function ApprovalRow({ order, currentUserId, role = 'project_manager' }: Props) {
   const router = useRouter()
   const lang = useLang()
@@ -159,6 +179,7 @@ export function ApprovalRow({ order, currentUserId, role = 'project_manager' }: 
             {order.isTrial && <TrialBadge lang={lang} />}
           </div>
           <BudgetNotice budget={order.budget} lang={lang} />
+          <PolicyNotice warning={order.policyWarning} lang={lang} />
           <p className="text-sm text-slate-600">
             {order.environmentName}
             {/* Size and quantity change what the approver is agreeing to: one

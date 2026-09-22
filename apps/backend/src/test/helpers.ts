@@ -253,6 +253,15 @@ export const createOrder = async (
     sizeCode?: string | null
     quantity?: number
     productSnapshot?: schema.Order['productSnapshot']
+    /**
+     * What policy said about the order when it was placed (#526).
+     *
+     * Settable at creation because the column is written by `createPreparedOrder`,
+     * not by this helper, and the surfaces that read it back — the approvals row,
+     * the detail view — are tested against orders that were placed by a gate
+     * rather than by a fixture.
+     */
+    policyWarning?: string | null
   },
 ) => {
   const [order] = await db
@@ -269,6 +278,7 @@ export const createOrder = async (
       ...(overrides?.sizeCode !== undefined ? { sizeCode: overrides.sizeCode } : {}),
       ...(overrides?.quantity !== undefined ? { quantity: overrides.quantity } : {}),
       ...(overrides?.productSnapshot !== undefined ? { productSnapshot: overrides.productSnapshot } : {}),
+      ...(overrides?.policyWarning !== undefined ? { policyWarning: overrides.policyWarning } : {}),
     })
     .returning()
   return order

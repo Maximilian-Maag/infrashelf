@@ -413,4 +413,61 @@ describe('ApprovalRow offers root the escapes from a refusal (#514)', () => {
 
     expect(mockedPost).toHaveBeenCalledWith('/api/approvals/412/approve', {})
   })
+
+  /*
+   * The approver's half of #526.
+   *
+   * The budget gets a notice on this row because the approver decides from it
+   * (#325); the policy verdict that rode on the order when it was placed was
+   * returned to whoever placed it and never seen again. Same row, same reason.
+   */
+  it('shows what policy said about the order when it was placed', async () => {
+    render(
+      <ApprovalRow
+        order={order({ policyWarning: 'This project is near its VM limit.' })}
+        currentUserId={99}
+        role="root"
+      />,
+    )
+
+    expect(screen.getByText(/This order went through with a policy warning/i)).toBeInTheDocument()
+    expect(screen.getByText(/near its VM limit/i)).toBeInTheDocument()
+  })
+
+  it('says nothing about policy when there was nothing to say', async () => {
+    // Null and absent both mean "no notice": most orders were never near a rule.
+    render(<ApprovalRow order={order({ policyWarning: null })} currentUserId={99} role="root" />)
+
+    expect(screen.queryByText(/This order went through with a policy warning/i)).not.toBeInTheDocument()
+  })
+
+  it('shows the policy notice beside the budget one, not instead of it', async () => {
+    // The two are independent: a rule's warning must not hide the ceiling, and the
+    // ceiling must not hide the warning.
+    render(
+      <ApprovalRow
+        order={order({
+          policyWarning: 'This project is near its VM limit.',
+          budget: {
+            costCenterId: 3,
+            costCenterLabel: 'IT-4711 — Platform',
+            amount: 1_000,
+            currency: 'EUR',
+            period: 'total',
+            behaviour: 'block',
+            committed: 1_400,
+            remaining: -400,
+            exhausted: true,
+            unconverted: [],
+            unpriced: 0,
+          },
+        })}
+        currentUserId={99}
+        role="root"
+      />,
+    )
+
+    expect(screen.getByText(/near its VM limit/i)).toBeInTheDocument()
+    expect(screen.getByText(/IT-4711/i)).toBeInTheDocument()
+  })
 })

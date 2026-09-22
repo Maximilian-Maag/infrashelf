@@ -216,6 +216,18 @@ export default async function OrderDetailPage({ params }: Props) {
             <p className="text-sm text-red-700">{order.rejectionNote}</p>
           </Alert>
         )}
+
+        {/* What policy said about the order when it was placed (#110, #526). On
+            the order itself rather than only in the banner somebody saw at the
+            time: a rule's warning is a fact about this order, and this page is
+            where an order is read afterwards — by its owner, by an approver, by
+            whoever is asked why it went through. */}
+        {order.policyWarning && (
+          <Alert tone="warning" className="mt-4">
+            <p className="text-sm font-medium mb-1">{t('policyWarningNotice', lang)}</p>
+            <p className="text-sm">{order.policyWarning}</p>
+          </Alert>
+        )}
       </Card>
 
       {paramEntries.length > 0 && (
