@@ -1,5 +1,6 @@
 import { and, eq, inArray, isNull, lt, notInArray, or, sql } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
+import { evaluateElementPolicies } from '@/lib/services/elementPolicy'
 import type { StackStep } from '@infrashelf/types'
 import {
   infrastructureElements, unclaimedStates, driftReportState, pipelineStacks,
@@ -66,6 +67,17 @@ export interface RecordedReport {
   ignored: number
   /** Elements skipped because their recorded check is already newer. */
   stale: number
+  /**
+   * Elements policy was asked about by this run (#110, slice 6).
+   *
+   * Reported back for the same reason the counts beside it are: a run whose log
+   * says what the portal did with its report. Zero here means no engine is
+   * configured for these elements' environments, which is a different thing from
+   * an engine that answered.
+   */
+  policyEvaluated: number
+  /** Of those, how many the engine could not be asked about (`unavailable`). */
+  policyUnavailable: number
 }
 
 /**
@@ -281,6 +293,26 @@ export const recordDriftReport = async (report: DriftReport): Promise<RecordedRe
     else matchedElements.push({ id: elementId, outcome, summary })
   }
 
+  /*
+   * Continuous policy evaluation (#110, slice 6), for the elements this run
+   * actually moved.
+   *
+   * Here rather than in the reporting pipeline because the pipeline knows state
+   * files and the portal knows the order behind each element — its parameters, its
+   * size, the requester — and a policy about "whose VM is this" cannot be answered
+   * from a plan. Report-only: nothing below this line reads the verdict, and the
+   * columns it writes are for the element page (see `elementPolicy.ts`).
+   *
+   * Awaited rather than fired and forgotten: the caller is a scheduler that wants
+   * to know the portal is done with its report, and an unhandled rejection in a
+   * background call is the one way a sweep could break without saying so. Every
+   * failure inside is a stored `unavailable` verdict, never a throw.
+   */
+  const policy = await evaluateElementPolicies(
+    matchedElements.map((e) => e.id),
+    report.checkedAt,
+  )
+
   for (const result of unknown) {
     await db
       .insert(unclaimedStates)
@@ -356,7 +388,14 @@ export const recordDriftReport = async (report: DriftReport): Promise<RecordedRe
     )
   }
 
-  return { matched: matchedElements.length, unclaimed: unknown.length, ignored, stale }
+  return {
+    matched: matchedElements.length,
+    unclaimed: unknown.length,
+    ignored,
+    stale,
+    policyEvaluated: policy.evaluated,
+    policyUnavailable: policy.unavailable,
+  }
 }
 
 /** How stale the whole picture is, for the admin UI to show. */

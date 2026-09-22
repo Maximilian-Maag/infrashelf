@@ -6,6 +6,7 @@ import {
   createUser, createCategory, createProduct, createCiSource,
   createEnvironment, createProject, createOrder, createInfraElement,
 } from '@/test/helpers'
+import { createIntegration } from '@/lib/services/admin/integrations'
 import type { StackStep } from '@infrashelf/types'
 import { recordDriftReport, driftReportStatus, driftTargets } from './driftReports'
 
@@ -59,7 +60,7 @@ describe('recordDriftReport', () => {
 
     const out = await recordDriftReport({ checkedAt: AT, results: [{ stateKey: 'web-01-o42', outcome: 'clean' }] })
 
-    expect(out).toEqual({ matched: 1, unclaimed: 0, ignored: 0, stale: 0 })
+    expect(out).toEqual({ matched: 1, unclaimed: 0, ignored: 0, stale: 0, policyEvaluated: 0, policyUnavailable: 0 })
     const row = await reload(element.id)
     expect(row.lastRefreshedAt?.toISOString()).toBe(AT.toISOString())
     expect(row.lastRefreshOutcome).toBe('clean')
@@ -126,7 +127,7 @@ describe('recordDriftReport', () => {
       results: [{ stateKey: 'left-behind-o7', outcome: 'drifted', summary: { resources: [] } }],
     })
 
-    expect(out).toEqual({ matched: 0, unclaimed: 1, ignored: 0, stale: 0 })
+    expect(out).toEqual({ matched: 0, unclaimed: 1, ignored: 0, stale: 0, policyEvaluated: 0, policyUnavailable: 0 })
     const [row] = await db.select().from(unclaimedStates).where(eq(unclaimedStates.stateKey, 'left-behind-o7'))
     expect(row.outcome).toBe('drifted')
   })
@@ -306,7 +307,7 @@ describe('recordDriftReport', () => {
       ],
     })
 
-    expect(out).toEqual({ matched: 1, unclaimed: 0, ignored: 0, stale: 0 })
+    expect(out).toEqual({ matched: 1, unclaimed: 0, ignored: 0, stale: 0, policyEvaluated: 0, policyUnavailable: 0 })
     expect((await reload(element.id)).lastRefreshOutcome).toBe('clean')
     expect(await db.select().from(unclaimedStates)).toHaveLength(0)
   })
@@ -331,7 +332,91 @@ describe('recordDriftReport', () => {
     expect(results).toHaveLength(2)
 
     const out = await recordDriftReport({ checkedAt: AT, results })
-    expect(out).toEqual({ matched: 1, unclaimed: 0, ignored: 0, stale: 0 })
+    expect(out).toEqual({ matched: 1, unclaimed: 0, ignored: 0, stale: 0, policyEvaluated: 0, policyUnavailable: 0 })
+  })
+
+  /*
+   * Continuous policy evaluation (#110, slice 6): the report that moves an element
+   * is also the moment policy is asked about it, and the answer is stored on the
+   * element rather than returned to the pipeline — the pipeline has no page to put
+   * it on, and an operator does.
+   */
+  it('asks policy about the element the report moved, and stores the verdict', async () => {
+    const { element } = await scenario()
+    const root = await createUser({ role: 'root' })
+    await createIntegration(root.id, {
+      kind: 'opa',
+      name: 'Policy engine',
+      baseUrl: 'https://opa.example.com',
+      authType: 'none',
+      failureMode: 'best_effort',
+      environmentId: element.environmentId,
+    })
+    // A fresh Response per call, and the element path — not the order one.
+    const asked: string[] = []
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      asked.push(String(input))
+      return new Response(
+        JSON.stringify({ result: { decision: 'deny', rule: 'exposure/public-ip', message: 'A public IP is not permitted.' } }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      )
+    })
+
+    const out = await recordDriftReport({
+      checkedAt: AT,
+      results: [{ stateKey: 'web-01-o42', outcome: 'clean' }],
+    })
+
+    expect(out.policyEvaluated).toBe(1)
+    expect(out.policyUnavailable).toBe(0)
+    expect(asked).toHaveLength(1)
+    expect(asked[0]).toContain('/v1/data/infrashelf/element/decision')
+
+    const row = await reload(element.id)
+    expect(row.policyOutcome).toBe('deny')
+    expect(row.policyRule).toBe('exposure/public-ip')
+    expect(row.policyMessage).toBe('A public IP is not permitted.')
+    expect(row.policyCheckedAt?.toISOString()).toBe(AT.toISOString())
+    // The report still did what it came to do: the drift columns are untouched by
+    // any of this, which is what report-only means.
+    expect(row.lastRefreshOutcome).toBe('clean')
+  })
+
+  /*
+   * A dead engine must not stop the report from being recorded: what the plan says
+   * is the part that cannot be re-derived, and the verdict is stored as
+   * `unavailable` rather than left absent.
+   */
+  it('records the report even when the policy engine cannot be reached', async () => {
+    const { element } = await scenario()
+    const root = await createUser({ role: 'root' })
+    await createIntegration(root.id, {
+      kind: 'opa',
+      name: 'Policy engine',
+      baseUrl: 'https://opa.example.com',
+      authType: 'none',
+      failureMode: 'blocking',
+      environmentId: element.environmentId,
+    })
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('ECONNREFUSED'))
+
+    const out = await recordDriftReport({
+      checkedAt: AT,
+      results: [{ stateKey: 'web-01-o42', outcome: 'drifted', summary: { resources: [] } }],
+    })
+
+    expect(out).toEqual({
+      matched: 1,
+      unclaimed: 0,
+      ignored: 0,
+      stale: 0,
+      policyEvaluated: 1,
+      policyUnavailable: 1,
+    })
+    const row = await reload(element.id)
+    expect(row.lastRefreshOutcome).toBe('drifted')
+    expect(row.policyOutcome).toBe('unavailable')
+    expect(row.policyMessage).toContain('ECONNREFUSED')
   })
 
   /*

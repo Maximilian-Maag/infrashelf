@@ -699,6 +699,63 @@ look as it did before somebody tried.
 been approved and its cost is committed, so the room it needs is not available to
 anyone else while it waits.
 
+### Policies against what already exists (#110)
+
+An order is put to the engine twice — when it is requested and again when it is
+committed — and neither ask can see what became of it. An element that was
+compliant when it was ordered and drifted away from its plan three weeks later is
+exactly the case policy as code exists for, so the engine is asked about the
+element as well, whenever a drift report covers it (#108).
+
+**What the portal sends** for each element a report moved:
+
+```
+POST {base URL}/v1/data/infrashelf/element/decision
+{ "input": { "version": 1, "elementId": …, "orderId": …, "projectId": …,
+             "productId": …, "environmentId": …, "size": "M", "quantity": 2,
+             "status": "active", "deployedAt": "2026-09-01T10:00:00.000Z",
+             "parameters": { "instance_type": "t3.large", "db_password": "[redacted]" },
+             "sensitiveParameters": ["db_password"],
+             "outputs": { "public_ip": "203.0.113.9" },
+             "refresh": { "outcome": "drifted", "driftDetectedAt": "…",
+                          "resources": [{ "address": "linode_instance.vm", "action": "update" }] } } }
+```
+
+A **different rule path**, not the same rule path with a different input: a
+repository is free to enforce nothing about orders and everything about running
+infrastructure, and the two documents answer different questions. `refresh` is the
+live fact — what the last check found — because "a policy refuses this element"
+means something different about one that still matches its plan and one that has
+drifted away from it. The same `version` discipline applies as for orders: this is
+version 1 of the element document, and a rule written against it keeps working.
+
+**The verdict is reported, never enforced.** A `deny` here stops nothing: the
+element is already running, so un-provisioning it is not something a report can
+justify, and refusing to render its page would hide the very fact somebody has to
+act on. The answer is stored on the element (`policy_checked_at`, `policy_outcome`,
+`policy_rule`, `policy_message`) and shown on the element page **beside the drift
+report** — one card, because neither line reads correctly alone. `allow`, `warn`,
+`deny` and `needs-approval` mean what they mean for an order. A fifth word,
+`unavailable`, means the engine could not be asked: a fact about the check rather
+than about the element, never rendered as agreement, and shown with the engine's
+name and the error so somebody can go and look.
+
+The integration's **failure mode does not apply** to any of this. It decides
+whether an *order* proceeds when the engine is down, and nothing proceeds or stops
+on an element verdict, so a blocking integration and a best-effort one store the
+same answer.
+
+An element nothing has checked carries **nothing**, and the page says so in words
+rather than rendering it as a clean result: "nothing has checked this element yet"
+is a different screen from "the plan and what is deployed agree", which is the
+distinction the drift report itself makes. A failed check still dates itself, so
+"asked at 06:00 and could not be answered" is readable as that rather than as an
+absence.
+
+Nothing here is written to the **audit log**. An order's verdict is an entry
+because a decision hung on it and somebody took it; a sweep runs unattended, and
+one entry per element per run is how an audit log stops being read.
+
 ## 6. User Management
 
 Under **Administration → Users**:

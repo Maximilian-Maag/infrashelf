@@ -185,6 +185,40 @@ describe('InfrastructureDetailPage', () => {
     expect(within(card('Pipelines')).getByText('No pipelines recorded.')).toBeInTheDocument()
   })
 
+  /*
+   * The compliance card (#110, slice 6) is on the page, and it shows what the last
+   * refresh found beside what policy said — the two are one card on purpose, since
+   * a refusal reads differently about an element that has drifted.
+   */
+  it('shows what the last refresh found beside the policy verdict', async () => {
+    answer(
+      element({
+        lastRefreshOutcome: 'drifted',
+        driftDetectedAt: '2026-09-21T06:00:00.000Z',
+        driftSummary: { resources: [{ address: 'linode_instance.vm', action: 'update' }] },
+        policyOutcome: 'deny',
+        policyRule: 'exposure/public-ip',
+        policyMessage: 'A public IP is not permitted in this environment.',
+        policyCheckedAt: '2026-09-22T06:00:00.000Z',
+      } as never),
+    )
+    render(await InfrastructureDetailPage({ params }))
+
+    const compliance = card('Compliance')
+    expect(within(compliance).getByText(/plan and the deployed resources disagree/i)).toBeInTheDocument()
+    expect(within(compliance).getByText('linode_instance.vm')).toBeInTheDocument()
+    expect(within(compliance).getByText(/a policy refused this element/i)).toBeInTheDocument()
+    expect(within(compliance).getByText('exposure/public-ip')).toBeInTheDocument()
+  })
+
+  it('says an element nothing has checked is not a compliant one', async () => {
+    // The failure this guards: rendering "no data" as a clean bill of health.
+    render(await InfrastructureDetailPage({ params }))
+
+    expect(within(card('Compliance')).getByText(/nothing has checked this element yet/i)).toBeInTheDocument()
+    expect(within(card('Compliance')).getByText(/policy has not been asked about this element yet/i)).toBeInTheDocument()
+  })
+
   it('polls on the DERIVED status, not the stored one', async () => {
     answer(element({ status: 'active', displayStatus: 'provisioning' } as never))
     render(await InfrastructureDetailPage({ params }))

@@ -45,8 +45,20 @@ import {
  * state a portal should not silently treat as "everything is permitted".
  */
 
-/** Where the decision lives, on the engine. */
+/** Where the order-time decision lives, on the engine. */
 export const ORDER_DECISION_PATH = '/v1/data/infrashelf/order/decision'
+
+/**
+ * Where the decision about something that already EXISTS lives (issue #110,
+ * slice 6 — continuous evaluation).
+ *
+ * A different rule path, not the same one with different input: a policy
+ * repository is free to enforce nothing about orders and everything about running
+ * infrastructure, and the two documents answer different questions. Fixed here
+ * for the same reason the order path is — "which rule declined this element" has
+ * to be answerable from the acting side.
+ */
+export const ELEMENT_DECISION_PATH = '/v1/data/infrashelf/element/decision'
 
 /**
  * How long to wait. The budget gate's own number, for the same reason: this runs
@@ -90,10 +102,11 @@ const timedOut = (e: unknown): boolean => {
 export const queryPolicy = async (
   target: IntegrationTarget,
   input: unknown,
+  path: string = ORDER_DECISION_PATH,
 ): Promise<PolicyQueryResult> => {
   let url: URL
   try {
-    url = integrationUrl(target.baseUrl, ORDER_DECISION_PATH)
+    url = integrationUrl(target.baseUrl, path)
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
   }
@@ -130,18 +143,18 @@ export const queryPolicy = async (
   if (result === undefined || result === null) {
     return {
       ok: false,
-      error: `No decision at ${ORDER_DECISION_PATH} — the policy repository may not load it`,
+      error: `No decision at ${path} — the policy repository may not load it`,
     }
   }
   if (typeof result !== 'object' || Array.isArray(result)) {
-    return { ok: false, error: `Unexpected decision shape from ${ORDER_DECISION_PATH}` }
+    return { ok: false, error: `Unexpected decision shape from ${path}` }
   }
 
   const { decision, rule, message } = result as Record<string, unknown>
   if (!isDecision(decision)) {
     return {
       ok: false,
-      error: `Unrecognised decision "${String(decision)}" from ${ORDER_DECISION_PATH}`,
+      error: `Unrecognised decision "${String(decision)}" from ${path}`,
     }
   }
 

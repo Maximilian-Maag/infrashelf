@@ -1564,6 +1564,33 @@ export interface InfrastructureDetail extends InfrastructureElement {
   orderCreatedAt: string | null
   isTrial: boolean
   redactedParameters: string[]
+  /**
+   * What the last refresh found (#108) and what policy last said about it (#110,
+   * slice 6). The two are shown together on the element, because the second is
+   * unreadable without the first: "a policy refuses this" means one thing about an
+   * element that matches its plan and another about one that drifted away from it.
+   *
+   * Every field is nullable, and null means NEVER CHECKED — deliberately not
+   * "checked and fine". An element nothing has looked at must not read as a
+   * compliant one, which is the distinction #108 opens with.
+   */
+  lastRefreshOutcome?: 'clean' | 'drifted' | 'locked' | 'error' | null
+  /** When drift was found; cleared by a clean report, so it describes drift now. */
+  driftDetectedAt?: string | null
+  driftSummary?: { resources: { address: string; action: string }[] } | null
+  /** When policy was last asked, and what it answered (`unavailable` = could not ask). */
+  policyCheckedAt?: string | null
+  policyOutcome?: 'allow' | 'warn' | 'deny' | 'needs-approval' | 'unavailable' | null
+  /** Which rule decided — what makes a verdict actionable rather than a colour. */
+  policyRule?: string | null
+  /**
+   * The policy's own words, shown as written rather than translated.
+   *
+   * The portal cannot phrase a rule it did not write, and inventing a sentence in
+   * a translation file would put words in a policy author's mouth — the same
+   * reasoning as `outputsError` above, and as the order gate's refusal message.
+   */
+  policyMessage?: string | null
 }
 
 /** Option lists for the infrastructure list filters (GET /infrastructure/facets). */

@@ -3162,6 +3162,13 @@ One row per deployed pipeline; created when an order is approved.
     \code{pipeline\_id}   & JSONB       & \code{'[]'} & tracked pipeline IDs \\
     \code{outputs}        & JSONB       & \code{'\{\}'} & key/value map of OpenTofu outputs \\
     \code{deployed\_at}   & TIMESTAMPTZ & NOW()       & \\
+    \code{last\_refresh\_outcome} & TEXT & NULL & what the last drift report found (\code{clean}, \code{drifted}, \code{locked}, \code{error}); NULL is \emph{never checked}, not \emph{checked and clean} \\
+    \code{drift\_detected\_at}    & TIMESTAMPTZ & NULL & when drift was found; cleared by a later clean report \\
+    \code{drift\_summary}         & JSONB & NULL & the resources the report saw move \\
+    \code{policy\_checked\_at}    & TIMESTAMPTZ & NULL & when policy was last asked about this element (NULL: never asked) \\
+    \code{policy\_outcome}        & TEXT & NULL & \code{allow}/\code{warn}/\code{deny}/\code{needs-approval} from the engine, or \code{unavailable} when it could not be asked --- reported on the element, never enforced \\
+    \code{policy\_rule}           & TEXT & NULL & which rule decided \\
+    \code{policy\_message}        & TEXT & NULL & the policy's own words, shown as written \\
     \bottomrule
   \end{tabular}
 \end{table}
