@@ -5,6 +5,8 @@ import { join } from 'node:path'
 import {
   snapshotSourceTree,
   guardFilePath,
+  newRunId,
+  providedRunId,
   writeGuardBaseline,
   readGuardBaseline,
   assertSourceUnchanged,
@@ -28,11 +30,6 @@ import {
  * changing a file underneath it, which is a thing only a real run can do.
  */
 let root: string
-
-// A baseline is only valid for a process that started after it was written (see the
-// guard), so any test presenting one ages it by a minute. The real one is written by
-// `globalSetup` before the worker that reads it has been forked.
-const AGED = (): number => Date.now() - 60_000
 
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'tree-guard-test-'))
@@ -84,7 +81,7 @@ describe('snapshotSourceTree', () => {
 describe('the baseline the run starts on', () => {
   it('is written once and read back with the tree it describes', () => {
     const path = join(root, 'baseline.json')
-    const written = writeGuardBaseline(path, root, AGED())
+    const written = writeGuardBaseline(path, root)
 
     const read = readGuardBaseline(path)
 
@@ -95,8 +92,8 @@ describe('the baseline the run starts on', () => {
 
   it('is replaced whole, so a reader never sees half a document', () => {
     const path = join(root, 'baseline.json')
-    writeGuardBaseline(path, root, AGED())
-    writeGuardBaseline(path, root, AGED())
+    writeGuardBaseline(path, root)
+    writeGuardBaseline(path, root)
 
     const read = readGuardBaseline(path)
 
@@ -117,23 +114,31 @@ describe('the baseline the run starts on', () => {
     if (read.kind === 'unreadable') expect(read.path).toBe(path)
   })
 
-  it('is named after the run it belongs to, so two runs in one checkout do not share it', () => {
-    expect(guardFilePath('infrashelf_test_one')).not.toBe(guardFilePath('infrashelf_test_two'))
-    expect(guardFilePath('infrashelf_test_one')).toContain('infrashelf_test_one')
+  it('is named after the run it belongs to, so two runs in one checkout never share it', () => {
+    expect(guardFilePath('infrashelf_test_one-aaaa1111')).not.toBe(guardFilePath('infrashelf_test_one-bbbb2222'))
+    expect(guardFilePath('infrashelf_test_one-aaaa1111')).toContain('infrashelf_test_one-aaaa1111')
+  })
+
+  it('names a run after its database and a token, so two runs never look alike', () => {
+    // The database name is for a human looking in the temp directory; the token is
+    // what stops a run comparing itself against a newer run's snapshot and passing.
+    expect(newRunId('infrashelf_test_x')).toContain('infrashelf_test_x')
+    expect(newRunId('infrashelf_test_x')).not.toBe(newRunId('infrashelf_test_x'))
+    expect(newRunId('infrashelf test/x')).toMatch(/^[a-zA-Z0-9_-]+$/)
   })
 })
 
 describe('assertSourceUnchanged', () => {
   it('passes silently while the tree is the one the run started on', () => {
     const path = join(root, 'baseline.json')
-    writeGuardBaseline(path, root, AGED())
+    writeGuardBaseline(path, root)
 
     expect(() => assertSourceUnchanged({ path, root })).not.toThrow()
   })
 
   it('names the file that was rewritten under the run, which is the whole point', () => {
     const path = join(root, 'baseline.json')
-    writeGuardBaseline(path, root, AGED())
+    writeGuardBaseline(path, root)
     writeFileSync(join(root, 'src', 'lib', 'thing.ts'), 'export const thing = 2\n')
 
     expect(() => assertSourceUnchanged({ path, root })).toThrow(/src\/lib\/thing\.ts/)
@@ -141,7 +146,7 @@ describe('assertSourceUnchanged', () => {
 
   it('says what changed rather than only that something did', () => {
     const path = join(root, 'baseline.json')
-    writeGuardBaseline(path, root, AGED())
+    writeGuardBaseline(path, root)
     rmSync(join(root, 'src', 'lib', 'thing.test.ts'))
     writeFileSync(join(root, 'src', 'lib', 'new.test.ts'), 'it("is new", () => {})\n')
 
@@ -159,7 +164,7 @@ describe('assertSourceUnchanged', () => {
 
   it('counts the files it did not name, so a branch switch does not print 200 paths', () => {
     const path = join(root, 'baseline.json')
-    writeGuardBaseline(path, root, AGED())
+    writeGuardBaseline(path, root)
     for (let i = 0; i < 12; i++) {
       writeFileSync(join(root, 'src', `bulk-${i}.ts`), `export const n = ${i}\n`)
     }
@@ -191,14 +196,12 @@ describe('assertSourceUnchanged', () => {
     expect(() => assertSourceUnchanged({ path, root })).toThrow(/cannot be read/)
   })
 
-  it("refuses another run's baseline rather than passing on a tree this run never saw", () => {
-    // A second `vitest` in this directory with the same TEST_DB_SUFFIX overwrote the
-    // baseline after this process started: comparing against it would let a run whose
-    // own tree moved report success.
-    const path = join(root, 'baseline.json')
-    writeGuardBaseline(path, root, Date.now() + 60_000)
-
-    expect(() => assertSourceUnchanged({ path, root })).toThrow(/another run of the suite/i)
-    expect(() => assertSourceUnchanged({ path, root })).toThrow(/TEST_DB_SUFFIX/)
+  it('knows which run it is in, because globalSetup provided the identity', () => {
+    // This asserts the wiring rather than the parsing: if `provide` leaves globalSetup,
+    // every file loses the ability to find its own baseline, and this test is what says
+    // so. (The branch for a run that provided nothing is defensive — a setup file loaded
+    // without globalSetup — and cannot be reached from inside a run, which is the only
+    // place these tests execute.)
+    expect(providedRunId()).toMatch(/-[0-9a-f]{8}$/)
   })
 })

@@ -1,8 +1,19 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
+import { inject } from 'vitest'
 import { testDatabaseName } from './database'
+
+/**
+ * The provided context this guard travels in, declared so `inject` is typed rather
+ * than stringly-typed at each call site.
+ */
+declare module 'vitest' {
+  interface ProvidedContext {
+    infrashelfTreeGuardRunId: string
+  }
+}
 
 /**
  * The tree the suite is reading, recorded when the run starts (#543).
@@ -103,39 +114,62 @@ export const snapshotSourceTree = (root: string = process.cwd()): TreeSnapshot =
 }
 
 /**
- * Where this run's baseline lives.
+ * Where a run's baseline lives: one file per run, named by the run's own identity.
  *
- * Keyed by the database name the run WOULD claim, which is derived from the
- * working directory and `TEST_DB_SUFFIX` (`src/test/database.ts`) — so two
- * checkouts, or two runs separated by a suffix, never share one. Two runs in the
- * same directory with the same suffix do share it, and that is why the reader
- * checks the baseline's age against its own process (below): it can tell that a
- * snapshot written after it started belongs to somebody else, and refuses to
- * compare itself against it rather than passing on the strength of another run's
- * tree.
+ * The identity comes from `globalSetup`, which generates it and hands it to the
+ * workers with Vitest's `provide`/`inject` (see `RUN_ID_KEY`). It is not derived from
+ * the working directory or `TEST_DB_SUFFIX`: those are only as distinct as the person
+ * running the suite remembers to make them, and two runs that share them would
+ * otherwise share a baseline — run B's snapshot standing in for run A's, which is a
+ * run reporting success on a tree it never read.
  */
-export const guardFilePath = (runKey: string = testDatabaseName()): string => {
+export const guardFilePath = (runId: string): string => {
   const dir = join(tmpdir(), 'infrashelf-tree-guard')
   mkdirSync(dir, { recursive: true })
-  // Readable and unique: the run's database name identifies it to a person looking
-  // in the temp directory, and the digest keeps two keys that sanitise alike apart.
-  const readable = runKey.replace(/[^a-zA-Z0-9_]/g, '_').slice(0, 60)
-  return join(dir, `${readable}-${sha256(runKey).slice(0, 8)}.json`)
+  return join(dir, `${runId}.json`)
 }
 
 /**
- * Record the tree this run started on. Called from `globalSetup`, once per run and per rerun.
+ * A name for a run: readable, and unique to it.
  *
- * `startedAt` is injectable because the guard only accepts a baseline written before
- * its reader started: a test that has to present one has to age it, and inventing a
- * clock is clearer about what is being tested than sleeping would be.
+ * The database name is in there because it is what a person looking in the temp
+ * directory recognises — it says which checkout and which suffix — and the token is
+ * what makes it this run's and nobody else's, so two runs in one checkout never
+ * share a file whatever the suffix says.
  */
+export const newRunId = (name: string = testDatabaseName()): string =>
+  `${name.replace(/[^a-zA-Z0-9_]/g, '_').slice(0, 60)}-${randomUUID().slice(0, 8)}`
+
+/** The key the run's identity travels under, from `globalSetup` to each worker. */
+export const RUN_ID_KEY = 'infrashelfTreeGuardRunId'
+
+/**
+ * This worker's run identity, or `undefined` when the run never provided one.
+ *
+ * `undefined` is not a fallback to a derived name: a run that did not provide an
+ * identity is a run whose baseline cannot be located, and the guard refuses to speak
+ * rather than guess which file it should be comparing against.
+ */
+export const providedRunId = (): string | undefined => {
+  try {
+    // Typed as `unknown` deliberately: the declaration above says what this run
+    // provides, and a value that arrives as anything else is still a state to report
+    // rather than to assume away.
+    const provided: unknown = inject(RUN_ID_KEY)
+    return typeof provided === 'string' && provided.length > 0 ? provided : undefined
+  } catch {
+    // `inject` throws when the value was never provided, which is a state the guard
+    // reports rather than a failure to recover from here.
+    return undefined
+  }
+}
+
+/** Record the tree a run started on. Called from `globalSetup`, once per run and per rerun. */
 export const writeGuardBaseline = (
-  path: string = guardFilePath(),
+  path: string = guardFilePath(newRunId()),
   root: string = process.cwd(),
-  startedAt: number = Date.now(),
 ): GuardBaseline => {
-  const baseline: GuardBaseline = { startedAt, root, files: snapshotSourceTree(root) }
+  const baseline: GuardBaseline = { startedAt: Date.now(), root, files: snapshotSourceTree(root) }
   // Written whole: a reader must never see half a JSON document, or it would report
   // a corrupt baseline that only ever existed for a microsecond.
   const temporary = `${path}.${process.pid}.tmp`
@@ -144,8 +178,8 @@ export const writeGuardBaseline = (
   return baseline
 }
 
-/** Read this run's baseline, saying which way it failed rather than returning a guess. */
-export const readGuardBaseline = (path: string = guardFilePath()): BaselineRead => {
+/** Read a run's baseline, saying which way it failed rather than returning a guess. */
+export const readGuardBaseline = (path: string): BaselineRead => {
   if (!existsSync(path)) return { kind: 'missing', path }
   try {
     const parsed = JSON.parse(readFileSync(path, 'utf8')) as GuardBaseline
@@ -155,17 +189,6 @@ export const readGuardBaseline = (path: string = guardFilePath()): BaselineRead 
     return { kind: 'unreadable', path, reason: (e as Error).message }
   }
 }
-
-/**
- * When THIS process started, in the same units as `baseline.startedAt`.
- *
- * The baseline is written by the run's main process before it forks any worker, so
- * a baseline older than the worker is this run's. One written LATER belongs to a run
- * that began later — a second `vitest` in the same checkout with the same suffix —
- * and comparing against it would let this run pass on a tree somebody else snapshotted.
- */
-const startedAfterThisProcess = (baseline: GuardBaseline, slackMs = 5_000): boolean =>
-  baseline.startedAt > Date.now() - Math.round(process.uptime() * 1000) + slackMs
 
 /** How many differing paths the failure message names before it just counts them. */
 const NAMED_PATHS = 8
@@ -196,13 +219,25 @@ const CANNOT_SPEAK = [
  * file that starts afterwards fails with the same sentence, which is the honest
  * report for a run nobody can attribute.
  *
- * A baseline that is missing, unreadable, or somebody else's run is also a failure:
- * those are the states in which the guard would otherwise be silently absent, which
- * is the bug it exists to prevent.
+ * A baseline that is missing, unreadable, or that this run cannot even locate is also
+ * a failure: those are the states in which the guard would otherwise be silently
+ * absent, which is the bug it exists to prevent.
  */
 export const assertSourceUnchanged = (options: { path?: string; root?: string } = {}): void => {
   const root = options.root ?? process.cwd()
-  const path = options.path ?? guardFilePath()
+  const runId = providedRunId()
+  const path = options.path ?? (runId === undefined ? undefined : guardFilePath(runId))
+
+  if (path === undefined) {
+    throw new Error(
+      [
+        `No run identity to locate this run's baseline (#543): no value was provided under ${RUN_ID_KEY},`,
+        'which `src/test/globalSetup.ts` does before any worker is forked.',
+        CANNOT_SPEAK,
+      ].join('\n'),
+    )
+  }
+
   const read = readGuardBaseline(path)
 
   if (read.kind === 'missing') {
@@ -217,20 +252,6 @@ export const assertSourceUnchanged = (options: { path?: string; root?: string } 
   }
 
   const baseline = read.baseline
-  if (startedAfterThisProcess(baseline)) {
-    throw new Error(
-      [
-        `The tree baseline at ${path} was written after this process started (#543).`,
-        '',
-        `  baseline written: ${new Date(baseline.startedAt).toLocaleTimeString('en-GB', { hour12: false })}`,
-        '  this process:     later than that',
-        '',
-        'That is another run of the suite — a second `vitest` in this checkout with the',
-        'same TEST_DB_SUFFIX — and comparing against it would let this run pass on a tree',
-        'it never saw. Give one of the two runs its own TEST_DB_SUFFIX.',
-      ].join('\n'),
-    )
-  }
 
   const now = snapshotSourceTree(root)
   const changed = Object.keys(baseline.files).filter((p) => now[p] !== undefined && now[p] !== baseline.files[p])
