@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
 import { testDatabaseName } from './database'
@@ -38,17 +38,18 @@ import { testDatabaseName } from './database'
  *
  * ── What it does ────────────────────────────────────────────────────────────
  *
- * `globalSetup` snapshots the tree once per run, before any worker exists; the
- * per-file setup compares its own snapshot against that baseline and refuses to
- * let the run be read as a verdict on the code. It names the files that differ,
- * because "the tree moved" is only useful when it says where.
+ * `globalSetup` snapshots the tree once per run — and once per watch-mode rerun,
+ * which does not re-run `globalSetup` — before any worker exists; the per-file setup
+ * compares its snapshot against that baseline when it starts and again when it
+ * finishes, and refuses to let the run be read as a verdict on the code. It names
+ * the files that differ, because "the tree moved" is only useful when it says where.
  *
  * ── Cost ────────────────────────────────────────────────────────────────────
  *
- * 535 files, 1.6 MB, ~9 ms per snapshot: ~2 s of aggregate worker time across the
- * whole suite, and nothing on the critical path of any single test. Hashing
- * contents rather than mtimes is deliberate — an mtime changes when a file is
- * rewritten with identical bytes, and a guard that cries wolf on a `git checkout`
+ * 535 files, 1.6 MB, ~9 ms per snapshot: ~4 s of aggregate worker time across a full
+ * suite (twice per test file), and nothing on the critical path of any single test.
+ * Hashing contents rather than mtimes is deliberate — an mtime changes when a file
+ * is rewritten with identical bytes, and a guard that cries wolf on a `git checkout`
  * of the same content is a guard somebody turns off.
  */
 
@@ -64,6 +65,12 @@ export interface GuardBaseline {
   root: string
   files: TreeSnapshot
 }
+
+/** What reading the baseline found. Absent and unreadable are different faults. */
+export type BaselineRead =
+  | { kind: 'ok'; baseline: GuardBaseline }
+  | { kind: 'missing'; path: string }
+  | { kind: 'unreadable'; path: string; reason: string }
 
 const sha256 = (content: Buffer | string): string => createHash('sha256').update(content).digest('hex')
 
@@ -101,11 +108,11 @@ export const snapshotSourceTree = (root: string = process.cwd()): TreeSnapshot =
  * Keyed by the database name the run WOULD claim, which is derived from the
  * working directory and `TEST_DB_SUFFIX` (`src/test/database.ts`) — so two
  * checkouts, or two runs separated by a suffix, never share one. Two runs in the
- * same directory with the same suffix do share it, and that is survivable rather
- * than safe: the second run's `globalSetup` overwrites the baseline, and the
- * first run then compares against a fingerprint taken of a tree that is, in the
- * ordinary case, identical. It cannot be made per-run without threading a value
- * from the main process into every worker, which vitest does not offer.
+ * same directory with the same suffix do share it, and that is why the reader
+ * checks the baseline's age against its own process (below): it can tell that a
+ * snapshot written after it started belongs to somebody else, and refuses to
+ * compare itself against it rather than passing on the strength of another run's
+ * tree.
  */
 export const guardFilePath = (runKey: string = testDatabaseName()): string => {
   const dir = join(tmpdir(), 'infrashelf-tree-guard')
@@ -116,35 +123,49 @@ export const guardFilePath = (runKey: string = testDatabaseName()): string => {
   return join(dir, `${readable}-${sha256(runKey).slice(0, 8)}.json`)
 }
 
-/** Record the tree this run started on. Called once, from `globalSetup`. */
+/**
+ * Record the tree this run started on. Called from `globalSetup`, once per run and per rerun.
+ *
+ * `startedAt` is injectable because the guard only accepts a baseline written before
+ * its reader started: a test that has to present one has to age it, and inventing a
+ * clock is clearer about what is being tested than sleeping would be.
+ */
 export const writeGuardBaseline = (
   path: string = guardFilePath(),
   root: string = process.cwd(),
+  startedAt: number = Date.now(),
 ): GuardBaseline => {
-  const baseline: GuardBaseline = { startedAt: Date.now(), root, files: snapshotSourceTree(root) }
-  writeFileSync(path, JSON.stringify(baseline))
+  const baseline: GuardBaseline = { startedAt, root, files: snapshotSourceTree(root) }
+  // Written whole: a reader must never see half a JSON document, or it would report
+  // a corrupt baseline that only ever existed for a microsecond.
+  const temporary = `${path}.${process.pid}.tmp`
+  writeFileSync(temporary, JSON.stringify(baseline))
+  renameSync(temporary, path)
   return baseline
 }
 
-/**
- * The baseline for this run, or null if there is none.
- *
- * Null is not an error and does not fail the run: it means `globalSetup` did not
- * write one (the guard was not configured, or the file was removed under it), and
- * a missing baseline is no evidence of anything about this tree. Nothing is
- * written here either — the baseline belongs to the run, and a worker inventing
- * one would compare against itself and always pass.
- */
-export const readGuardBaseline = (path: string = guardFilePath()): GuardBaseline | null => {
-  if (!existsSync(path)) return null
+/** Read this run's baseline, saying which way it failed rather than returning a guess. */
+export const readGuardBaseline = (path: string = guardFilePath()): BaselineRead => {
+  if (!existsSync(path)) return { kind: 'missing', path }
   try {
     const parsed = JSON.parse(readFileSync(path, 'utf8')) as GuardBaseline
-    return parsed && typeof parsed.files === 'object' ? parsed : null
-  } catch {
-    // A half-written baseline is a broken guard, not a moved tree.
-    return null
+    const ok = parsed && typeof parsed.startedAt === 'number' && typeof parsed.files === 'object'
+    return ok ? { kind: 'ok', baseline: parsed } : { kind: 'unreadable', path, reason: 'not a baseline' }
+  } catch (e) {
+    return { kind: 'unreadable', path, reason: (e as Error).message }
   }
 }
+
+/**
+ * When THIS process started, in the same units as `baseline.startedAt`.
+ *
+ * The baseline is written by the run's main process before it forks any worker, so
+ * a baseline older than the worker is this run's. One written LATER belongs to a run
+ * that began later — a second `vitest` in the same checkout with the same suffix —
+ * and comparing against it would let this run pass on a tree somebody else snapshotted.
+ */
+const startedAfterThisProcess = (baseline: GuardBaseline, slackMs = 5_000): boolean =>
+  baseline.startedAt > Date.now() - Math.round(process.uptime() * 1000) + slackMs
 
 /** How many differing paths the failure message names before it just counts them. */
 const NAMED_PATHS = 8
@@ -156,24 +177,65 @@ const quote = (paths: string[]): string => {
   return shown.join('\n')
 }
 
+const CANNOT_SPEAK = [
+  '',
+  'The guard compares each test file against the tree this run started on; without a',
+  'baseline it cannot say anything about this run, and a run it cannot speak about is',
+  'not one to report as a result. Most likely `src/test/globalSetup.ts` is not in the',
+  'vitest config, or the temporary directory it writes to was not writable.',
+].join('\n')
+
 /**
  * Refuse to report on a run whose tree moved.
  *
  * Throws rather than warns. A warning in a 24-minute log arrives next to three
  * failures in two files and reads as noise; the failure of this file is the thing
- * that stops the run being quoted as a result. It fires in the per-file setup, so
- * once the tree has moved EVERY file that starts afterwards fails with the same
- * sentence — which is the honest report for a run nobody can attribute.
+ * that stops the run being quoted as a result. It is called by the per-file setup
+ * when the file starts AND when it finishes, so a change made while the last test in
+ * the run is still reading files is caught too — and once the tree has moved EVERY
+ * file that starts afterwards fails with the same sentence, which is the honest
+ * report for a run nobody can attribute.
+ *
+ * A baseline that is missing, unreadable, or somebody else's run is also a failure:
+ * those are the states in which the guard would otherwise be silently absent, which
+ * is the bug it exists to prevent.
  */
 export const assertSourceUnchanged = (options: { path?: string; root?: string } = {}): void => {
   const root = options.root ?? process.cwd()
-  const baseline = readGuardBaseline(options.path ?? guardFilePath())
-  if (baseline === null) return
+  const path = options.path ?? guardFilePath()
+  const read = readGuardBaseline(path)
+
+  if (read.kind === 'missing') {
+    throw new Error(
+      [`No tree baseline for this run: nothing at ${path} (#543).`, CANNOT_SPEAK].join('\n'),
+    )
+  }
+  if (read.kind === 'unreadable') {
+    throw new Error(
+      [`The tree baseline at ${path} cannot be read: ${read.reason} (#543).`, CANNOT_SPEAK].join('\n'),
+    )
+  }
+
+  const baseline = read.baseline
+  if (startedAfterThisProcess(baseline)) {
+    throw new Error(
+      [
+        `The tree baseline at ${path} was written after this process started (#543).`,
+        '',
+        `  baseline written: ${new Date(baseline.startedAt).toLocaleTimeString('en-GB', { hour12: false })}`,
+        '  this process:     later than that',
+        '',
+        'That is another run of the suite — a second `vitest` in this checkout with the',
+        'same TEST_DB_SUFFIX — and comparing against it would let this run pass on a tree',
+        'it never saw. Give one of the two runs its own TEST_DB_SUFFIX.',
+      ].join('\n'),
+    )
+  }
 
   const now = snapshotSourceTree(root)
-  const changed = Object.keys(baseline.files).filter((path) => now[path] !== undefined && now[path] !== baseline.files[path])
-  const removed = Object.keys(baseline.files).filter((path) => now[path] === undefined)
-  const added = Object.keys(now).filter((path) => baseline.files[path] === undefined)
+  const changed = Object.keys(baseline.files).filter((p) => now[p] !== undefined && now[p] !== baseline.files[p])
+  const removed = Object.keys(baseline.files).filter((p) => now[p] === undefined)
+  const added = Object.keys(now).filter((p) => baseline.files[p] === undefined)
 
   if (changed.length === 0 && removed.length === 0 && added.length === 0) return
 
@@ -188,7 +250,7 @@ export const assertSourceUnchanged = (options: { path?: string; root?: string } 
   if (removed.length > 0) parts.push('disappeared:', quote(removed))
   parts.push(
     '',
-    `This run started at ${startedAt} on the tree it recorded in ${options.path ?? guardFilePath()}.`,
+    `This run started at ${startedAt} on the tree it recorded in ${path}.`,
     'Files transformed before the change were read from one revision and files after',
     'it from another, so a failure here says nothing about the code: #543 was three of',
     'them, in two files that both pass on their own. Re-run on a tree nobody is',

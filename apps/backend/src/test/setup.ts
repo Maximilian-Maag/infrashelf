@@ -241,4 +241,10 @@ afterAll(async () => {
   // Releases the advisory lock on this run's database, freeing the name for the
   // next run in this directory.
   await acquired.release()
+  // Last, so a guard failure cannot leave the database locked: the check is about the
+  // run, and the teardown above is about the server everybody else is sharing. This
+  // is the second half of the guard — the module-scope call catches a tree that moved
+  // before this file started, and this one catches a change made while its tests were
+  // still reading, which is what an end-of-run report would otherwise miss.
+  assertSourceUnchanged()
 })
