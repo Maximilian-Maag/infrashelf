@@ -20,6 +20,8 @@ import { triggerProductWebhooksTracked, triggerPipelineStacksTracked } from '@/l
 import { ELEMENT_SEQUENCE_VAR, STATE_KEY_NAMESPACE_VAR } from '@/lib/ci/stateKey'
 import { withoutReservedCiVariables } from '@/lib/ci/reserved'
 import { ok, err, type Result } from '@/lib/services/result'
+import { resolveIntegrationEndpoint } from '@/lib/services/admin/integrations'
+import { elementDashboardLink, type ObservabilityLink } from '@/lib/integrations/grafana'
 import { pageWindow, toPage, LIST_MAX_LIMIT, type Page } from '@/lib/services/page'
 import { trialVariables, trialExpiry } from '@/lib/services/trial'
 import {
@@ -971,6 +973,14 @@ export interface InfraDetail extends InfraRow {
   policyOutcome: 'allow' | 'warn' | 'deny' | 'needs-approval' | 'unavailable' | null
   policyRule: string | null
   policyMessage: string | null
+  /**
+   * Where this element can be watched outside the portal (#546): a deep link into
+   * the Grafana dashboard for it, or null when no enabled Grafana integration
+   * serves its environment. The portal builds the URL so that the browser never
+   * has to be told an admin-only integration's base URL, and so the agreement
+   * about variable names lives in one place.
+   */
+  observability: { grafana: ObservabilityLink | null }
 }
 
 /**
@@ -1191,5 +1201,41 @@ export const getInfrastructureElement = async (
     pipelinePhase,
     parameters: redactParameters(parameters, sensitive),
     redactedParameters,
+    observability: await elementObservability(row),
   } as InfraDetail)
+}
+
+/**
+ * Where this element can be watched, as far as the portal knows (#546).
+ *
+ * Built here rather than handed to the browser as a base URL, and included for
+ * whoever may already see this element: a URL is not a credential — Grafana
+ * enforces its own access — and the alternative (reading an admin-only
+ * integration row from the client) is a worse answer to the same question. The
+ * credential, the username and every other integration are not part of this and
+ * never will be.
+ *
+ * `null` when no enabled Grafana integration serves this element's environment,
+ * and the page then says nothing rather than linking somewhere that does not
+ * exist. Note that the integration's OWN resolution does not depend on the
+ * credential being decryptable (see `resolveIntegrationEndpoint`): a portal that
+ * cannot decrypt its Grafana token can still send somebody to Grafana.
+ */
+const elementObservability = async (row: {
+  id: number
+  orderId: number
+  projectId: number
+  environmentId: number | null
+}): Promise<{ grafana: ObservabilityLink | null }> => {
+  const grafana = await resolveIntegrationEndpoint('grafana', row.environmentId)
+  return {
+    grafana: grafana
+      ? elementDashboardLink(grafana.baseUrl, {
+          elementId: row.id,
+          orderId: row.orderId,
+          projectId: row.projectId,
+          environmentId: row.environmentId,
+        })
+      : null,
+  }
 }

@@ -12,6 +12,7 @@ import {
   listIntegrations,
   probeIntegrationById,
   resolveIntegration,
+  resolveIntegrationEndpoint,
   blocksProvisioning,
   type CreateIntegrationInput,
 } from './integrations'
@@ -882,5 +883,80 @@ describe('the shared type the frontend compiles against', () => {
 
   it('names exactly the kinds the backend registry holds', () => {
     expect(Object.keys(mirror).sort()).toEqual([...backendKinds].sort())
+  })
+})
+
+describe('resolveIntegrationEndpoint (#546)', () => {
+  /*
+   * The reader the dashboard links use. It must answer the same question as
+   * `resolveIntegration` — which Grafana is this environment's — WITHOUT touching
+   * the credential, and the two facts are tested separately: the precedence cases
+   * below, and the undecryptable-credential case, which is the one that would
+   * quietly take a link down if a secret were read on this path.
+   */
+  const grafana = (overrides: Partial<CreateIntegrationInput> = {}) =>
+    input({ kind: 'grafana', name: 'Grafana', baseUrl: 'https://grafana.example.com', ...overrides })
+
+  it("takes the environment's own integration over the portal-wide one", async () => {
+    const env = await createEnvironment((await createCiSource()).id)
+    await createIntegration(await rootId(), grafana({ name: 'Grafana portal' }))
+    await createIntegration(
+      await rootId(),
+      grafana({ name: 'Grafana env', environmentId: env.id, baseUrl: 'https://env-grafana.example.com' }),
+    )
+
+    const resolved = await resolveIntegrationEndpoint('grafana', env.id)
+
+    expect(resolved?.name).toBe('Grafana env')
+    expect(resolved?.baseUrl).toBe('https://env-grafana.example.com')
+  })
+
+  it('falls back to the portal-wide one, which is the normal shape for one Grafana', async () => {
+    const env = await createEnvironment((await createCiSource()).id)
+    await createIntegration(await rootId(), grafana())
+
+    expect((await resolveIntegrationEndpoint('grafana', env.id))?.baseUrl).toBe('https://grafana.example.com')
+  })
+
+  it('is null when the row is disabled, rather than linking at something switched off', async () => {
+    await createIntegration(await rootId(), grafana({ enabled: false }))
+
+    expect(await resolveIntegrationEndpoint('grafana', null)).toBeNull()
+  })
+
+  it('is null for a kind nobody configured, and does not answer for another kind', async () => {
+    await createIntegration(await rootId(), input({ kind: 'foreman' }))
+
+    expect(await resolveIntegrationEndpoint('grafana', null)).toBeNull()
+    expect((await resolveIntegrationEndpoint('foreman', null))?.name).toBe('Foreman Prod')
+  })
+
+  it('returns the fields a link needs and nothing else — no credential, no username', async () => {
+    await createIntegration(await rootId(), grafana())
+
+    const resolved = await resolveIntegrationEndpoint('grafana', null)
+
+    expect(Object.keys(resolved ?? {}).sort()).toEqual(['baseUrl', 'id', 'name'])
+  })
+
+  it('hands out the endpoint even when the credential cannot be decrypted', async () => {
+    // A rotated SECRET_ENCRYPTION_KEY is a fault in the portal's connection to a
+    // system, not in a URL a browser opens itself. resolveIntegration must say null
+    // here (it cannot authenticate), and the link must still be built — which is
+    // only true because this path never reads the credential.
+    const [row] = await db
+      .insert(integrations)
+      .values({
+        kind: 'grafana',
+        name: 'Grafana with an unreadable credential',
+        baseUrl: 'https://grafana.example.com',
+        authType: 'bearer',
+        credential: 'v1:not-an-envelope',
+        failureMode: 'best_effort',
+      })
+      .returning()
+
+    expect(await resolveIntegration('grafana', null)).toBeNull()
+    expect((await resolveIntegrationEndpoint('grafana', null))?.id).toBe(row.id)
   })
 })

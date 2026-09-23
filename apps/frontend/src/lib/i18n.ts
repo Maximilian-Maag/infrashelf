@@ -196,6 +196,10 @@ export type Translations = {
   rereadingOutputs: string
   /** Card heading; the `outputs` key is the lowercase noun used mid-sentence. */
   outputsTitle: string
+  /** Card heading for where an object can be watched outside the portal (#546). */
+  observabilityTitle: string
+  /** The link itself. "Grafana" is a product name and stays as written. */
+  observabilityGrafanaLink: string
   noParameters: string
   pipelines: string
   noPipelines: string
@@ -954,6 +958,8 @@ export type Translations = {
 // the string and not afterwards.
 const translations: { en: Translations } & Record<string, Partial<Translations>> = {
   bg: {
+    observabilityTitle: 'Мониторинг',
+    observabilityGrafanaLink: 'Отваряне в Grafana',
     budgetUnpriced: 'За някои ангажирани поръчки не може да се установи цена, затова тази стойност е непълна:',
     budgetApprovalBlocked: 'одобрението ще бъде отхвърлено при проверката',
     budgetApprovalWarned: 'одобрението минава и се записва',
@@ -1801,6 +1807,8 @@ const translations: { en: Translations } & Record<string, Partial<Translations>>
     policyUnavailable: 'Правилата не можаха да бъдат питани за този елемент.',
   },
   cs: {
+    observabilityTitle: 'Monitoring',
+    observabilityGrafanaLink: 'Grafana: otevřít',
     budgetUnpriced: 'U některých závazně vyčerpaných objednávek nelze zjistit cenu, proto je tento údaj neúplný:',
     budgetApprovalBlocked: 'schválení bude na kontrole odmítnuto',
     budgetApprovalWarned: 'schválení projde a bude zaznamenáno',
@@ -2648,6 +2656,8 @@ const translations: { en: Translations } & Record<string, Partial<Translations>>
     policyUnavailable: 'Zásad se na tento prvek nepodařilo zeptat.',
   },
   da: {
+    observabilityTitle: 'Overvågning',
+    observabilityGrafanaLink: 'Åbn i Grafana',
     budgetUnpriced: 'Nogle bundne ordrer har ingen genfindelig pris, så dette tal er ufuldstændigt:',
     budgetApprovalBlocked: 'godkendelse vil blive afvist ved kontrollen',
     budgetApprovalWarned: 'godkendelse går igennem og registreres',
@@ -3495,6 +3505,8 @@ const translations: { en: Translations } & Record<string, Partial<Translations>>
     policyUnavailable: 'Politikken kunne ikke spørges om dette element.',
   },
   de: {
+    observabilityTitle: 'Monitoring',
+    observabilityGrafanaLink: 'In Grafana öffnen',
     budgetUnpriced: 'Für einige gebundene Bestellungen ist kein Preis mehr ermittelbar, daher ist dieser Wert unvollständig:',
     budgetApprovalBlocked: 'Die Genehmigung wird beim Prüfpunkt abgelehnt',
     budgetApprovalWarned: 'Die Genehmigung geht durch und wird protokolliert',
@@ -4342,6 +4354,8 @@ const translations: { en: Translations } & Record<string, Partial<Translations>>
     policyUnavailable: 'Die Richtlinien konnten zu diesem Element nicht befragt werden.',
   },
   el: {
+    observabilityTitle: 'Παρακολούθηση',
+    observabilityGrafanaLink: 'Άνοιγμα στο Grafana',
     budgetUnpriced: 'Για ορισμένες δεσμευμένες παραγγελίες δεν είναι δυνατή η ανάκτηση τιμής, οπότε το μέγεθος αυτό είναι ελλιπές:',
     budgetApprovalBlocked: 'η έγκριση θα απορριφθεί στον έλεγχο',
     budgetApprovalWarned: 'η έγκριση προχωρά και καταγράφεται',
@@ -5189,6 +5203,8 @@ const translations: { en: Translations } & Record<string, Partial<Translations>>
     policyUnavailable: 'Δεν ήταν δυνατό να ερωτηθεί η πολιτική για αυτό το στοιχείο.',
   },
   en: {
+    observabilityTitle: 'Monitoring',
+    observabilityGrafanaLink: 'Open in Grafana',
     budgetUnpriced: 'Some committed orders have no recoverable price, so this figure is incomplete:',
     budgetApprovalBlocked: 'approving this will be refused at the gate',
     budgetApprovalWarned: 'approving this goes through and is recorded',
@@ -6036,6 +6052,8 @@ const translations: { en: Translations } & Record<string, Partial<Translations>>
     policyUnavailable: 'Policy could not be asked about this element.',
   },
   es: {
+    observabilityTitle: 'Monitorización',
+    observabilityGrafanaLink: 'Abrir en Grafana',
     budgetUnpriced: 'Algunos pedidos comprometidos no tienen precio recuperable, por lo que esta cifra está incompleta:',
     budgetApprovalBlocked: 'la aprobación será rechazada en el control',
     budgetApprovalWarned: 'la aprobación se cursa y queda registrada',
@@ -6883,6 +6901,8 @@ const translations: { en: Translations } & Record<string, Partial<Translations>>
     policyUnavailable: 'No se pudo preguntar a las políticas por este elemento.',
   },
   et: {
+    observabilityTitle: 'Seire',
+    observabilityGrafanaLink: 'Grafana: ava',
     budgetUnpriced: 'Mõne seotud tellimuse hinda ei ole võimalik taastada, seega on see näitaja puudulik:',
     budgetApprovalBlocked: 'kinnitamine lükatakse kontrollis tagasi',
     budgetApprovalWarned: 'kinnitamine läheb läbi ja logitakse',
@@ -7730,6 +7750,8 @@ const translations: { en: Translations } & Record<string, Partial<Translations>>
     policyUnavailable: 'Eeskirjadelt ei õnnestunud selle elemendi kohta küsida.',
   },
   fi: {
+    observabilityTitle: 'Valvonta',
+    observabilityGrafanaLink: 'Grafana: avaa',
     budgetUnpriced: 'Joillekin sidotuille tilauksille ei löydy hintaa, joten tämä luku on epätäydellinen:',
     budgetApprovalBlocked: 'hyväksyntä hylätään tarkistuksessa',
     budgetApprovalWarned: 'hyväksyntä menee läpi ja kirjataan',
@@ -8577,6 +8599,8 @@ const translations: { en: Translations } & Record<string, Partial<Translations>>
     policyUnavailable: 'Käytännöiltä ei voitu kysyä tästä elementistä.',
   },
   fr: {
+    observabilityTitle: 'Supervision',
+    observabilityGrafanaLink: 'Ouvrir dans Grafana',
     budgetUnpriced: 'Le prix de certaines commandes engagées n\'est plus récupérable, ce chiffre est donc incomplet :',
     budgetApprovalBlocked: 'l\'approbation sera refusée au contrôle',
     budgetApprovalWarned: 'l\'approbation passe et est enregistrée',
@@ -9424,6 +9448,8 @@ const translations: { en: Translations } & Record<string, Partial<Translations>>
     policyUnavailable: 'Les politiques n’ont pas pu être interrogées sur cet élément.',
   },
   ga: {
+    observabilityTitle: 'Monatóireacht',
+    observabilityGrafanaLink: 'Oscail i Grafana',
     budgetUnpriced: 'Níl praghas inaisghabhála ag roinnt orduithe geallta, mar sin tá an figiúr seo neamhiomlán:',
     budgetApprovalBlocked: 'diúltófar don cheadú ag an seiceáil',
     budgetApprovalWarned: 'téann an ceadú tríd agus taifeadtar é',
@@ -10271,6 +10297,8 @@ const translations: { en: Translations } & Record<string, Partial<Translations>>
     policyUnavailable: 'Níorbh fhéidir na beartais a chur faoi cheist faoin eilimint seo.',
   },
   hr: {
+    observabilityTitle: 'Nadzor',
+    observabilityGrafanaLink: 'Grafana: otvori',
     budgetUnpriced: 'Za neke obvezane narudžbe cijena se više ne može utvrditi, pa je ovaj iznos nepotpun:',
     budgetApprovalBlocked: 'odobrenje će biti odbijeno na provjeri',
     budgetApprovalWarned: 'odobrenje prolazi i bilježi se',
@@ -11118,6 +11146,8 @@ const translations: { en: Translations } & Record<string, Partial<Translations>>
     policyUnavailable: 'Pravila nije bilo moguće upitati o ovom elementu.',
   },
   hu: {
+    observabilityTitle: 'Monitorozás',
+    observabilityGrafanaLink: 'Grafana: megnyitás',
     budgetUnpriced: 'Néhány lekötött rendelés ára nem állapítható meg, ezért ez az érték hiányos:',
     budgetApprovalBlocked: 'a jóváhagyást az ellenőrzés elutasítja',
     budgetApprovalWarned: 'a jóváhagyás átmegy, és naplózzuk',
@@ -11965,6 +11995,8 @@ const translations: { en: Translations } & Record<string, Partial<Translations>>
     policyUnavailable: 'A szabályzatokat nem sikerült megkérdezni erről az elemről.',
   },
   it: {
+    observabilityTitle: 'Monitoraggio',
+    observabilityGrafanaLink: 'Apri in Grafana',
     budgetUnpriced: 'Per alcuni ordini impegnati il prezzo non è più recuperabile, quindi questa cifra è incompleta:',
     budgetApprovalBlocked: 'l\'approvazione verrà rifiutata al controllo',
     budgetApprovalWarned: 'l\'approvazione passa e viene registrata',
@@ -12812,6 +12844,8 @@ const translations: { en: Translations } & Record<string, Partial<Translations>>
     policyUnavailable: 'Non è stato possibile interpellare i criteri su questo elemento.',
   },
   lt: {
+    observabilityTitle: 'Stebėjimas',
+    observabilityGrafanaLink: 'Grafana: atidaryti',
     budgetUnpriced: 'Kai kurių įsipareigotų užsakymų kainos nustatyti nepavyksta, todėl šis skaičius nepilnas:',
     budgetApprovalBlocked: 'patvirtinimas bus atmestas patikroje',
     budgetApprovalWarned: 'patvirtinimas praeina ir yra užfiksuojamas',
@@ -13659,6 +13693,8 @@ const translations: { en: Translations } & Record<string, Partial<Translations>>
     policyUnavailable: 'Taisyklių apie šį elementą paklausti nepavyko.',
   },
   lv: {
+    observabilityTitle: 'Uzraudzība',
+    observabilityGrafanaLink: 'Grafana: atvērt',
     budgetUnpriced: 'Dažiem rezervētajiem pasūtījumiem cena nav atgūstama, tāpēc šis skaitlis ir nepilnīgs:',
     budgetApprovalBlocked: 'apstiprinājums tiks noraidīts pārbaudē',
     budgetApprovalWarned: 'apstiprinājums tiek izpildīts un reģistrēts',
@@ -14506,6 +14542,8 @@ const translations: { en: Translations } & Record<string, Partial<Translations>>
     policyUnavailable: 'Politikas par šo elementu nevarēja jautāt.',
   },
   mt: {
+    observabilityTitle: 'Monitoraġġ',
+    observabilityGrafanaLink: 'Iftaħ fi Grafana',
     budgetUnpriced: 'Xi ordnijiet impenjati m’għandhomx prezz li jista’ jinstab, għalhekk din iċ-ċifra hija mhux kompluta:',
     budgetApprovalBlocked: 'l-approvazzjoni tiġi rifjutata fil-verifika',
     budgetApprovalWarned: 'l-approvazzjoni tgħaddi u tiġi rreġistrata',
@@ -15353,6 +15391,8 @@ const translations: { en: Translations } & Record<string, Partial<Translations>>
     policyUnavailable: 'Il-politiki ma setgħux jiġu mistoqsija dwar dan l-element.',
   },
   nl: {
+    observabilityTitle: 'Monitoring',
+    observabilityGrafanaLink: 'Openen in Grafana',
     budgetUnpriced: 'Van sommige vastgelegde bestellingen is geen prijs meer te achterhalen, dus dit getal is onvolledig:',
     budgetApprovalBlocked: 'goedkeuren wordt bij de controle geweigerd',
     budgetApprovalWarned: 'goedkeuren gaat door en wordt vastgelegd',
@@ -16200,6 +16240,8 @@ const translations: { en: Translations } & Record<string, Partial<Translations>>
     policyUnavailable: 'Het beleid kon niet worden gevraagd naar dit element.',
   },
   pl: {
+    observabilityTitle: 'Monitorowanie',
+    observabilityGrafanaLink: 'Grafana: otwórz',
     budgetUnpriced: 'Dla części zaangażowanych zamówień nie da się odtworzyć ceny, więc ta wartość jest niepełna:',
     budgetApprovalBlocked: 'zatwierdzenie zostanie odrzucone przy kontroli',
     budgetApprovalWarned: 'zatwierdzenie przechodzi i zostaje odnotowane',
@@ -17047,6 +17089,8 @@ const translations: { en: Translations } & Record<string, Partial<Translations>>
     policyUnavailable: 'Nie udało się zapytać zasad o ten element.',
   },
   pt: {
+    observabilityTitle: 'Monitorização',
+    observabilityGrafanaLink: 'Abrir no Grafana',
     budgetUnpriced: 'Algumas encomendas comprometidas não têm preço recuperável, pelo que este valor está incompleto:',
     budgetApprovalBlocked: 'a aprovação será recusada na verificação',
     budgetApprovalWarned: 'a aprovação passa e fica registada',
@@ -17894,6 +17938,8 @@ const translations: { en: Translations } & Record<string, Partial<Translations>>
     policyUnavailable: 'Não foi possível questionar as políticas sobre este elemento.',
   },
   ro: {
+    observabilityTitle: 'Monitorizare',
+    observabilityGrafanaLink: 'Deschide în Grafana',
     budgetUnpriced: 'Pentru unele comenzi angajate prețul nu mai poate fi recuperat, deci această cifră este incompletă:',
     budgetApprovalBlocked: 'aprobarea va fi refuzată la verificare',
     budgetApprovalWarned: 'aprobarea trece și este înregistrată',
@@ -18741,6 +18787,8 @@ const translations: { en: Translations } & Record<string, Partial<Translations>>
     policyUnavailable: 'Politicile nu au putut fi întrebate despre acest element.',
   },
   ru: {
+    observabilityTitle: 'Мониторинг',
+    observabilityGrafanaLink: 'Открыть в Grafana',
     budgetUnpriced: 'Для части заказов в обязательствах цену восстановить нельзя, поэтому эта величина неполная:',
     budgetApprovalBlocked: 'согласование будет отклонено на проверке',
     budgetApprovalWarned: 'согласование проходит и записывается',
@@ -19588,6 +19636,8 @@ const translations: { en: Translations } & Record<string, Partial<Translations>>
     policyUnavailable: 'Правила не удалось спросить об этом элементе.',
   },
   sk: {
+    observabilityTitle: 'Monitorovanie',
+    observabilityGrafanaLink: 'Grafana: otvoriť',
     budgetUnpriced: 'Pri niektorých viazaných objednávkach sa cena nedá zistiť, preto je tento údaj neúplný:',
     budgetApprovalBlocked: 'schválenie bude pri kontrole zamietnuté',
     budgetApprovalWarned: 'schválenie prejde a zaznamená sa',
@@ -20435,6 +20485,8 @@ const translations: { en: Translations } & Record<string, Partial<Translations>>
     policyUnavailable: 'Zásad sa na tento prvok nepodarilo opýtať.',
   },
   sl: {
+    observabilityTitle: 'Spremljanje',
+    observabilityGrafanaLink: 'Grafana: odpri',
     budgetUnpriced: 'Pri nekaterih zavezanih naročilih cene ni mogoče ugotoviti, zato je ta številka nepopolna:',
     budgetApprovalBlocked: 'odobritev bo pri preverjanju zavrnjena',
     budgetApprovalWarned: 'odobritev gre skozi in se zabeleži',
@@ -21282,6 +21334,8 @@ const translations: { en: Translations } & Record<string, Partial<Translations>>
     policyUnavailable: 'Politike ni bilo mogoče vprašati o tem elementu.',
   },
   sv: {
+    observabilityTitle: 'Övervakning',
+    observabilityGrafanaLink: 'Öppna i Grafana',
     budgetUnpriced: 'För vissa bundna ordrar går priset inte att få fram, så denna siffra är ofullständig:',
     budgetApprovalBlocked: 'godkännandet avvisas vid kontrollen',
     budgetApprovalWarned: 'godkännandet går igenom och registreras',

@@ -7,6 +7,8 @@ import { fireDestroyTriggers, destroyVariables } from '@/lib/services/teardown'
 import { isEmptyUpdate, EMPTY_UPDATE_MESSAGE } from '@/lib/services/updates'
 import { logAudit, logAuditWith, changedFields } from '@/lib/audit'
 import { refingerprintAfterProjectDelete } from '@/lib/services/admin/parameters'
+import { resolveIntegrationEndpoint } from '@/lib/services/admin/integrations'
+import { projectDashboardLink, type ObservabilityLink } from '@/lib/integrations/grafana'
 
 export interface ProjectRow {
   id: number
@@ -17,6 +19,16 @@ export interface ProjectRow {
   createdAt: Date
   ownerName: string | null
   costCenterName: string | null
+  /**
+   * Where this project's machines can be watched (#546), or null when no
+   * portal-wide Grafana integration is configured.
+   *
+   * Portal-wide only, deliberately: a project spans environments, so an
+   * environment-scoped Grafana is not "the one for this project" — resolving one
+   * would pick whichever environment happened to come first and quietly hide the
+   * rest. The project dashboard is the view that answers "all of my machines".
+   */
+  observability: { grafana: ObservabilityLink | null }
 }
 
 export interface UpdateProjectInput {
@@ -79,7 +91,15 @@ export const getProjectById = async (
     return err(403, 'Forbidden')
   }
 
-  return ok(project)
+  // The project dashboard link (#546), resolved portal-wide — see ProjectRow.
+  const grafana = await resolveIntegrationEndpoint('grafana', null)
+
+  return ok({
+    ...project,
+    observability: {
+      grafana: grafana ? projectDashboardLink(grafana.baseUrl, { projectId: project.id }) : null,
+    },
+  })
 }
 
 export const createProject = async (

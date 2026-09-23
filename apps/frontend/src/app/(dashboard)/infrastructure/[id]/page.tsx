@@ -61,6 +61,11 @@ export default async function InfrastructureDetailPage({ params }: Props) {
   const failedTriggers = Object.entries(element.pipelineStatus ?? {}).filter(
     ([key]) => !pipelines.includes(key),
   )
+  // Where this element can be watched outside the portal (#546). Null when no
+  // Grafana is configured, and the page then says nothing at all: a card that
+  // reads "not configured" is a worse answer than the absence of a card, because
+  // an operator cannot act on it from here.
+  const grafana = element.observability?.grafana ?? null
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
@@ -163,6 +168,21 @@ export default async function InfrastructureDetailPage({ params }: Props) {
           Below the outputs because those are the day-to-day answer, and above the
           parameters because a verdict nobody scrolls to is a verdict nobody reads. */}
       <ComplianceCard element={element} lang={lang} />
+
+      {grafana && (
+        <Card title={t('observabilityTitle', lang)}>
+          <a
+            href={grafana.url}
+            target="_blank"
+            // noreferrer as well as noopener: the dashboard is a different origin,
+            // and nothing about this page belongs in its referrer log.
+            rel="noreferrer"
+            className="text-sm text-blue-600 hover:underline"
+          >
+            {t('observabilityGrafanaLink', lang)}
+          </a>
+        </Card>
+      )}
 
       <Card title={t('parameters', lang)}>
         {parameters.length === 0 ? (
