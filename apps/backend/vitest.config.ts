@@ -47,6 +47,10 @@ export default defineConfig({
     ...(underMutationTesting ? { testTimeout: 60_000, hookTimeout: 60_000 } : {}),
     globals: true,
     environment: 'node',
+    // Records the tree this run started on, once, before any worker exists — the
+    // per-file setup compares itself against it and refuses to report on a run
+    // whose tree moved underneath it (#543, `src/test/treeGuard.ts`).
+    globalSetup: ['./src/test/globalSetup.ts'],
     // Stryker copies the whole source tree into .stryker-tmp/sandbox-*/ while a
     // mutation run is in progress. Those copies contain test files, so an ordinary
     // `vitest run` picks them up: the suite doubles, and the copies fail against a

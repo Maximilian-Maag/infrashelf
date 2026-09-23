@@ -6,6 +6,14 @@ import { getTableName, sql } from 'drizzle-orm'
 import { migrate } from 'drizzle-orm/postgres-js/migrator'
 import { join } from 'node:path'
 import { acquireTestDatabase, wipeIfUnaccountedFor } from './database'
+import { assertSourceUnchanged } from './treeGuard'
+
+// Before anything in this file reads a source file: is this the tree the run
+// started on? A run that has been read across two revisions cannot be reported
+// as a verdict on either, and #543 is what that looks like when nobody says so —
+// three failures in two files that pass on their own. This throws, so the
+// sentence is attached to a failing file rather than buried in a 24-minute log.
+assertSourceUnchanged()
 
 // Claimed at MODULE scope, before any test file is imported: the app's db
 // singleton reads process.env.DATABASE_URL when its module first loads, so a URL
@@ -233,4 +241,10 @@ afterAll(async () => {
   // Releases the advisory lock on this run's database, freeing the name for the
   // next run in this directory.
   await acquired.release()
+  // Last, so a guard failure cannot leave the database locked: the check is about the
+  // run, and the teardown above is about the server everybody else is sharing. This
+  // is the second half of the guard — the module-scope call catches a tree that moved
+  // before this file started, and this one catches a change made while its tests were
+  // still reading, which is what an end-of-run report would otherwise miss.
+  assertSourceUnchanged()
 })
