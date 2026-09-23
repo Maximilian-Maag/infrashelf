@@ -6,6 +6,14 @@ import { getTableName, sql } from 'drizzle-orm'
 import { migrate } from 'drizzle-orm/postgres-js/migrator'
 import { join } from 'node:path'
 import { acquireTestDatabase, wipeIfUnaccountedFor } from './database'
+import { assertSourceUnchanged } from './treeGuard'
+
+// Before anything in this file reads a source file: is this the tree the run
+// started on? A run that has been read across two revisions cannot be reported
+// as a verdict on either, and #543 is what that looks like when nobody says so —
+// three failures in two files that pass on their own. This throws, so the
+// sentence is attached to a failing file rather than buried in a 24-minute log.
+assertSourceUnchanged()
 
 // Claimed at MODULE scope, before any test file is imported: the app's db
 // singleton reads process.env.DATABASE_URL when its module first loads, so a URL
