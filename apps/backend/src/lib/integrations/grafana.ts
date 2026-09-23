@@ -25,12 +25,13 @@ import { integrationUrl } from '@/lib/integrations/http'
  *
  * ── Dashboards as code ──────────────────────────────────────────────────────
  *
- * These UIDs name dashboards the platform ships and provisions from the
- * repository, for the reason the epic gives: hand-made dashboards drift exactly
- * like hand-made infrastructure, which is the problem #108 exists to solve. A
- * deployment that has not provisioned them gets a link Grafana answers 404 for —
- * visible, and fixable by deploying them. A link into nothing at all would be
- * invisible, which is worse.
+ * These two UIDs are the contract between the portal and the Grafana a deployment
+ * points it at: they are what the link names, and what a dashboard has to carry to
+ * be worth linking to. What is NOT in this repository yet is the dashboards
+ * themselves (#548) — a deployment that has not provisioned them gets a link
+ * Grafana answers 404 for, which is visible and fixable by importing them, where a
+ * link into nothing at all would be invisible. Writing panels before the metric
+ * source exists (#117) would be inventing the answer #548 has to give.
  */
 export const ELEMENT_DASHBOARD_UID = 'infrashelf-element'
 export const PROJECT_DASHBOARD_UID = 'infrashelf-project'

@@ -39,7 +39,10 @@ const observabilityLinkSchema = z.object({
       'admin-only integration row itself.',
   }),
   dashboardUid: z.string().openapi({
-    description: 'Which dashboard the url points at, provisioned from this repository.',
+    description:
+      'Which dashboard the url points at. The UID is the portal’s contract with the ' +
+      'Grafana the deployment configures; the dashboards themselves are not in this ' +
+      'repository yet (#548), so a deployment that has not imported them answers 404.',
   }),
 })
 

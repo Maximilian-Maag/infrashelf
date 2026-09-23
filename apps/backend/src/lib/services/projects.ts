@@ -19,15 +19,24 @@ export interface ProjectRow {
   createdAt: Date
   ownerName: string | null
   costCenterName: string | null
-  /**
-   * Where this project's machines can be watched (#546), or null when no
-   * portal-wide Grafana integration is configured.
-   *
-   * Portal-wide only, deliberately: a project spans environments, so an
-   * environment-scoped Grafana is not "the one for this project" — resolving one
-   * would pick whichever environment happened to come first and quietly hide the
-   * rest. The project dashboard is the view that answers "all of my machines".
-   */
+}
+
+/**
+ * One project as its own page reads it (#546): the row plus where its machines can
+ * be watched.
+ *
+ * A separate interface rather than a field on `ProjectRow`, for the same reason the
+ * shared type has `ProjectDetail` and the spec has `projectDetailSchema`:
+ * `listProjects` selects no integration per row, and a field there would describe
+ * rows the list never returns — hidden by the `as ProjectRow[]` cast, so nothing
+ * would have caught it.
+ *
+ * Portal-wide only, deliberately: a project spans environments, so an
+ * environment-scoped Grafana is not "the one for this project" — resolving one
+ * would pick whichever environment happened to come first and quietly hide the
+ * rest. The project dashboard is the view that answers "all of my machines".
+ */
+export interface ProjectDetailRow extends ProjectRow {
   observability: { grafana: ObservabilityLink | null }
 }
 
@@ -65,7 +74,7 @@ export const listProjects = async (session: SessionUser): Promise<Result<Project
 export const getProjectById = async (
   session: SessionUser,
   projectId: number,
-): Promise<Result<ProjectRow>> => {
+): Promise<Result<ProjectDetailRow>> => {
   const rows = await db
     .select({
       id: projects.id,
@@ -91,7 +100,7 @@ export const getProjectById = async (
     return err(403, 'Forbidden')
   }
 
-  // The project dashboard link (#546), resolved portal-wide — see ProjectRow.
+  // The project dashboard link (#546), resolved portal-wide — see ProjectDetailRow.
   const grafana = await resolveIntegrationEndpoint('grafana', null)
 
   return ok({
