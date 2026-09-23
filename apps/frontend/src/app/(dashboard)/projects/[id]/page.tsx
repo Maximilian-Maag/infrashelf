@@ -1,7 +1,7 @@
 import { auth } from '@/lib/auth'
 import { get } from '@/lib/serverApi'
 import { redirect, notFound, unstable_rethrow } from 'next/navigation'
-import type { Project, Order, CostCenter, OrderPage } from '@infrashelf/types'
+import type { ProjectDetail, Order, CostCenter, OrderPage } from '@infrashelf/types'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Breadcrumbs } from '@/components/layout/Breadcrumbs'
 import { Card } from '@/components/ui/Card'
@@ -26,14 +26,18 @@ export default async function ProjectDetailPage({ params }: Props) {
 
   const lang = await getLang()
 
-  let project: Project
+  let project: ProjectDetail
   try {
-    project = await get<Project>(`/api/projects/${id}`)
+    project = await get<ProjectDetail>(`/api/projects/${id}`)
   } catch (e) {
     // A 401 redirect is not a failed fetch (#434).
     unstable_rethrow(e)
     notFound()
   }
+
+  // Where this project's machines can be watched (#546), or null when nothing is
+  // configured — see the element page for why the card is then simply absent.
+  const observability = project.observability?.grafana ?? null
 
   const [ordersRes, costCentersRes] = await Promise.allSettled([
     // The filter was already in this URL and the backend ignored it, so this
@@ -74,6 +78,22 @@ export default async function ProjectDetailPage({ params }: Props) {
           everything else. */}
       <SectionError error={costCenters.error} lang={lang} />
       <ProjectEditForm project={project} costCenters={costCenters.data} />
+
+      {/* Where this project's machines can be watched (#546). Absent when no
+          Grafana is configured — see the element page for why that is a card's
+          absence rather than a card saying "not configured". */}
+      {observability && (
+        <Card title={t('observabilityTitle', lang)}>
+          <a
+            href={observability.url}
+            target="_blank"
+            rel="noreferrer"
+            className="text-sm text-blue-600 hover:underline"
+          >
+            {t('observabilityGrafanaLink', lang)}
+          </a>
+        </Card>
+      )}
 
       {/* Rendered unconditionally. The card used to be hidden when the project
           had no orders, which made the empty message below unreachable — and

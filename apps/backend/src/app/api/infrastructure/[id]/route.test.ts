@@ -16,6 +16,7 @@ import {
   createCostCenter,
   makeAuthHeader,
 } from '@/test/helpers'
+import { createIntegration } from '@/lib/services/admin/integrations'
 
 const makeReq = (id: string, auth?: string) =>
   new NextRequest(`http://localhost/api/infrastructure/${id}`, auth ? { headers: { authorization: auth } } : undefined)
@@ -169,5 +170,69 @@ describe('GET /api/infrastructure/[id]', () => {
     const body = await (await GET(makeReq(String(element.id), await makeAuthHeader(root)), params(String(element.id)))).json()
     expect(body.status).toBe('active')
     expect(body.orderStatus).toBe('failed')
+  })
+})
+
+describe('GET /api/infrastructure/[id] — where it can be watched (#546)', () => {
+  /*
+   * The deep link into Grafana. What matters beyond the URL's shape (asserted in
+   * lib/integrations/grafana.test.ts) is that it is built here, from the resolved
+   * integration, and that neither the credential nor the username of an admin-only
+   * row escapes into a response any signed-in caller can read.
+   */
+  const grafana = { kind: 'grafana' as const, name: 'Grafana', baseUrl: 'https://grafana.example.com', authType: 'bearer' as const, credential: 'grafana-token', failureMode: 'best_effort' as const }
+
+  it('carries a deep link for this element, filtered by its identifiers', async () => {
+    const { root, element, project } = await scenario()
+    await createIntegration(root.id, grafana)
+
+    const body = await (await GET(makeReq(String(element.id), await makeAuthHeader(root)), params(String(element.id)))).json()
+
+    expect(body.observability.grafana.url).toContain('https://grafana.example.com/d/infrashelf-element/element?')
+    expect(body.observability.grafana.url).toContain(`var-element_id=${element.id}`)
+    expect(body.observability.grafana.url).toContain(`var-project_id=${project.id}`)
+    expect(body.observability.grafana.dashboardUid).toBe('infrashelf-element')
+  })
+
+  it('is null when no Grafana is configured, rather than a link to nowhere', async () => {
+    const { root, element } = await scenario()
+
+    const body = await (await GET(makeReq(String(element.id), await makeAuthHeader(root)), params(String(element.id)))).json()
+
+    expect(body.observability).toEqual({ grafana: null })
+  })
+
+  it('is null when the only Grafana is disabled', async () => {
+    const { root, element } = await scenario()
+    await createIntegration(root.id, { ...grafana, enabled: false })
+
+    const body = await (await GET(makeReq(String(element.id), await makeAuthHeader(root)), params(String(element.id)))).json()
+
+    expect(body.observability.grafana).toBeNull()
+  })
+
+  it("prefers the environment's own Grafana to the portal-wide one", async () => {
+    const { root, element, env } = await scenario()
+    await createIntegration(root.id, grafana)
+    await createIntegration(root.id, { ...grafana, name: 'Grafana env', environmentId: env.id, baseUrl: 'https://env-grafana.example.com' })
+
+    const body = await (await GET(makeReq(String(element.id), await makeAuthHeader(root)), params(String(element.id)))).json()
+
+    expect(body.observability.grafana.url).toContain('https://env-grafana.example.com/d/')
+  })
+
+  it('hands a project manager the link too, and only the link', async () => {
+    // The element page is the one place a project manager sees their own machines,
+    // and a URL is not a credential — Grafana enforces its own access. What must not
+    // travel is everything else the registry row holds.
+    const { pm, element } = await scenario()
+    await createIntegration(await createUser({ role: 'root' }).then((u) => u.id), grafana)
+
+    const body = await (await GET(makeReq(String(element.id), await makeAuthHeader(pm)), params(String(element.id)))).json()
+
+    expect(body.observability.grafana.url).toContain('/d/infrashelf-element/element?')
+    expect(Object.keys(body.observability.grafana).sort()).toEqual(['dashboardUid', 'url'])
+    expect(JSON.stringify(body.observability)).not.toContain('grafana-token')
+    expect(JSON.stringify(body.observability)).not.toContain('Grafana')
   })
 })

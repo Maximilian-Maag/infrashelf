@@ -599,6 +599,25 @@ export interface ResolvedIntegration {
 }
 
 /**
+ * Which row a kind means for an environment: the environment's own first, then
+ * the portal-wide fallback, and only if it is enabled.
+ *
+ * Factored out because two readers now depend on this precedence agreeing —
+ * `resolveIntegration` for the API clients, `resolveIntegrationEndpoint` for the
+ * dashboard links (#546) — and a second copy of it would be a second answer to
+ * "which Grafana is this environment's", which is the class of bug the partial
+ * unique indexes exist to prevent.
+ */
+const integrationScope = (kind: IntegrationKind, environmentId: number | null) =>
+  and(
+    eq(integrations.kind, kind),
+    eq(integrations.enabled, true),
+    environmentId === null
+      ? isNull(integrations.environmentId)
+      : sql`(${integrations.environmentId} = ${environmentId} OR ${integrations.environmentId} IS NULL)`,
+  )
+
+/**
  * Find the integration of `kind` that serves `environmentId`, with its
  * credential decrypted — the entry point every one of #112–#117 uses.
  *
@@ -638,15 +657,7 @@ export const resolveIntegration = async (
       enabled: integrations.enabled,
     })
     .from(integrations)
-    .where(
-      and(
-        eq(integrations.kind, kind),
-        eq(integrations.enabled, true),
-        environmentId === null
-          ? isNull(integrations.environmentId)
-          : sql`(${integrations.environmentId} = ${environmentId} OR ${integrations.environmentId} IS NULL)`,
-      ),
-    )
+    .where(integrationScope(kind, environmentId))
     // NULLS LAST puts the environment-specific row first, so the fallback is a
     // property of the query rather than of the loop that reads it.
     .orderBy(sql`${integrations.environmentId} ASC NULLS LAST`)
@@ -681,4 +692,40 @@ export const resolveIntegration = async (
     failureMode: row.failureMode,
     blocking: blocksProvisioning(row),
   }
+}
+
+/** Where an integration lives, without its credential (#546). */
+export interface IntegrationEndpoint {
+  id: number
+  name: string
+  baseUrl: string
+}
+
+/**
+ * The base URL of the integration of `kind` serving `environmentId`, and nothing
+ * else — no credential is read, and none is decrypted.
+ *
+ * Exists for the dashboard links (#546), where the browser needs a URL and the
+ * portal needs nothing: decrypting a secret to build a URL would widen the
+ * credential's blast radius for no reason. It also means a link keeps working
+ * when the portal cannot DECRYPT a credential — a rotated key is a fault in the
+ * portal's connection to a system, not in a URL a browser opens on its own, and
+ * `resolveIntegration` returning `null` for that case would otherwise take the
+ * dashboard link down with it.
+ *
+ * Same precedence and same enabled rule as `resolveIntegration`, from the same
+ * `integrationScope`: two readers, one answer.
+ */
+export const resolveIntegrationEndpoint = async (
+  kind: IntegrationKind,
+  environmentId: number | null,
+): Promise<IntegrationEndpoint | null> => {
+  const [row] = await db
+    .select({ id: integrations.id, name: integrations.name, baseUrl: integrations.baseUrl })
+    .from(integrations)
+    .where(integrationScope(kind, environmentId))
+    .orderBy(sql`${integrations.environmentId} ASC NULLS LAST`)
+    .limit(1)
+
+  return row ?? null
 }

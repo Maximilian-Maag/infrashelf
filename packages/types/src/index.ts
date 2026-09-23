@@ -960,6 +960,23 @@ export interface Project {
   costCenterName?: string
 }
 
+/**
+ * One project as its own page reads it (GET /projects/{id}): the row plus where its
+ * machines can be watched (#546).
+ *
+ * A separate type rather than a field on `Project`, for the same reason the spec has
+ * a separate schema: the list answers with `Project`, and it resolves no integration
+ * per row — documenting `observability` there would promise the list a field it
+ * never sends.
+ *
+ * Portal-wide Grafana only, deliberately: a project spans environments, so an
+ * environment-scoped one is not "the one for this project" and picking either would
+ * silently hide the other's machines.
+ */
+export interface ProjectDetail extends Project {
+  observability?: Observability
+}
+
 export interface CreateProjectRequest {
   name: string
   description?: string
@@ -1591,6 +1608,45 @@ export interface InfrastructureDetail extends InfrastructureElement {
    * reasoning as `outputsError` above, and as the order gate's refusal message.
    */
   policyMessage?: string | null
+  /**
+   * Where this element can be watched outside the portal (#546): a link into the
+   * dashboard system for it, or null inside the slot when nothing is configured.
+   *
+   * The URL is built by the BACKEND, because the integrations registry is
+   * admin-only — a client is never handed the base URL of a row it may not read,
+   * and the portal and the dashboard agree about variable names in one place.
+   * The page shows nothing when it is null rather than a link to nowhere.
+   *
+   * A URL is not a credential: it is included for whoever may already see the
+   * element, and the dashboard system enforces its own access. No credential,
+   * username or other integration is ever part of it.
+   */
+  observability?: Observability
+}
+
+/**
+ * A deep link out of the portal into the dashboard for something (#546).
+ *
+ * Declared once for the same reason the portal builds it once: the element page and
+ * the project page render the same thing, and Loki logs and the systems #111 still
+ * carries want the same slot.
+ */
+export interface ObservabilityLink {
+  /** Absolute, already filtered by this object's identifiers. */
+  url: string
+  /** Which dashboard it points at, provisioned from this repository. */
+  dashboardUid: string
+}
+
+/**
+ * Where a thing can be watched outside the portal.
+ *
+ * A named slot per system rather than bare fields, so that "Grafana is not
+ * configured" (`grafana: null`) is distinguishable from "no observability
+ * integrations at all" and from the systems that have not been built yet.
+ */
+export interface Observability {
+  grafana: ObservabilityLink | null
 }
 
 /** Option lists for the infrastructure list filters (GET /infrastructure/facets). */

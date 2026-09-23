@@ -25,6 +25,43 @@ const bearerAuth = [{ BearerAuth: [] }]
 
 // ─── Shared schemas ───────────────────────────────────────────────────────────
 
+/**
+ * A deep link out of the portal into the dashboard for something (#546).
+ *
+ * Declared here rather than beside its first user: `const` is not hoisted, and
+ * both the element and the project detail responses carry one.
+ */
+const observabilityLinkSchema = z.object({
+  url: z.string().openapi({
+    description:
+      'Absolute URL into the configured dashboard system, already filtered by this ' +
+      'object’s identifiers. Built by the backend so a client never needs the ' +
+      'admin-only integration row itself.',
+  }),
+  dashboardUid: z.string().openapi({
+    description:
+      'Which dashboard the url points at. The UID is the portal’s contract with the ' +
+      'Grafana the deployment configures; the dashboards themselves are not in this ' +
+      'repository yet (#548), so a deployment that has not imported them answers 404.',
+  }),
+})
+
+/**
+ * Where a thing can be watched outside the portal (#546, #111).
+ *
+ * A named slot rather than a bare url field: Loki logs and the other systems the
+ * epic carries want the same place on the same pages, and `null` inside the
+ * object says "this kind is not configured" without pretending the slot is
+ * empty.
+ */
+const observabilitySchema = z.object({
+  grafana: observabilityLinkSchema.nullable().openapi({
+    description:
+      'Null when no enabled Grafana integration serves this object — the page then ' +
+      'shows nothing, rather than a link into a dashboard that does not exist.',
+  }),
+})
+
 const userSchema = z.object({
   id: z.number(),
   email: z.string(),
@@ -128,6 +165,18 @@ const projectSchema = z.object({
   createdAt: z.string().nullable(),
   ownerName: z.string().nullable(),
   costCenterName: z.string().nullable(),
+})
+
+/**
+ * One project, as its own page reads it — the list row plus where its machines can
+ * be watched (#546).
+ *
+ * Deliberately NOT folded into `projectSchema`: the list endpoint answers with the
+ * same row shape and does not resolve an integration per project, so documenting
+ * `observability` on the shared schema would promise a field the list never sends.
+ */
+const projectDetailSchema = projectSchema.extend({
+  observability: observabilitySchema,
 })
 
 const categorySchema = z.object({
@@ -349,6 +398,11 @@ const infraDetailSchema = infraSchema.extend({
     description:
       "The policy's own words, shown to an operator as written rather than translated: the portal " +
       'cannot rephrase a rule it did not write.',
+  }),
+  observability: observabilitySchema.openapi({
+    description:
+      'Where this element can be watched outside the portal (#546). Built here because the ' +
+      'integrations registry is admin-only and the browser has no business reading it.',
   }),
 })
 
@@ -1986,8 +2040,8 @@ registry.registerPath({
   },
   responses: {
     200: {
-      description: 'Project',
-      content: { 'application/json': { schema: projectSchema } },
+      description: 'Project, plus where its machines can be watched (#546)',
+      content: { 'application/json': { schema: projectDetailSchema } },
     },
     401: { description: 'Unauthorized' },
     403: { description: 'Forbidden' },

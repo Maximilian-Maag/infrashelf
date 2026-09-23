@@ -3,6 +3,7 @@ import { render, screen } from '@testing-library/react'
 import { ApiError } from '@/lib/api'
 import type * as Navigation from 'next/navigation'
 import ProjectDetailPage from './page'
+import { t } from '@/lib/i18n'
 
 const auth = vi.fn()
 vi.mock('@/lib/auth', () => ({ auth: () => auth() }))
@@ -170,5 +171,31 @@ describe('ProjectDetailPage', () => {
     render(await ProjectDetailPage({ params }))
 
     expect(console.error).toHaveBeenCalledWith('[page] could not load orders for project 4: HTTP 500: boom')
+  })
+})
+
+describe('where the project can be watched (#546)', () => {
+  const grafana = {
+    url: 'https://grafana.example.com/d/infrashelf-project/project?var-project_id=4',
+    dashboardUid: 'infrashelf-project',
+  }
+
+  it('links into the dashboard for this project', async () => {
+    answer({ project: { ...project, observability: { grafana } } })
+
+    render(await ProjectDetailPage({ params }))
+
+    const link = screen.getByRole('link', { name: t('observabilityGrafanaLink', 'en') })
+    expect(link).toHaveAttribute('href', grafana.url)
+    expect(link).toHaveAttribute('target', '_blank')
+    expect(link).toHaveAttribute('rel', 'noreferrer')
+  })
+
+  it('says nothing at all when no Grafana is configured', async () => {
+    answer({ project: { ...project, observability: { grafana: null } } })
+
+    render(await ProjectDetailPage({ params }))
+
+    expect(screen.queryByRole('heading', { name: t('observabilityTitle', 'en') })).toBeNull()
   })
 })

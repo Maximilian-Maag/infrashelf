@@ -4,6 +4,7 @@ import type * as Navigation from 'next/navigation'
 import type { InfrastructureDetail } from '@infrashelf/types'
 import { ApiError } from '@/lib/api'
 import InfrastructureDetailPage from './page'
+import { t } from '@/lib/i18n'
 
 const auth = vi.fn()
 vi.mock('@/lib/auth', () => ({ auth: () => auth() }))
@@ -268,5 +269,48 @@ describe('InfrastructureDetailPage', () => {
   it('shows a dash for an element charged to no cost centre', async () => {
     render(await InfrastructureDetailPage({ params }))
     expect(within(screen.getByText('Cost Center').closest('div') as HTMLElement).getByText('—')).toBeInTheDocument()
+  })
+})
+
+describe('where the element can be watched (#546)', () => {
+  /*
+   * The link is built by the backend and rendered as given: the page never sees an
+   * integration's base URL, so there is nothing here to assemble. What the page owes
+   * is the honest absence — no card at all when the server said null, because a card
+   * reading "not configured" is something an operator cannot act on from here.
+   */
+  const grafana = {
+    url: 'https://grafana.example.com/d/infrashelf-element/element?var-element_id=21&from=now-6h&to=now',
+    dashboardUid: 'infrashelf-element',
+  }
+
+  it('links into the dashboard for this element, in a new tab, without a referrer', async () => {
+    answer(element({ observability: { grafana } }))
+
+    render(await InfrastructureDetailPage({ params }))
+
+    const monitoring = card(t('observabilityTitle', 'en'))
+    const link = within(monitoring).getByRole('link', { name: t('observabilityGrafanaLink', 'en') })
+    expect(link).toHaveAttribute('href', grafana.url)
+    expect(link).toHaveAttribute('target', '_blank')
+    expect(link).toHaveAttribute('rel', 'noreferrer')
+  })
+
+  it('says nothing at all when no Grafana is configured', async () => {
+    answer(element({ observability: { grafana: null } }))
+
+    render(await InfrastructureDetailPage({ params }))
+
+    expect(screen.queryByRole('heading', { name: t('observabilityTitle', 'en') })).toBeNull()
+  })
+
+  it('says nothing at all when the server sent no observability slot', async () => {
+    // An older backend, or a shape that moved: the page must not crash or invent a
+    // card. The field is optional in the shared type for exactly this reason.
+    answer(element())
+
+    render(await InfrastructureDetailPage({ params }))
+
+    expect(screen.queryByRole('heading', { name: t('observabilityTitle', 'en') })).toBeNull()
   })
 })
