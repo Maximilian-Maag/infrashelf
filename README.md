@@ -377,9 +377,17 @@ disagree, so CI catches a forgotten refresh.
 make test                         # all unit + integration tests
 pnpm --filter backend test:watch  # backend tests in watch mode
 pnpm --filter frontend test       # frontend tests only
+pnpm test:coverage                # both apps, with coverage
+pnpm test:mutation                # Stryker — hours, see the guide below
 ```
 
 Integration tests require the postgres container to be running (`make dev`).
+A single file is `cd apps/backend && TEST_DB_SUFFIX=thing pnpm exec vitest run <path>`;
+the suffix names the databases that run creates, and each test file gets its own.
+
+How the suite is put together, what the gates enforce and the traps worth knowing
+are in **[docs/guides/testing.md](docs/guides/testing.md)**; the mutation half has
+its own guide, [docs/guides/mutation-testing.md](docs/guides/mutation-testing.md).
 
 #### Simulating a CI/CD pipeline webhook
 
