@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { db } from '@/lib/db/client'
 import { appConfig } from '@/lib/db/schema'
 import { translateProduct } from './index'
+import { SECRET_KEY_ENV, SECRET_KEY_HEX_LENGTH, encryptSecret } from '@/lib/crypto/secrets'
 
 /**
  * The AI translation client (#307's tail): five providers behind one call, and the
@@ -245,5 +246,61 @@ describe('the prompt', () => {
       expect(prompt, code).toContain(code)
     }
     expect(prompt).toContain('exactly these 25 languages')
+  })
+})
+
+/*
+ * #556. The API key is stored as an envelope, and this module reads the config
+ * table directly — so what goes on the wire has to be the plaintext, never the
+ * ciphertext, and never a stale one.
+ */
+describe('translateProduct — the stored key (#556)', () => {
+  it('sends the key decrypted from its envelope', async () => {
+    await configure({ aiProvider: 'openai', aiEndpoint: '', aiApiKey: encryptSecret('sk-stored') })
+    const fetchMock = vi
+      .spyOn(global, 'fetch')
+      .mockResolvedValue(openAiAnswer('{"de":{"name":"n"}}'))
+
+    await translateProduct('Web-01', 'A virtual machine')
+
+    expect(requestTo(fetchMock).headers.Authorization).toBe('Bearer sk-stored')
+  })
+
+  it('uses a key an older deployment left in plain text, and leaves it alone', async () => {
+    await configure({ aiProvider: 'openai', aiEndpoint: '', aiApiKey: 'sk-legacy' })
+    const fetchMock = vi
+      .spyOn(global, 'fetch')
+      .mockResolvedValue(openAiAnswer('{"de":{"name":"n"}}'))
+
+    await translateProduct('Web-01', 'A virtual machine')
+
+    // Used as it is, so an upgrade does not stop translations while the boot
+    // backfill has still to run — and NOT re-written here, because a read path
+    // that writes can overwrite a key an administrator is saving at that moment.
+    expect(requestTo(fetchMock).headers.Authorization).toBe('Bearer sk-legacy')
+    const [row] = await db.select().from(appConfig)
+    expect(row?.aiApiKey).toBe('sk-legacy')
+  })
+
+  it('does not send a ciphertext when the key does not match the envelope', async () => {
+    // A replaced SECRET_ENCRYPTION_KEY. The request must NOT go out with `v1:...`
+    // as the bearer token: the provider would answer 401 and the operator would go
+    // looking at their API key instead of at the server's own configuration.
+    const configured = process.env[SECRET_KEY_ENV]
+    try {
+      process.env[SECRET_KEY_ENV] = 'b'.repeat(SECRET_KEY_HEX_LENGTH)
+      const foreign = encryptSecret('sk-stored')
+      process.env[SECRET_KEY_ENV] = configured
+      await configure({ aiProvider: 'openai', aiEndpoint: '', aiApiKey: foreign })
+
+      const fetchMock = vi
+        .spyOn(global, 'fetch')
+        .mockResolvedValue(openAiAnswer('{"de":{"name":"n"}}'))
+
+      await expect(translateProduct('Web-01', 'A virtual machine')).rejects.toThrow()
+      expect(fetchMock).not.toHaveBeenCalled()
+    } finally {
+      process.env[SECRET_KEY_ENV] = configured
+    }
   })
 })

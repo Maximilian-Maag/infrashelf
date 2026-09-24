@@ -2,6 +2,7 @@ import nodemailer from 'nodemailer'
 import { db } from '@/lib/db/client'
 import { appConfig } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
+import { readAppSecret } from '@/lib/crypto/appSecrets'
 
 interface SmtpSettings {
   host: string
@@ -55,7 +56,10 @@ const getSmtpSettings = async (): Promise<SmtpSettings | null> => {
     port: cfg.smtpPort ?? 0,
     from: cfg.smtpFrom ?? '',
     user: cfg.smtpUser ?? '',
-    pass: cfg.smtpPass ?? '',
+    // Through `readAppSecret`, not off the row: the column holds an envelope since
+    // #556 and plaintext on rows that predate it. Handing the envelope to nodemailer
+    // as a password is a login failure that names the wrong component.
+    pass: (await readAppSecret('smtpPass')) ?? '',
     tls: cfg.smtpTls ?? true,
   }
   return smtpSettingsCache

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import {
   getSmtpConfig,
   updateSmtpConfig,
@@ -8,6 +8,16 @@ import {
 import { db } from '@/lib/db/client'
 import { appConfig, auditLog } from '@/lib/db/schema'
 import { sql, eq } from 'drizzle-orm'
+import { readAppSecret } from '@/lib/crypto/appSecrets'
+import { SECRET_KEY_ENV, decryptSecret, isEncryptedEnvelope } from '@/lib/crypto/secrets'
+
+/** vitest.config.ts sets a key for the whole suite; restore it after meddling. */
+const configuredKey = process.env[SECRET_KEY_ENV]
+
+afterEach(() => {
+  if (configuredKey === undefined) delete process.env[SECRET_KEY_ENV]
+  else process.env[SECRET_KEY_ENV] = configuredKey
+})
 
 // The app_config row with id=1 is seeded once in beforeAll, but the table is
 // not in the TRUNCATE list — so the row persists across tests. Reset it here
@@ -95,7 +105,10 @@ describe('updateSmtpConfig', () => {
     const [row] = await db.select().from(appConfig)
     expect(row?.smtpHost).toBe('smtp2.example.com')
     expect(row?.smtpUser).toBe('u2')
-    expect(row?.smtpPass).toBe('original-secret')
+    // The column holds an envelope since #556, and the value is still the one that
+    // was set: NFA-06.3 is about preservation, not about the encoding.
+    expect(isEncryptedEnvelope(row?.smtpPass as string)).toBe(true)
+    expect(decryptSecret(row?.smtpPass as string)).toBe('original-secret')
   })
 })
 
@@ -143,9 +156,11 @@ describe('updateAiConfig', () => {
       expect(result.data.model).toBe('gpt-4o')
     }
 
-    // Sanity check: DB row also has the apiKey persisted
+    // Sanity check: DB row also has the apiKey persisted — as an envelope, not as
+    // the key itself (#556).
     const rows = await db.select().from(appConfig)
-    expect(rows[0]?.aiApiKey).toBe('k')
+    expect(isEncryptedEnvelope(rows[0]?.aiApiKey as string)).toBe(true)
+    expect(decryptSecret(rows[0]?.aiApiKey as string)).toBe('k')
   })
 
   // NFA-06.3: omitting the credential field preserves the existing stored value
@@ -169,7 +184,8 @@ describe('updateAiConfig', () => {
     expect(row?.aiProvider).toBe('claude')
     expect(row?.aiEndpoint).toBe('https://api.anthropic.com')
     expect(row?.aiModel).toBe('claude-sonnet-4-6')
-    expect(row?.aiApiKey).toBe('sk-original')
+    expect(isEncryptedEnvelope(row?.aiApiKey as string)).toBe(true)
+    expect(decryptSecret(row?.aiApiKey as string)).toBe('sk-original')
   })
 })
 
@@ -211,5 +227,160 @@ describe('clearing a configuration', () => {
       .from(auditLog)
       .where(eq(auditLog.action, 'config.smtp_updated'))
     expect(entry.details).toBe('SMTP turned off')
+  })
+})
+
+/*
+ * #556. `smtp_pass` and `ai_api_key` were written as plain text while the
+ * integration credentials next door went through the encrypted store #111 built,
+ * so a database dump or a support export was a usable mail password and a
+ * billable API key.
+ *
+ * The value is never returned by `getSmtpConfig` / `getAiConfig` — that part was
+ * already right — so what these assert is what reached the COLUMN.
+ */
+describe('the stored secrets of app_config (#556)', () => {
+  it('stores the SMTP password as an envelope, not as the password', async () => {
+    await updateSmtpConfig({
+      host: 'smtp.example.com',
+      port: 587,
+      from: 'no@example.com',
+      password: 'hunter2',
+    })
+
+    const [row] = await db.select().from(appConfig)
+    expect(row?.smtpPass).not.toBe('hunter2')
+    expect(isEncryptedEnvelope(row?.smtpPass as string)).toBe(true)
+    expect(decryptSecret(row?.smtpPass as string)).toBe('hunter2')
+  })
+
+  it('stores the AI key as an envelope', async () => {
+    await updateAiConfig({
+      provider: 'openai',
+      endpoint: 'https://api.openai.com',
+      apiKey: 'sk-live-123',
+      model: 'gpt-4o',
+    })
+
+    const [row] = await db.select().from(appConfig)
+    expect(row?.aiApiKey).not.toBe('sk-live-123')
+    expect(decryptSecret(row?.aiApiKey as string)).toBe('sk-live-123')
+  })
+
+  it('refuses to store a secret when there is no key, leaving the column alone', async () => {
+    await updateSmtpConfig({
+      host: 'smtp.example.com',
+      port: 587,
+      from: 'no@example.com',
+      password: 'first',
+    })
+    const [before] = await db.select().from(appConfig)
+
+    delete process.env[SECRET_KEY_ENV]
+
+    const result = await updateSmtpConfig({
+      host: 'smtp.example.com',
+      port: 587,
+      from: 'no@example.com',
+      password: 'second',
+    })
+
+    // 503, not 400: the form was fine and the server cannot store what it was
+    // given. Refusing is the point — the alternative is a plaintext fallback
+    // indistinguishable from an encrypted column afterwards (#111).
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.status).toBe(503)
+      expect(result.message).toContain(SECRET_KEY_ENV)
+    }
+    // And nothing was written: the refusal happens before the upsert.
+    const [after] = await db.select().from(appConfig)
+    expect(after?.smtpPass).toBe(before?.smtpPass)
+  })
+
+  it('refuses to store an AI key when there is no key', async () => {
+    delete process.env[SECRET_KEY_ENV]
+
+    const result = await updateAiConfig({
+      provider: 'openai',
+      endpoint: 'https://api.openai.com',
+      apiKey: 'sk-live-123',
+      model: 'gpt-4o',
+    })
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.status).toBe(503)
+    const [row] = await db.select().from(appConfig)
+    // Not written as plaintext, and not written as an envelope either: the key
+    // arrived as an update to a form the deployment cannot serve.
+    expect(row?.aiApiKey).toBeNull()
+  })
+
+  it('clears the password when an empty string is sent', async () => {
+    await updateSmtpConfig({
+      host: 'smtp.example.com',
+      port: 587,
+      from: 'no@example.com',
+      password: 'hunter2',
+    })
+
+    await updateSmtpConfig({
+      host: 'smtp.example.com',
+      port: 587,
+      from: 'no@example.com',
+      password: '',
+    })
+
+    // NULL, not an empty envelope: every reader means "not configured" by NULL,
+    // and an envelope of nothing would read back as a stored secret of ''.
+    const [row] = await db.select().from(appConfig)
+    expect(row?.smtpPass).toBeNull()
+    expect(await readAppSecret('smtpPass')).toBeNull()
+  })
+
+  it('clears the AI key when an empty string is sent', async () => {
+    await updateAiConfig({
+      provider: 'openai',
+      endpoint: 'https://api.openai.com',
+      apiKey: 'sk-live-123',
+      model: 'gpt-4o',
+    })
+
+    await updateAiConfig({
+      provider: 'openai',
+      endpoint: 'https://api.openai.com',
+      apiKey: '   ',
+      model: 'gpt-4o',
+    })
+
+    const [row] = await db.select().from(appConfig)
+    expect(row?.aiApiKey).toBeNull()
+    expect(await readAppSecret('aiApiKey')).toBeNull()
+  })
+
+  it('says in the audit log that a secret was cleared rather than replaced', async () => {
+    await updateSmtpConfig({
+      host: 'smtp.example.com',
+      port: 587,
+      from: 'no@example.com',
+      password: 'hunter2',
+    })
+    await updateSmtpConfig({
+      host: 'smtp.example.com',
+      port: 587,
+      from: 'no@example.com',
+      password: '',
+    })
+
+    const entries = await db
+      .select()
+      .from(auditLog)
+      .where(eq(auditLog.action, 'config.smtp_updated'))
+    // Appended in order: the first says it was replaced, the second that it was
+    // cleared. Neither carries the password, which is the other half of the rule.
+    expect(entries.map((e) => e.details)).toEqual([
+      'SMTP set to smtp.example.com:587 (tls true), password replaced',
+      'SMTP set to smtp.example.com:587 (tls true), password cleared',
+    ])
   })
 })

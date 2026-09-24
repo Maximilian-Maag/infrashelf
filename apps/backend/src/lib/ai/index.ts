@@ -2,6 +2,7 @@ import { db } from '@/lib/db/client'
 import { appConfig } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
 import type { AiProviderType } from '@infrashelf/types'
+import { readAppSecret } from '@/lib/crypto/appSecrets'
 
 const LANGUAGES = [
   'de', 'en', 'fr', 'it', 'es', 'pt', 'nl', 'pl', 'cs', 'sk', 'sl', 'hr',
@@ -40,10 +41,16 @@ const loadConfig = async (): Promise<AiConfig> => {
   // fires on a blank value — treat empty/whitespace as "use provider default".
   const configuredEndpoint = cfg?.aiEndpoint?.trim() ?? ''
 
+  // Through `readAppSecret`, not off the row (#556): the column holds an envelope
+  // on rows written since, and plaintext on rows that predate it — and this module
+  // reads the config table directly, so it is one of the two places a stored secret
+  // is turned back into one.
+  const apiKey = (await readAppSecret('aiApiKey')) ?? ''
+
   return {
     provider,
     endpoint: configuredEndpoint || defaultEndpoint(provider),
-    apiKey: cfg?.aiApiKey ?? '',
+    apiKey,
     model: cfg?.aiModel ?? 'gpt-4o-mini',
   }
 }

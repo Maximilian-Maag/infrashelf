@@ -25,6 +25,8 @@ intentional_secret_reads := {
 	"apps/backend/src/lib/auth/sessions.ts tokenHash": "validateSession compares the stored SHA-256 against the hash of the presented token; the row never leaves the function",
 	"apps/backend/src/lib/services/admin/integrations.ts credential": "probeIntegrationById and resolveIntegration decrypt it to build the outbound Authorization header; no route returns a ResolvedIntegration, and the list/get paths project the column away",
 	"apps/backend/src/lib/services/twoFactor.ts secret": "requiresSecondFactor reads it only through isConfirmed — `secret IS NOT NULL AND confirmed_at IS NOT NULL` is what \"2FA is on\" means — and returns a boolean",
+	"apps/backend/src/lib/crypto/appSecrets.ts smtpPass": "the module that owns this column since #556: it reads the value to decrypt it for nodemailer, and in the boot backfill to write an envelope back over it in place; it is never returned to a caller, and the boot log carries a count and no value",
+	"apps/backend/src/lib/crypto/appSecrets.ts aiApiKey": "the module that owns this column since #556: it reads the value to decrypt it for the AI client, and in the boot backfill to write an envelope back over it in place; it is never returned to a caller, and the boot log carries a count and no value",
 }
 
 deny contains v if {

@@ -9,6 +9,7 @@ import {
   isSecretEncryptionConfigured,
 } from '@/lib/crypto/secrets'
 import bcrypt from 'bcryptjs'
+import { encryptLegacyAppSecrets } from '@/lib/crypto/appSecrets'
 import { reportConfigProblems } from '@/lib/config/validate'
 import { insecureTransportRefusal, INSECURE_TRANSPORT_FLAG } from '@/lib/ci/transport'
 
@@ -228,6 +229,17 @@ const bootstrapOnce = async (): Promise<void> => {
   // certainly there. A failure here is a real one — a key that decrypts nothing
   // or a database that will not take the write — so it is not swallowed.
   await encryptLegacyCiTokens()
+
+  // #556: same place, same reason — the SMTP password and the AI key in
+  // `app_config` were stored in plain text while the credentials next door were
+  // encrypted. Reported only when it converted something, so the boot log does not
+  // claim work it did not do.
+  const convertedSecrets = await encryptLegacyAppSecrets()
+  if (convertedSecrets > 0) {
+    console.warn(
+      `[bootstrap] encrypted ${convertedSecrets} stored secret(s) that were kept in plain text (#556)`,
+    )
+  }
 
   // After the migrations, so `ci_sources` is certainly there, and awaited rather
   // than fired and forgotten: the point is that it lands in the boot log next to
