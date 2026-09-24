@@ -1,7 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
-import { infrastructureElements, deploymentEnvironments } from '@/lib/db/schema'
+import { infrastructureElements, deploymentEnvironments, integrations } from '@/lib/db/schema'
 import type { SessionUser } from '@infrashelf/types'
 import {
   createUser, createCategory, createProduct, createCiSource,
@@ -47,6 +47,8 @@ beforeEach(() => {
   // one case's element is still inside the next case's refresh cooldown.
   refreshOutputsLimit.clear()
 })
+
+afterEach(() => vi.restoreAllMocks())
 
 /**
  * Issue #218. Outputs are parsed once, at settle. When something was wrong at
@@ -251,5 +253,121 @@ describe('refreshElementOutputs', () => {
     const [row] = await db.select().from(infrastructureElements).where(eq(infrastructureElements.id, el.id))
     expect(row.outputsError).toMatch(/no pipeline/i)
     expect(fetchJobTraces).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * Issue #111's Loki item: the pipeline log read from Loki rather than from the
+ * provider's job API.
+ *
+ * The wiring is what these cases are for — the environment's integration is what
+ * decides which source a read uses, and the window starts at the run that printed
+ * the outputs. The HTTP response is faked rather than the Loki client, so the
+ * selector and the parameters an operator's Loki would actually receive are part
+ * of what is asserted.
+ */
+describe('refreshElementOutputs — with a Loki bound to the environment (#111)', () => {
+  /** A Loki answer for `elementId`, from the real API's shape. */
+  const lokiStream = (elementId: number, lines: string[]): Response =>
+    new Response(
+      JSON.stringify({
+        status: 'success',
+        data: {
+          resultType: 'streams',
+          result: lines.length
+            ? [
+                {
+                  stream: { element_id: String(elementId) },
+                  values: lines.map((line, i) => [`175870800${String(i).padStart(9, '0')}`, line]),
+                },
+              ]
+            : [],
+        },
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    )
+
+  const addLoki = (environmentId: number) =>
+    db.insert(integrations).values({
+      kind: 'loki',
+      name: 'loki',
+      baseUrl: 'https://loki.example.com',
+      // `none` on purpose: this case is about which source a read uses, not about
+      // decrypting a credential, and it keeps the test out of the secret store.
+      authType: 'none',
+      failureMode: 'best_effort',
+      environmentId,
+    })
+
+  it('reads the element’s log from Loki and stores its outputs', async () => {
+    const { admin, env, el } = await scenario()
+    await addLoki(env.id)
+    const deployedAt = new Date('2026-09-01T00:00:00Z')
+    await db
+      .update(infrastructureElements)
+      .set({ deployedAt })
+      .where(eq(infrastructureElements.id, el.id))
+
+    const fetchMock = vi
+      .spyOn(global, 'fetch')
+      .mockResolvedValue(lokiStream(el.id, ['apply chatter', 'Outputs:', 'ip_address = "10.0.0.7"']))
+
+    const result = await refreshElementOutputs(session(admin), el.id)
+    expect(result.ok).toBe(true)
+
+    const [row] = await db.select().from(infrastructureElements).where(eq(infrastructureElements.id, el.id))
+    expect(row.outputs).toEqual({ ip_address: '10.0.0.7' })
+    expect(row.outputsError).toBeNull()
+
+    // The provider's job API was never asked: this deployment reads from Loki.
+    expect(fetchJobTraces).not.toHaveBeenCalled()
+
+    const url = new URL(String((fetchMock.mock.calls[0] as [unknown])[0]))
+    expect(url.pathname).toBe('/loki/api/v1/query_range')
+    expect(url.searchParams.get('query')).toBe(`{element_id="${el.id}"}`)
+    // The window opens at the run that printed these outputs rather than at the
+    // default week-back, which is why the column is selected at all.
+    expect(url.searchParams.get('start')).toBe(`${BigInt(deployedAt.getTime()) * 1_000_000n}`)
+  })
+
+  it('leaves a deployment without one reading through the CI provider, as before', async () => {
+    const { admin, el } = await scenario()
+    fetchJobTraces.mockResolvedValue(['Outputs:\nip_address = "10.0.0.8"'])
+    const fetchMock = vi.spyOn(global, 'fetch')
+
+    await refreshElementOutputs(session(admin), el.id)
+
+    const [row] = await db.select().from(infrastructureElements).where(eq(infrastructureElements.id, el.id))
+    expect(row.outputs).toEqual({ ip_address: '10.0.0.8' })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('records what Loki said when the read fails, and keeps the outputs it had', async () => {
+    const { admin, env, el } = await scenario()
+    await addLoki(env.id)
+    vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ status: 'error', error: 'Unauthorized' }), {
+        status: 401,
+        headers: { 'content-type': 'application/json' },
+      }),
+    )
+    // Both sources are asked — the CI one is the second source rather than a
+    // dead end — and both are named in what the element records.
+    fetchJobTraces.mockRejectedValue(new Error('GitLab job trace fetch failed: 410'))
+    await db
+      .update(infrastructureElements)
+      .set({ outputs: { ip_address: '10.0.0.1' } })
+      .where(eq(infrastructureElements.id, el.id))
+
+    const result = await refreshElementOutputs(session(admin), el.id)
+    expect(result.ok).toBe(true)
+
+    const [row] = await db.select().from(infrastructureElements).where(eq(infrastructureElements.id, el.id))
+    expect(row.outputs).toEqual({ ip_address: '10.0.0.1' })
+    // The message has to send the operator to the integration, not to the CI
+    // token: the token is not what failed.
+    expect(row.outputsError).toMatch(/Loki: Rejected the stored credential \(HTTP 401\)/)
+    expect(row.outputsError).toMatch(/Admin → Integrations/)
+    expect(row.outputsError).toMatch(/410/)
   })
 })

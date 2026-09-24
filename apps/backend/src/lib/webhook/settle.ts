@@ -5,6 +5,7 @@ import { logAudit } from '@/lib/audit'
 import { readOutputsForElement, outputsUnavailableReason } from '@/lib/webhook/outputs'
 import { sendProvisioningCompleted, sendDecommissioned } from '@/lib/notification'
 import { findProductName, findUserEmail, findCiSourceForEnv } from '@/lib/db/queries'
+import { resolveIntegration } from '@/lib/services/admin/integrations'
 
 /**
  * Deciding "is this run finished?" and acting on it, in one place.
@@ -192,13 +193,19 @@ const recordOutputs = async (
   const allIds = infraElements.map((e) => e.id)
   const ciSource = await findCiSourceForEnv(order.environmentId)
 
+  // Resolved once for the whole order: every element of one order shares its
+  // environment, so every element's log lives in the same Loki (#111). Null when
+  // the deployment has none, which is the arrangement that reads through the CI
+  // provider instead.
+  const loki = await resolveIntegration('loki', order.environmentId)
+
   // Reasons that belong to the environment rather than to one element: no CI
-  // source, a provider whose logs cannot be read, a trigger URL with no project.
-  // One answer for every element of the order.
-  const unavailable = outputsUnavailableReason(ciSource)
-  if (unavailable || !ciSource) {
+  // source and no Loki, a provider whose logs cannot be read, a trigger URL with
+  // no project. One answer for every element of the order.
+  const unavailable = outputsUnavailableReason(ciSource, { loki: loki !== null })
+  if (unavailable) {
     console.warn(`[webhook] Order ${order.id}: ${unavailable}`)
-    await noteOutputsError(allIds, unavailable ?? 'Terraform outputs cannot be collected.')
+    await noteOutputsError(allIds, unavailable)
     return
   }
 
@@ -211,6 +218,7 @@ const recordOutputs = async (
     const { outputs, error } = await readOutputsForElement(ciSource, element.pipelineId, {
       elementId: element.id,
       orderId: order.id,
+      loki,
     })
 
     if (error) {

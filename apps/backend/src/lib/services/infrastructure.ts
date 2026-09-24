@@ -18,9 +18,9 @@ import { TRIGGERING_KEY, TRIGGERING_VALUE } from '@/lib/webhook/settle'
 import { recordOrderPipelineId, finishOrderTriggerRun } from '@/lib/services/pipelineTracking'
 import { triggerProductWebhooksTracked, triggerPipelineStacksTracked } from '@/lib/ci/webhooks'
 import { ELEMENT_SEQUENCE_VAR, STATE_KEY_NAMESPACE_VAR } from '@/lib/ci/stateKey'
-import { withoutReservedCiVariables } from '@/lib/ci/reserved'
+import { withoutReservedCiVariables, ELEMENT_ID_VAR } from '@/lib/ci/reserved'
 import { ok, err, type Result } from '@/lib/services/result'
-import { resolveIntegrationEndpoint } from '@/lib/services/admin/integrations'
+import { resolveIntegrationEndpoint, resolveIntegration } from '@/lib/services/admin/integrations'
 import { elementDashboardLink, type ObservabilityLink } from '@/lib/integrations/grafana'
 import { pageWindow, toPage, LIST_MAX_LIMIT, type Page } from '@/lib/services/page'
 import { trialVariables, trialExpiry } from '@/lib/services/trial'
@@ -473,6 +473,10 @@ export const retryProvisioning = async (
       // the ORIGINAL order id is the point: the retry has to target the same
       // Terraform state the failed attempt was working on.
       ORDER_ID: String(infra.orderId),
+      // This element's own row, for the same reason as at provisioning: it is the
+      // identity a pipeline labels its log stream with, and the one the refreshed
+      // outputs are recorded against (#111).
+      [ELEMENT_ID_VAR]: String(element.id),
       // And the element's own sequence, for the same reason: it is what suffixes
       // the state key, so element 3 retries element 3's state and not element 1's.
       [ELEMENT_SEQUENCE_VAR]: String(element.sequence),
@@ -1022,6 +1026,11 @@ export const refreshElementOutputs = async (
       orderId: infrastructureElements.orderId,
       environmentId: infrastructureElements.environmentId,
       pipelineId: infrastructureElements.pipelineId,
+      // Selected for the Loki window only: the log that carries this element's
+      // outputs is the one its provisioning run printed, so a read that knows
+      // when it deployed asks Loki for a bounded interval instead of the
+      // default window (#111).
+      deployedAt: infrastructureElements.deployedAt,
       // Selected so the response can report what is STORED rather than what this
       // particular read returned. The two differ whenever a read comes back
       // empty, because an empty read deliberately does not overwrite outputs an
@@ -1060,9 +1069,16 @@ export const refreshElementOutputs = async (
   }
 
   const ciSource = await findCiSourceForEnv(row.environmentId)
-  const unavailable = outputsUnavailableReason(ciSource)
-  if (unavailable || !ciSource) {
-    const reason = unavailable ?? 'Terraform outputs cannot be collected.'
+
+  // A deployment whose pipelines ship their logs to Loki does not need a CI
+  // source to have its outputs read (#111), so the integration is resolved before
+  // the reason is asked for — and `null` here is the ordinary "this deployment
+  // reads through the provider instead".
+  const loki = await resolveIntegration('loki', row.environmentId)
+
+  const unavailable = outputsUnavailableReason(ciSource, { loki: loki !== null })
+  if (unavailable) {
+    const reason = unavailable
     await db
       .update(infrastructureElements)
       .set({ outputsError: reason })
@@ -1077,6 +1093,11 @@ export const refreshElementOutputs = async (
   const { outputs, error } = await readOutputsForElement(ciSource, row.pipelineId ?? [], {
     elementId: row.id,
     orderId: row.orderId,
+    loki,
+    // The element's own provisioning run is the one that printed its outputs, so
+    // the Loki window starts there rather than at the default. NULL on a row
+    // provisioned before the column existed, which falls back to the default.
+    since: row.deployedAt ?? undefined,
   })
 
   await db

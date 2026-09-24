@@ -31,7 +31,7 @@ import {
   clearOrderTriggerRun,
 } from '@/lib/services/pipelineTracking'
 import { ELEMENT_SEQUENCE_VAR, STATE_KEY_NAMESPACE_VAR, stateKeyNamespaceFor } from '@/lib/ci/stateKey'
-import { isReservedCiVariable, withoutReservedCiVariables } from '@/lib/ci/reserved'
+import { isReservedCiVariable, withoutReservedCiVariables, ELEMENT_ID_VAR } from '@/lib/ci/reserved'
 import { findProductName, findUserEmail, findUserName, findAdminEmails } from '@/lib/db/queries'
 import { ok, err, type Result } from '@/lib/services/result'
 import { pageWindow, toPage, type Page } from '@/lib/services/page'
@@ -931,6 +931,7 @@ export const provisionOrderElements = async (
     const triggerVars = elementTriggerVariables({
       parameters,
       orderId,
+      elementId: element.id,
       sizeCode,
       sequence,
       isTrial,
@@ -1055,6 +1056,7 @@ export const provisionOrderElements = async (
 const elementTriggerVariables = (input: {
   parameters: Record<string, string>
   orderId: number
+  elementId: number
   sizeCode: string | null
   sequence: number
   isTrial: boolean
@@ -1062,6 +1064,11 @@ const elementTriggerVariables = (input: {
 }): Record<string, string> => ({
   ...withoutReservedCiVariables(input.parameters),
   ORDER_ID: String(input.orderId),
+  // Which element row this run belongs to. It is what a pipeline labels its log
+  // stream with so the portal can read the apply log back out of Loki (#111),
+  // and it is the identity the outputs are recorded against — ORDER_ID cannot
+  // stand in for it, because an order's elements share one (#104).
+  [ELEMENT_ID_VAR]: String(input.elementId),
   // Namespaces this element's Terraform state key, and is stored on the element
   // row so its teardown derives the same one. Same function as the row above,
   // because the two must not drift.

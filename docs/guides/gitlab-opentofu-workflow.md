@@ -405,6 +405,30 @@ infrastructure element, shown in the UI and included in the CSV export. That is 
 `linode/object-storage` does not output an access key, even though both are
 available inside the module.
 
+**Reading the log from Loki instead.** Everything above reads the log back through
+the CI provider's own job API, and only GitLab's serves a job's stdout: GitHub
+hands a run's log back as a redirect to a ZIP, Bitbucket needs every step
+enumerated first — so on those two providers an element never receives its outputs
+at all (#97). A deployment whose pipelines ship their stdout to **Loki** gives the
+portal somewhere to read it whatever the provider is.
+
+Configure the Loki integration for the environment under Admin → Integrations, and
+have each run label the lines it pushes with the element it applied for. The portal
+sends exactly one query, and `element_id` is the whole contract:
+
+```
+{element_id="42"}     # 42 = INFRA_ID, the element the run was triggered for
+```
+
+`INFRA_ID` is passed to every provisioning, retry and destroy trigger for that
+reason. How the lines reach Loki is Loki's own push API — the portal only reads,
+and never writes a log line itself.
+
+Nothing has to be changed in the same release as the integration: a read that finds
+no lines for the element in Loki falls back to the provider's job API, so a
+deployment part-way through the move keeps reporting its outputs, and Loki takes
+over as soon as the pipeline pushes its first run.
+
 ---
 
 ## Step 5: `backend.tf`
@@ -513,8 +537,13 @@ The webshop sends the following CI variables with every pipeline trigger:
 | `TF_STATE_NAME` | Unique state key for this resource | `web-01` |
 | `TF_ACTION` | Always `apply` on provisioning | `apply` |
 | `ORDER_ID` | Order ID from webshop | `99` |
+| `INFRA_ID` | Infrastructure element ID — the row this run is for | `42` |
 | `HOSTNAME` | Order parameter `hostname` | `web-01` |
 | *(any additional parameter)* | Order parameters (uppercased) | |
+
+For an order with a quantity above 1 every element is triggered separately, so
+`INFRA_ID` and `ELEMENT_SEQUENCE` (which suffixes the state key) name the element
+that run belongs to. `ORDER_ID` is the same value for all of them.
 
 For pipeline stacks, additionally:
 
