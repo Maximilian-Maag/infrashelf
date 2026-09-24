@@ -92,13 +92,14 @@ describe('one order, N infrastructure elements (issue #104)', () => {
   it('fans the pipeline trigger out per element, with the element sequence', async () => {
     const { admin, product, env, project } = await setup()
 
-    await createOrder(makeSession(admin), {
+    const result = await createOrder(makeSession(admin), {
       projectId: project.id,
       productId: product.id,
       environmentId: env.id,
       parameters: {},
       quantity: 3,
     })
+    if (!result.ok) throw new Error('order failed')
 
     expect(mockedWebhooks).toHaveBeenCalledTimes(3)
     const sequences = mockedWebhooks.mock.calls.map(
@@ -107,6 +108,19 @@ describe('one order, N infrastructure elements (issue #104)', () => {
     // Distinct per element: this is what makes each element's Terraform state its
     // own rather than the second element applying over the first's.
     expect(sequences).toEqual(['1', '2', '3'])
+
+    // And each run is told WHICH element row it is for (#111). A pipeline labels
+    // its log stream with this so the portal can read the apply log back out of
+    // Loki, and the outputs are recorded against the row with this id — ORDER_ID
+    // cannot stand in for it, because all three of these share one.
+    const elements = await db
+      .select()
+      .from(infrastructureElements)
+      .where(eq(infrastructureElements.orderId, result.data.id))
+      .orderBy(infrastructureElements.sequence)
+    expect(mockedWebhooks.mock.calls.map((call) => (call[2] as Record<string, string>).INFRA_ID)).toEqual(
+      elements.map((el) => String(el.id)),
+    )
   })
 
   it("gives every element its own pipeline ids, and the order their union", async () => {

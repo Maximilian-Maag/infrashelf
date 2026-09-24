@@ -1,6 +1,19 @@
 import { ELEMENT_SEQUENCE_VAR, STATE_KEY_NAMESPACE_VAR } from './stateKey'
 
 /**
+ * The trigger variable carrying the element id.
+ *
+ * The provisioning trigger names the ORDER; this names which of its elements the
+ * run is for, which is the only identity a pipeline has for the row its outputs
+ * are recorded against. Teardown has always sent it (`destroyVariables`), and the
+ * provisioning and retry paths send it since #111: without it a pipeline cannot
+ * label its log stream with `element_id`, which is how the portal reads an
+ * element's apply log out of Loki — and under quantity (#104) an order's elements
+ * share one order id, so ORDER_ID cannot stand in for it.
+ */
+export const ELEMENT_ID_VAR = 'INFRA_ID'
+
+/**
  * The CI trigger variables the server decides, and which a catalogue parameter
  * may therefore never be named after (issue #183).
  *
@@ -44,7 +57,7 @@ const RESERVED_CI_VARIABLES: ReadonlySet<string> = new Set([
   // ORDER_ID and ELEMENT_SEQUENCE both feed the state key.
   'ORDER_ID',
   ELEMENT_SEQUENCE_VAR,
-  'INFRA_ID',
+  ELEMENT_ID_VAR,
   // Whether the run is a time-boxed trial. Duplicated from lib/services/trial so
   // this module stays free of the db-backed service layer; reserved.test.ts
   // asserts the two agree.

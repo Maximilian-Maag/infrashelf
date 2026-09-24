@@ -3,7 +3,7 @@ import { infrastructureElements } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
 import { triggerProductWebhooksTracked, triggerPipelineStacksTracked } from '@/lib/ci/webhooks'
 import { ELEMENT_SEQUENCE_VAR, STATE_KEY_NAMESPACE_VAR } from '@/lib/ci/stateKey'
-import { withoutReservedCiVariables } from '@/lib/ci/reserved'
+import { withoutReservedCiVariables, ELEMENT_ID_VAR } from '@/lib/ci/reserved'
 import {
   beginElementTriggerRun,
   recordElementPipelineId,
@@ -42,7 +42,7 @@ export const destroyVariables = (infra: {
   // destroy runs from.
   ...withoutReservedCiVariables(infra.parameters as Record<string, string>),
   TF_ACTION: 'destroy',
-  INFRA_ID: String(infra.id),
+  [ELEMENT_ID_VAR]: String(infra.id),
   // Pipeline stacks derive TF_STATE_NAME from stateKeyParam ?? ORDER_ID, and the
   // stored parameters do not carry the server-generated order id — so a stack
   // whose stateKeyParam is absent would otherwise destroy an empty/wrong state.

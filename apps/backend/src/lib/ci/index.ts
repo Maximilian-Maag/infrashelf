@@ -1,4 +1,5 @@
 import type { CiProvider, CiProject, CiBranch, CiFile } from '@infrashelf/types'
+import { OUTPUTS_BLOCK_HEADER } from './outputsBlock'
 import {
   triggerGitLabPipeline,
   getGitLabApplyTraces,
@@ -202,7 +203,7 @@ export const parseTofuOutputs = (trace: string): Record<string, string> => {
     const trimmed = line.trim()
 
     if (!inOutputs) {
-      if (/^Outputs:/.test(trimmed)) inOutputs = true
+      if (OUTPUTS_BLOCK_HEADER.test(trimmed)) inOutputs = true
       continue
     }
 
