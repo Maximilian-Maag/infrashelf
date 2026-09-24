@@ -5,6 +5,8 @@ import { ok, type Result } from '@/lib/services/result'
 import { resetSmtpCache } from '@/lib/notification'
 import { logAudit } from '@/lib/audit'
 
+import { prepareAppSecret } from '@/lib/crypto/appSecrets'
+
 export interface SmtpConfig {
   host: string
   port: number
@@ -84,7 +86,15 @@ export const updateSmtpConfig = async (
     smtpUser: input.user ?? '',
     smtpTls: input.tls ?? true,
   }
-  if (input.password !== undefined) setValues.smtpPass = input.password
+  // Encrypted, not stored as given (#556): this column held plain text while the
+  // integration credentials next door were already encrypted, so a database dump
+  // was a usable mail password. A blank value clears it; see `prepareAppSecret`.
+  const replacedPassword = input.password !== undefined ? input.password.trim() !== '' : false
+  if (input.password !== undefined) {
+    const prepared = prepareAppSecret('smtpPass', input.password)
+    if (!prepared.ok) return prepared
+    setValues.smtpPass = prepared.data
+  }
 
   await db
     .insert(appConfig)
@@ -103,7 +113,7 @@ export const updateSmtpConfig = async (
     undefined,
     orNull(input.host) === null
       ? 'SMTP turned off'
-      : `SMTP set to ${input.host}:${input.port} (tls ${input.tls ?? true})${input.password !== undefined ? ', password replaced' : ''}`,
+      : `SMTP set to ${input.host}:${input.port} (tls ${input.tls ?? true})${input.password === undefined ? '' : replacedPassword ? ', password replaced' : ', password cleared'}`,
   )
 
   return ok(undefined)
@@ -141,7 +151,12 @@ export const updateAiConfig = async (
     aiEndpoint: input.endpoint,
     aiModel: orNull(input.model),
   }
-  if (input.apiKey !== undefined) setValues.aiApiKey = input.apiKey
+  const replacedApiKey = input.apiKey !== undefined ? input.apiKey.trim() !== '' : false
+  if (input.apiKey !== undefined) {
+    const prepared = prepareAppSecret('aiApiKey', input.apiKey)
+    if (!prepared.ok) return prepared
+    setValues.aiApiKey = prepared.data
+  }
 
   await db
     .insert(appConfig)
@@ -153,7 +168,7 @@ export const updateAiConfig = async (
     actorId ?? null,
     'config.ai_updated',
     undefined,
-    `AI set to ${input.provider} ${input.model} at ${input.endpoint}${input.apiKey !== undefined ? ', API key replaced' : ''}`,
+    `AI set to ${input.provider} ${input.model} at ${input.endpoint}${input.apiKey === undefined ? '' : replacedApiKey ? ', API key replaced' : ', API key cleared'}`,
   )
 
   return ok(undefined)

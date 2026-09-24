@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 // Mock nodemailer so no real SMTP connection is made
 vi.mock('nodemailer', () => ({
@@ -32,7 +32,10 @@ vi.mock('@/lib/db/client', () => ({
 }))
 
 import nodemailer from 'nodemailer'
+import { encryptSecret } from '@/lib/crypto/secrets'
+import { db } from '@/lib/db/client'
 import {
+  resetSmtpCache,
   sendOrderCreated,
   sendApprovalRequest,
   sendOrderApproved,
@@ -220,5 +223,59 @@ describe('a notification that could not be sent', () => {
     const logged = failToSend()
     await expect(sendOrderCreated('ada@example.org', 'Managed Postgres', 4812)).resolves.toBeUndefined()
     logged.mockRestore()
+  })
+})
+
+/*
+ * #556. The password in the config row is an envelope now, and it is this module
+ * that hands it to nodemailer — so an envelope reaching the SMTP client is a login
+ * failure that names the wrong component.
+ */
+describe('the SMTP password (#556)', () => {
+  const env = ['SMTP_HOST', 'SMTP_PORT', 'SMTP_FROM'] as const
+  const saved: Record<string, string | undefined> = {}
+
+  beforeEach(() => {
+    for (const key of env) {
+      saved[key] = process.env[key]
+      delete process.env[key]
+    }
+    resetSmtpCache()
+  })
+
+  afterEach(() => {
+    for (const key of env) {
+      if (saved[key] === undefined) delete process.env[key]
+      else process.env[key] = saved[key]
+    }
+  })
+
+  it('gives nodemailer the decrypted password', async () => {
+    vi.mocked(db.select).mockReturnValue({
+      from: () => ({
+        where: () => ({
+          limit: async () => [
+            {
+              smtpHost: 'smtp.test.dev',
+              smtpPort: 587,
+              smtpFrom: 'noreply@test.dev',
+              smtpUser: 'smtp-user',
+              value: encryptSecret('hunter2'),
+              smtpTls: false,
+            },
+          ],
+        }),
+      }),
+    } as never)
+
+    await sendApprovalRequest('admin@test.dev', 'My Product', 42, 'Alice')
+
+    // Sending is fire-and-forget from the caller's point of view, so the transport
+    // is built in a microtask after the await above.
+    await vi.waitFor(() =>
+      expect(vi.mocked(nodemailer.createTransport)).toHaveBeenCalledWith(
+        expect.objectContaining({ auth: { user: 'smtp-user', pass: 'hunter2' } }),
+      ),
+    )
   })
 })
