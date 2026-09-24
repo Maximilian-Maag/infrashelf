@@ -121,16 +121,48 @@ describe('refreshRates', () => {
     }
   })
 
-  it('writes nothing and reports success for an EMPTY map, which is #554', async () => {
-    // Pinned deliberately, because it is a finding rather than a contract: a
-    // provider answering `{ "rates": {} }` passes the shape check above, writes no
-    // rows, and resolves — so the caller's "rates refreshed" is untrue and nothing
-    // anywhere says so (#554). Whoever fixes that flips this expectation.
-    // (Also true of an array: `typeof [] === 'object'`, and `Object.entries([])` is
-    // empty — the same nothing, from a body that looks even more like data.)
+  it('refuses an EMPTY map rather than reporting a refresh that did nothing', async () => {
+    // #554: `{ "rates": {} }` used to pass the shape check, write no rows and
+    // RESOLVE — so a provider that changed shape left yesterday's rates in place
+    // while the caller reported success, and every cost figure converted through
+    // them. A real answer carries 150+ currencies.
     vi.spyOn(global, 'fetch').mockResolvedValue(jsonRes({ rates: {} }))
 
-    await expect(refreshRates()).resolves.toBeUndefined()
+    await expect(refreshRates()).rejects.toThrow('The exchange rate API returned no rates')
     expect(await db.select().from(exchangeRates)).toHaveLength(0)
+  })
+
+  it('refuses an array of rates as a shape it does not know', async () => {
+    // `typeof [] === 'object'`, so an array of `{ code, rate }` objects passed the
+    // old check and produced the same nothing — from a body that looks even more
+    // like data.
+    vi.spyOn(global, 'fetch').mockResolvedValue(jsonRes({ rates: [{ code: 'USD', rate: 1.1 }] }))
+
+    await expect(refreshRates()).rejects.toThrow('Invalid exchange rate API response')
+    expect(await db.select().from(exchangeRates)).toHaveLength(0)
+  })
+
+  it('refuses an entry that is not a positive number, and writes none of the table', async () => {
+    // `String({})` is '[object Object]', which the numeric column rejects in the
+    // middle of the loop: the refresh failed with half the table refreshed, some of
+    // it written minutes and some of it months ago. Refusing up front is what makes
+    // "the refresh failed" mean the rates are all still the previous ones.
+    for (const bad of ['1.1', null, {}, [], -1, 0, Number.NaN]) {
+      vi.spyOn(global, 'fetch').mockResolvedValue(jsonRes({ rates: { USD: bad, CHF: 0.95 } }))
+
+      await expect(refreshRates(), JSON.stringify(bad)).rejects.toThrow('Invalid exchange rate for USD')
+      expect(await db.select().from(exchangeRates), JSON.stringify(bad)).toHaveLength(0)
+      vi.restoreAllMocks()
+    }
+  })
+
+  it('answers the number of rates it wrote', async () => {
+    // The count the audit line reports. It used to be `rows.length` — the size of
+    // the table — so the two numbers below are the ones that used to be confused.
+    await db.insert(exchangeRates).values({ currencyCode: 'SEK', rate: '11.5' })
+    vi.spyOn(global, 'fetch').mockResolvedValue(jsonRes({ rates: { USD: 1.1, CHF: 0.95 } }))
+
+    await expect(refreshRates()).resolves.toBe(2)
+    expect(await db.select().from(exchangeRates)).toHaveLength(3)
   })
 })

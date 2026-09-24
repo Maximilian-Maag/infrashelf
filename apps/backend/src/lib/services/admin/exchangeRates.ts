@@ -17,7 +17,10 @@ export const getExchangeRates = async (): Promise<Result<ExchangeRate[]>> => {
 export const refreshExchangeRates = async (
   actorId?: number,
 ): Promise<Result<ExchangeRate[]>> => {
-  await refreshRates()
+  // What the refresh WROTE, not what the table holds afterwards: the audit line
+  // used to report `rows.length`, so a refresh that wrote nothing still recorded
+  // "152 rate(s) refreshed" — the same untrue success #554 was about, one layer up.
+  const written = await refreshRates()
 
   const rows = await db
     .select()
@@ -26,7 +29,7 @@ export const refreshExchangeRates = async (
 
   // Rates decide what every order costs, so a manual refresh is a mutation worth
   // recording — the count, not the rates themselves, which the table already has.
-  await logAudit(actorId ?? null, 'exchange_rate.refreshed', undefined, `${rows.length} rate(s) refreshed`)
+  await logAudit(actorId ?? null, 'exchange_rate.refreshed', undefined, `${written} rate(s) refreshed`)
 
   return ok(rows)
 }
