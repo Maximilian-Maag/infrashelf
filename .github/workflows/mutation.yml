@@ -73,7 +73,42 @@ jobs:
           key: stryker-${{ matrix.app }}-${{ github.run_number }}
           restore-keys: stryker-${{ matrix.app }}-
 
+      # A `scope` is one string for a two-app matrix, and Stryker treats a glob
+      # that matches nothing as a configuration error — "No tests were executed.
+      # Stryker will exit prematurely" — not as "nothing to do". So a scoped run
+      # for a backend file ran the backend leg fine and FAILED the frontend leg,
+      # which marks the whole run failed and buries the number the run existed to
+      # produce (#561). A leg the scope does not name should skip itself and say
+      # so; that is what the person pressing the button meant.
+      #
+      # Matched with a shell glob rather than `compgen`/`find` so the answer is
+      # the same one Stryker will get: a pattern that matches nothing stays
+      # literal, and `-e` on it is false.
+      - name: Does the scope name anything here?
+        id: scope
+        working-directory: apps/${{ matrix.app }}
+        env:
+          SCOPE: ${{ inputs.scope }}
+        run: |
+          if [ -z "${SCOPE:-}" ]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          found=false
+          for pattern in $SCOPE; do
+            for match in $pattern; do
+              if [ -e "$match" ]; then found=true; fi
+            done
+          done
+          if [ "$found" = false ]; then
+            echo "::notice::scope '${SCOPE}' names no file in apps/${{ matrix.app }} — this leg has nothing to mutate"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Run Stryker
+        if: steps.scope.outputs.skip != 'true'
         working-directory: apps/${{ matrix.app }}
         env:
           # Only the backend leg uses it; harmless for the frontend.
@@ -112,7 +147,7 @@ jobs:
       # than read from a machine-readable file because Stryker's JSON report
       # carries the per-mutant verdicts, not the computed score.
       - name: Summarise
-        if: always()
+        if: always() && steps.scope.outputs.skip != 'true'
         working-directory: apps/${{ matrix.app }}
         run: |
           # `stryker.log` is a TERMINAL transcript, not a text file. The progress
@@ -155,7 +190,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload the HTML report
-        if: always()
+        if: always() && steps.scope.outputs.skip != 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: mutation-report-${{ matrix.app }}
