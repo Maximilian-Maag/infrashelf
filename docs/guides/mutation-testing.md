@@ -126,6 +126,23 @@ What costs the hours is that every mutant reruns route tests against a live
 Postgres at roughly 6s a piece, so the lever that still works is scope: prefer
 `--mutate` on the file you are actually changing.
 
+### Scoring one file
+
+The nightly judges everything; when you want a number for one file — the file you
+just wrote tests for, say — dispatch the workflow with a scope:
+
+```bash
+gh workflow run mutation.yml -f scope='src/lib/services/commitGates.ts'
+```
+
+The scope overrides `mutate` for BOTH legs of the matrix, and each leg checks
+whether the scope names a file of its own before it starts Stryker: a leg with no
+match skips itself with a `::notice::` and the run stays green, because a glob
+that matches nothing is a configuration error to Stryker ("No tests were
+executed"), not a no-op. Score the file in the leg that owns it; read the number
+from the job summary, or `incremental.json` in the `mutation-report-<app>`
+artifact when you want it per file.
+
 ---
 
 ## In CI
