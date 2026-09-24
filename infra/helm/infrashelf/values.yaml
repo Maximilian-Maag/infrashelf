@@ -98,6 +98,18 @@ driftReport:
   # same value on the infra-templates pipeline schedule.
   secret: ""
 
+# ── Metrics (issue #548) ──────────────────────────────────────────────────────
+# Bearer token for GET /api/internal/metrics: the endpoint the Prometheus a
+# deployment runs scrapes, and the metric source for the two dashboards in
+# infra/grafana. Prometheus and Grafana both take a bearer credential directly,
+# so there is nothing else to wire here — no exporter sidecar, no chart change.
+#
+# Blank leaves the endpoint disabled (503), which is the safe default: the
+# response describes the estate, so it must not be readable anonymously. Scrape
+# config, datasource and mounting instructions: infra/grafana/README.md.
+metrics:
+  secret: ""
+
 # ── Backend ───────────────────────────────────────────────────────────────────
 backend:
   replicaCount: 2

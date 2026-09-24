@@ -172,15 +172,16 @@ describe('the OpenAPI spec covers the routes', () => {
    * Deliberately undocumented, and named here so the exclusion is a decision
    * rather than an omission.
    *
-   * These are called by the scheduler and by pipelines, not by clients: they
-   * authenticate with an internal token rather than a session, and their bodies
-   * are machine-written reports (a drift report, a sweep result). Publishing them
-   * in a contract meant for clients would document an interface nobody should
-   * call, and the spec has one security scheme — `BearerAuth`, a session JWT —
-   * that would be wrong for them. `GET /internal/drift-targets`,
-   * `POST /internal/drift-report`, `POST /internal/holiday-refresh` and
-   * `POST /internal/deployment-window-sweep` are the whole set; a new one has to
-   * be added here on purpose.
+   * These are called by the scheduler, by pipelines and by a metrics scraper,
+   * not by clients: they authenticate with an internal token rather than a
+   * session, and their bodies are machine-written reports (a drift report, a
+   * sweep result) or a machine-read exposition format. Publishing them in a
+   * contract meant for clients would document an interface nobody should call,
+   * and the spec has one security scheme — `BearerAuth`, a session JWT — that
+   * would be wrong for them. `GET /internal/drift-targets`,
+   * `POST /internal/drift-report`, `POST /internal/holiday-refresh`,
+   * `POST /internal/deployment-window-sweep` and `GET /internal/metrics` (#548)
+   * are the whole set; a new one has to be added here on purpose.
    */
   const INTERNAL = ['/internal/']
 

@@ -1,0 +1,31 @@
+# The Prometheus the dashboards read (#548).
+#
+# The UID is part of the contract: every panel in both dashboards names it, and
+# a datasource provisioned under a different UID leaves the dashboards rendering
+# "Datasource infrashelf-prometheus was not found" on every panel. Rename it here
+# and the dashboards' own `datasource` variable can point elsewhere from the UI
+# without editing JSON.
+#
+# $PROMETHEUS_URL and $METRICS_SECRET are Grafana's own environment-variable
+# interpolation, read from the Grafana process rather than from this file. The
+# token is `METRICS_SECRET` from the backend (`apps/backend/src/app/api/internal/
+# metrics/route.ts`): Prometheus and Grafana both take a bearer credential as
+# first-class configuration, which is why that endpoint speaks `Authorization`
+# while the sweep endpoints speak `X-…-Secret`.
+apiVersion: 1
+
+datasources:
+  - name: InfraShelf
+    uid: infrashelf-prometheus
+    type: prometheus
+    access: proxy
+    url: $PROMETHEUS_URL
+    isDefault: true
+    jsonData:
+      # POST because a selector for a large estate can exceed what a proxy will
+      # put on a request line.
+      httpMethod: POST
+      httpHeaderName1: Authorization
+      timeInterval: 60s
+    secureJsonData:
+      httpHeaderValue1: Bearer $METRICS_SECRET

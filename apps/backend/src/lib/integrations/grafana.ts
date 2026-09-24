@@ -27,11 +27,14 @@ import { integrationUrl } from '@/lib/integrations/http'
  *
  * These two UIDs are the contract between the portal and the Grafana a deployment
  * points it at: they are what the link names, and what a dashboard has to carry to
- * be worth linking to. What is NOT in this repository yet is the dashboards
- * themselves (#548) — a deployment that has not provisioned them gets a link
- * Grafana answers 404 for, which is visible and fixable by importing them, where a
- * link into nothing at all would be invisible. Writing panels before the metric
- * source exists (#117) would be inventing the answer #548 has to give.
+ * be worth linking to. The dashboards themselves now ship in this repository
+ * (#548) — `infra/grafana/dashboards/<uid>.json`, provisioned by the files beside
+ * them, reading the portal's own metrics endpoint (`/api/internal/metrics`) —
+ * and `src/lib/metrics/dashboards.test.ts` reads them back to check that the
+ * variables sent below, the window below and the metric names in their panels all
+ * still agree with this file. A dashboard that disagrees with the portal loads
+ * perfectly and filters nothing, which is why the agreement is a test rather than
+ * a sentence in a README.
  */
 export const ELEMENT_DASHBOARD_UID = 'infrashelf-element'
 export const PROJECT_DASHBOARD_UID = 'infrashelf-project'
