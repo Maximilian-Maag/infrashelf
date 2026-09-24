@@ -1,5 +1,13 @@
 # Test Plan & Recommendations — 2026-08-12
 
+> This is a dated plan: what was recommended on the day it was written, and what
+> the PR that carried it left behind. It is kept because the reasoning is worth
+> keeping. For how the suite works NOW — the levels, the commands, the gates that
+> enforce them and the traps — read **[guides/testing.md](guides/testing.md)**,
+> and for the mutation score **[guides/mutation-testing.md](guides/mutation-testing.md)**.
+> The numbers below are stale by design; the command beside each is the part that
+> stays true.
+
 Recommended tests across the three levels. The **baseline** column is the
 pre-audit snapshot that motivated this plan and is frozen; the **at the time**
 column is what the PR this document accompanied left behind.
