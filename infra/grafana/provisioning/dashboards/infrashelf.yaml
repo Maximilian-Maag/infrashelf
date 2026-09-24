@@ -1,0 +1,27 @@
+# Grafana provisioning for the two InfraShelf dashboards (#548).
+#
+# Mount this directory at /etc/grafana/provisioning/dashboards in the Grafana
+# container and the dashboards JSON beside it at /var/lib/grafana/dashboards:
+#
+#   ./infra/grafana/provisioning:/etc/grafana/provisioning
+#   ./infra/grafana/dashboards:/var/lib/grafana/dashboards
+#
+# `allowUiUpdates: false` is the point of dashboards-as-code: an edit made in the
+# Grafana UI is overwritten on the next provision, so the file in this repository
+# stays the one answer. `disableDeletion: true` keeps a dashboard somebody
+# removed by hand from taking the provisioning with it on the next restart.
+apiVersion: 1
+
+providers:
+  - name: infrashelf
+    orgId: 1
+    folder: InfraShelf
+    folderUid: infrashelf
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    updateIntervalSeconds: 60
+    options:
+      path: /var/lib/grafana/dashboards
+      # The dashboards are two files in one directory, flat by design.
+      foldersFromFilesStructure: false

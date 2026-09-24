@@ -13,11 +13,12 @@ extendZodWithOpenApi(z)
 /*
  * Internal endpoints are deliberately NOT registered here (#534).
  *
- * `/internal/*` is called by the scheduler and by pipelines with an internal
- * token, never by a client with a session. The spec has exactly one security
+ * `/internal/*` is called by the scheduler, by pipelines and by a metrics
+ * scraper, never by a client with a session. The spec has exactly one security
  * scheme — `BearerAuth`, a session JWT — which would be wrong for them, and their
- * bodies are machine-written reports rather than an interface anybody should
- * call. `contract.test.ts` asserts the exclusion by name, so adding a fifth one
+ * bodies are machine-written reports (or, for `GET /internal/metrics`, a
+ * machine-read exposition format, #548) rather than an interface anybody should
+ * call. `contract.test.ts` asserts the exclusion by name, so adding a sixth one
  * is a decision somebody makes rather than an oversight nobody notices.
  */
 
@@ -41,8 +42,9 @@ const observabilityLinkSchema = z.object({
   dashboardUid: z.string().openapi({
     description:
       'Which dashboard the url points at. The UID is the portal’s contract with the ' +
-      'Grafana the deployment configures; the dashboards themselves are not in this ' +
-      'repository yet (#548), so a deployment that has not imported them answers 404.',
+      'Grafana the deployment configures: the dashboards carrying these UIDs ship in ' +
+      'this repository (#548, infra/grafana) and read the portal’s own metrics, so a ' +
+      'deployment that has not provisioned them from there answers 404.',
   }),
 })
 

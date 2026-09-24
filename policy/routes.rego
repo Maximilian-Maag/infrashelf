@@ -31,6 +31,7 @@ public_routes := {
 	"internal/deployment-window-sweep": "driven by a scheduler with no user to be; authenticated by DEPLOYMENT_WINDOW_SWEEP_SECRET and disabled outright when it is unset — the same shape as internal/decommission-sweep, which it copies deliberately",
 	"internal/holiday-refresh": "the same feature's other periodic job (#330): pulls the holiday feed into the database so the decision path never waits on a third party. Authenticated by DEPLOYMENT_WINDOW_SWEEP_SECRET — deliberately the same secret as the sweep it runs beside, because a secret per endpoint is a secret somebody forgets to set — and disabled outright when it is unset",
 	"internal/drift-targets": "the other half of the same conversation with the same caller — the work list that pipeline plans against; same secret, same 503 when unset, and it answers for ACTIVE elements only",
+	"internal/metrics": "read by a Prometheus scraping the portal (#548), which has no user to be and takes a bearer credential as first-class configuration. Authenticated by METRICS_SECRET and disabled outright (503) when it is unset, because the response describes the estate — how many elements, which projects have drifted, which integrations are failing — rather than a health check",
 }
 
 deny contains v if {

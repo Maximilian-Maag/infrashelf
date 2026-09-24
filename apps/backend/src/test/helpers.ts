@@ -335,6 +335,14 @@ export const createInfraElement = async (
     stateKeys?: Record<string, string>
     /** What the last drift report said (#108), as the sweep writes it. */
     lastRefreshOutcome?: string
+    /**
+     * When that report reached this element.
+     *
+     * Settable because the metrics endpoint (#548) reads the timestamp and the
+     * outcome as a pair, and a fixture that can set one but not the other can
+     * only test the shape where the report is half-written.
+     */
+    lastRefreshedAt?: Date
     driftDetectedAt?: Date
     driftSummary?: schema.DriftSummary
     /** A stored policy verdict (#110 slice 6), as the sweep writes it. */
@@ -364,6 +372,7 @@ export const createInfraElement = async (
       ...(overrides?.lastRefreshOutcome !== undefined
         ? { lastRefreshOutcome: overrides.lastRefreshOutcome as schema.InfrastructureElement['lastRefreshOutcome'] }
         : {}),
+      ...(overrides?.lastRefreshedAt ? { lastRefreshedAt: overrides.lastRefreshedAt } : {}),
       ...(overrides?.driftDetectedAt ? { driftDetectedAt: overrides.driftDetectedAt } : {}),
       ...(overrides?.driftSummary ? { driftSummary: overrides.driftSummary } : {}),
       ...(overrides?.policyCheckedAt ? { policyCheckedAt: overrides.policyCheckedAt } : {}),
