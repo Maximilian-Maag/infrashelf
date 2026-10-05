@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync, readdirSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { join } from 'node:path'
 import { METRIC_NAMES } from './catalog'
 import {
@@ -13,7 +14,6 @@ import {
  * The contract between the portal, the metric endpoint and the two dashboards
  * somebody provisions into their Grafana (#548).
  *
- * ── Why this is a test and not a paragraph in a README ──────────────────────
  *
  * Nothing here is checked by anything that runs: Grafana loads a dashboard whose
  * PromQL names a metric that does not exist and renders "No data" for ever, which
@@ -26,9 +26,20 @@ import {
  * The dashboards live in `infra/`, the metrics in `src/lib/metrics`, and the
  * links in `src/lib/integrations` — three artefacts that never meet at runtime
  * in a way that would complain, which is exactly the shape that needs a test.
+ *
  */
-const DASHBOARD_DIR = join(process.cwd(), '..', '..', 'infra', 'grafana', 'dashboards')
-const PROVISIONING = join(process.cwd(), '..', '..', 'infra', 'grafana', 'provisioning')
+// import.meta.url rather than process.cwd(): Stryker copies each mutant into
+// .stryker-tmp/sandbox-*/ and runs vitest from there. process.cwd() inside the
+// sandbox does not point at the workspace root, so the two-level-up path to
+// infra/grafana/ resolves to a path that does not exist and Stryker fails the
+// dry run before mutating anything. import.meta.url is file-relative and
+// survives the sandbox copy unchanged.
+//
+// This file lives at apps/backend/src/lib/metrics/dashboards.test.ts.
+// Four levels up (metrics/ -> lib/ -> src/ -> apps/backend/) reaches the repo root.
+const INFRA_ROOT = fileURLToPath(new URL('../../../../infra', import.meta.url))
+const DASHBOARD_DIR = join(INFRA_ROOT, 'grafana', 'dashboards')
+const PROVISIONING = join(INFRA_ROOT, 'grafana', 'provisioning')
 
 interface Dashboard {
   uid: string
