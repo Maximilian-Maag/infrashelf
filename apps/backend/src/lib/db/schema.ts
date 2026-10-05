@@ -550,6 +550,20 @@ export const integrations = pgTable('integrations', {
    */
   username: text().notNull().default(''),
   /**
+   * Loki multi-tenancy: the value sent as `X-Scope-OrgID` on every query.
+   *
+   * NULL means single-tenant — no header is sent. A non-NULL value is forwarded
+   * verbatim; the registry does not validate it, because a tenant id is an
+   * opaque label whose meaning is defined by the Loki operator, not the portal.
+   *
+   * Only Loki reads this field — Foreman, Grafana, etc. ignore it. Stored on the
+   * shared row rather than a separate table so `resolveIntegration` keeps
+   * returning one record instead of a join, and the admin form stays one page.
+   *
+   * Related: issue #551.
+   */
+  tenant: text(),
+  /**
    * The token or password, AES-256-GCM encrypted (see lib/crypto/secrets.ts for
    * the envelope). Never selected by the list/get paths and never returned by
    * the API — the only reader is `resolveIntegration`, which hands it to the
@@ -559,7 +573,7 @@ export const integrations = pgTable('integrations', {
    * health endpoint) does not have to store an empty ciphertext. NOT so a row
    * can outlive a revoked credential, which is what this said before #195: an
    * integration that claims bearer auth with nothing to send is not a row in a
-   * waiting state, it is a row that sends `Authorization: Bearer ` and blocks
+   * waiting state, it is a row that sends `Authorization: Bearer *** and blocks
    * whatever it gates. `integrations_credential_check` below forbids it.
    */
   credential: text(),

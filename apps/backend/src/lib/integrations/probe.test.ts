@@ -10,6 +10,7 @@ const target = (overrides: Partial<ProbeTarget> = {}): ProbeTarget => ({
   authType: 'bearer',
   username: '',
   credential: 'a-token',
+  tenant: null,
   ...overrides,
 })
 

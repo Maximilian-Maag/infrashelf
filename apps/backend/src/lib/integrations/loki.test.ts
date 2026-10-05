@@ -18,6 +18,7 @@ const target = (overrides: Partial<IntegrationTarget> = {}): IntegrationTarget =
   authType: 'bearer',
   username: '',
   credential: 'a-token',
+  tenant: null,
   ...overrides,
 })
 
@@ -228,5 +229,27 @@ describe('queryLokiLogs', () => {
     const result = await queryLokiLogs(target({ baseUrl: 'file:///etc' }), elementLogSelector(17), window)
 
     expect(result.ok === false && result.error).toMatch(/Disallowed URL protocol/)
+  })
+
+  it('sends X-Scope-OrgID when a tenant is configured (#551)', async () => {
+    // A multi-tenant Loki scopes every query to one org by this header.
+    // Without it the query lands on the default tenant — the wrong logs, or none.
+    const fetchMock = vi.spyOn(global, 'fetch').mockResolvedValue(streamsRes([]))
+
+    await queryLokiLogs(target({ tenant: 'infra-prod' }), elementLogSelector(1), window)
+
+    const [, init] = fetchMock.mock.calls[0] as [unknown, RequestInit]
+    expect((init.headers as Record<string, string>)['X-Scope-OrgID']).toBe('infra-prod')
+  })
+
+  it('omits X-Scope-OrgID when tenant is null — single-tenant behaviour (#551)', async () => {
+    // Sending a header with any value routes the request to that tenant.
+    // An absent header is the contract for single-tenant Loki.
+    const fetchMock = vi.spyOn(global, 'fetch').mockResolvedValue(streamsRes([]))
+
+    await queryLokiLogs(target({ tenant: null }), elementLogSelector(1), window)
+
+    const [, init] = fetchMock.mock.calls[0] as [unknown, RequestInit]
+    expect((init.headers as Record<string, string>)['X-Scope-OrgID']).toBeUndefined()
   })
 })

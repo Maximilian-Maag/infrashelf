@@ -25,6 +25,7 @@ const target = (over: Partial<IntegrationTarget> = {}): IntegrationTarget => ({
   authType: 'bearer',
   username: 'svc',
   credential: 'a-token',
+  tenant: null,
   ...over,
 })
 

@@ -38,6 +38,7 @@ const loki = (over: Partial<IntegrationTarget> = {}): IntegrationTarget => ({
   authType: 'bearer',
   username: '',
   credential: 'a-token',
+  tenant: null,
   ...over,
 })
 

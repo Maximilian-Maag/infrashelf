@@ -220,6 +220,26 @@ describe('createIntegration', () => {
     // The audit log is exportable; it must not become the plaintext store.
     expect(entries[0].details).not.toContain('glpat-super-secret')
   })
+
+  it('stores and returns a Loki tenant id (#551)', async () => {
+    // The tenant controls which X-Scope-OrgID is sent on every Loki query.
+    // It travels round-trip through the API and is visible on the row.
+    const actor = await rootId()
+    const created = await createIntegration(
+      actor,
+      input({ kind: 'loki', authType: 'none', credential: undefined, tenant: 'infra-prod' }),
+    )
+    if (!created.ok) throw new Error(JSON.stringify(created))
+    expect(created.data.tenant).toBe('infra-prod')
+  })
+
+  it('stores null and returns null when no tenant is given (#551)', async () => {
+    // Null is the single-tenant default: no X-Scope-OrgID is sent.
+    const actor = await rootId()
+    const created = await createIntegration(actor, input())
+    if (!created.ok) throw new Error(JSON.stringify(created))
+    expect(created.data.tenant).toBeNull()
+  })
 })
 
 describe('createIntegration without SECRET_ENCRYPTION_KEY', () => {

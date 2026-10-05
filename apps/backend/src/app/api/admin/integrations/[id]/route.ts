@@ -21,6 +21,8 @@ const UpdateIntegrationSchema = z.object({
   // Sending this rotates the credential; omitting it leaves the stored one
   // alone. There is no way to say "clear it" — that is what authType 'none' is.
   credential: z.string().min(1).optional(),
+  // Loki multi-tenancy (#551). Null or empty string clears the tenant.
+  tenant: z.string().nullable().optional(),
   environmentId: z.number().int().positive().nullable().optional(),
   enabled: z.boolean().optional(),
   failureMode: z.enum(INTEGRATION_FAILURE_MODES).optional(),

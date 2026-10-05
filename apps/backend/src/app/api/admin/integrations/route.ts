@@ -23,6 +23,8 @@ const CreateIntegrationSchema = z.object({
   authType: z.enum(INTEGRATION_AUTH_TYPES),
   username: z.string().optional(),
   credential: z.string().min(1).optional(),
+  // Loki multi-tenancy (#551). Empty string is treated as null (single-tenant).
+  tenant: z.string().nullable().optional(),
   // Explicit null is how "portal-wide" is said; omitting it means the same, but
   // nullable() lets a form submit the field it renders.
   environmentId: z.number().int().positive().nullable().optional(),
