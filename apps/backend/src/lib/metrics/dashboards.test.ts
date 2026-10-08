@@ -36,8 +36,9 @@ import {
 // survives the sandbox copy unchanged.
 //
 // This file lives at apps/backend/src/lib/metrics/dashboards.test.ts.
-// Four levels up (metrics/ -> lib/ -> src/ -> apps/backend/) reaches the repo root.
-const INFRA_ROOT = fileURLToPath(new URL('../../../../infra', import.meta.url))
+// Five levels up (metrics/ -> lib/ -> src/ -> backend/ -> apps/ -> repo root)
+// reaches the repo root, where infra/ lives.
+const INFRA_ROOT = fileURLToPath(new URL('../../../../../infra', import.meta.url))
 const DASHBOARD_DIR = join(INFRA_ROOT, 'grafana', 'dashboards')
 const PROVISIONING = join(INFRA_ROOT, 'grafana', 'provisioning')
 
