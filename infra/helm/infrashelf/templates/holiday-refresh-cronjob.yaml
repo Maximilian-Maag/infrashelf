@@ -82,7 +82,7 @@ spec:
                 - name: DEPLOYMENT_WINDOW_SWEEP_SECRET
                   valueFrom:
                     secretKeyRef:
-                      name: {{ include "infrashelf.backend.fullname" . }}
+                      name: {{ include "infrashelf.backend.secretName" . }}
                       key: DEPLOYMENT_WINDOW_SWEEP_SECRET
               {{- with .Values.deploymentWindowSweep.resources }}
               resources:

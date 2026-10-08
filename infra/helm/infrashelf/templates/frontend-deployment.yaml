@@ -42,7 +42,7 @@ spec:
             - name: NEXTAUTH_SECRET
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "infrashelf.frontend.fullname" . }}
+                  name: {{ include "infrashelf.frontend.secretName" . }}
                   key: NEXTAUTH_SECRET
           livenessProbe:
             httpGet:

@@ -81,6 +81,33 @@ app.kubernetes.io/component: backend
 {{- end }}
 
 {{/*
+Name of the Secret holding the backend's environment (DATABASE_URL, JWT_SECRET,
+the sweep/drift/metrics secrets). When `backend.existingSecret` is set the chart
+does not create a Secret of its own and every reference points at that one —
+which is how one release per environment (dev, staging, prod) is bound to that
+environment's own database credential without the URL ever entering a values
+file. Empty means the chart creates and owns the Secret, as before.
+*/}}
+{{- define "infrashelf.backend.secretName" -}}
+{{- if .Values.backend.existingSecret -}}
+{{- .Values.backend.existingSecret | trunc 63 | trimSuffix "-" -}}
+{{- else -}}
+{{- include "infrashelf.backend.fullname" . -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Same, for the frontend's Secret (NEXTAUTH_SECRET).
+*/}}
+{{- define "infrashelf.frontend.secretName" -}}
+{{- if .Values.frontend.existingSecret -}}
+{{- .Values.frontend.existingSecret | trunc 63 | trimSuffix "-" -}}
+{{- else -}}
+{{- include "infrashelf.frontend.fullname" . -}}
+{{- end -}}
+{{- end }}
+
+{{/*
 Frontend image reference.
 */}}
 {{- define "infrashelf.frontend.image" -}}

@@ -44,17 +44,17 @@ spec:
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "infrashelf.backend.fullname" . }}
+                  name: {{ include "infrashelf.backend.secretName" . }}
                   key: DATABASE_URL
             - name: JWT_SECRET
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "infrashelf.backend.fullname" . }}
+                  name: {{ include "infrashelf.backend.secretName" . }}
                   key: JWT_SECRET
             - name: ADMIN_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "infrashelf.backend.fullname" . }}
+                  name: {{ include "infrashelf.backend.secretName" . }}
                   key: ADMIN_PASSWORD
           {{- with .Values.backend.resources }}
           resources:

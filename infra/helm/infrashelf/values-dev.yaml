@@ -1,0 +1,49 @@
+# Development environment overlay.
+#
+#   helm install infrashelf-dev ./infrashelf \
+#     -f ./infrashelf/values.yaml -f ./infrashelf/values-dev.yaml
+#
+# The database is the dev Postgres (infra/docker-compose.dev.yml, database
+# `infrashelf`). Its URL is NOT here: it lives in the Secret named below, so one
+# overlay per environment can differ only in which Secret it points at while the
+# chart itself stays identical. Create the Secret first (see the chart README):
+#
+#   kubectl -n infrashelf-dev create secret generic infrashelf-dev-backend \
+#     --from-literal=DATABASE_URL=postgresql://postgres:pw@dev-postgres:5432/infrashelf \
+#     --from-literal=JWT_SECRET=... --from-literal=ADMIN_PASSWORD=...
+#
+# or manage the same Secret name with External Secrets / Sealed Secrets.
+
+frontend:
+  replicaCount: 1
+  existingSecret: infrashelf-dev-frontend
+  env:
+    nextauthUrl: "https://portal.dev.example.com"
+    apiUrl: "http://infrashelf-dev-backend:3001"
+
+backend:
+  replicaCount: 1
+  existingSecret: infrashelf-dev-backend
+  env:
+    adminEmail: "admin@dev.example.com"
+    frontendUrl: "https://portal.dev.example.com"
+  webauthn:
+    rpId: "dev.example.com"
+    rpOrigin: "https://portal.dev.example.com"
+
+# The sweeps are what make a scheduled order or decommission actually happen.
+# On in dev so the paths are exercised.
+decommissionSweep:
+  enabled: true
+  secret: "dev-decommission-sweep-secret"
+deploymentWindowSweep:
+  enabled: true
+  secret: "dev-deployment-window-sweep-secret"
+
+ingress:
+  hosts:
+    - host: portal.dev.example.com
+  tls:
+    - secretName: infrashelf-dev-tls
+      hosts:
+        - portal.dev.example.com

@@ -77,7 +77,7 @@ spec:
                 - name: DECOMMISSION_SWEEP_SECRET
                   valueFrom:
                     secretKeyRef:
-                      name: {{ include "infrashelf.backend.fullname" . }}
+                      name: {{ include "infrashelf.backend.secretName" . }}
                       key: DECOMMISSION_SWEEP_SECRET
               {{- with .Values.decommissionSweep.resources }}
               resources:

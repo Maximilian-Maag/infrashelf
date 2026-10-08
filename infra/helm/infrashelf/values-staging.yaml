@@ -1,0 +1,40 @@
+# Staging environment overlay.
+#
+#   helm install infrashelf-staging ./infrashelf \
+#     -f ./infrashelf/values.yaml -f ./infrashelf/values-staging.yaml
+#
+# Staging talks to its OWN database and its own Secret, like every environment.
+# Nothing here is shared with dev or prod: a staging release that pointed at the
+# dev Secret would silently test against dev data.
+
+frontend:
+  replicaCount: 2
+  existingSecret: infrashelf-staging-frontend
+  env:
+    nextauthUrl: "https://portal.staging.example.com"
+    apiUrl: "http://infrashelf-staging-backend:3001"
+
+backend:
+  replicaCount: 2
+  existingSecret: infrashelf-staging-backend
+  env:
+    adminEmail: "admin@staging.example.com"
+    frontendUrl: "https://portal.staging.example.com"
+  webauthn:
+    rpId: "staging.example.com"
+    rpOrigin: "https://portal.staging.example.com"
+
+decommissionSweep:
+  enabled: true
+  secret: "staging-decommission-sweep-secret"
+deploymentWindowSweep:
+  enabled: true
+  secret: "staging-deployment-window-sweep-secret"
+
+ingress:
+  hosts:
+    - host: portal.staging.example.com
+  tls:
+    - secretName: infrashelf-staging-tls
+      hosts:
+        - portal.staging.example.com

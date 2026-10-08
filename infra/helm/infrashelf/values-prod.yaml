@@ -1,0 +1,61 @@
+# Production environment overlay.
+#
+#   helm install infrashelf ./infrashelf \
+#     -f ./infrashelf/values.yaml -f ./infrashelf/values-prod.yaml
+#
+# Production talks to the production database through its own Secret
+# (`infrashelf-prod-backend`). WEBAUTHN_* are REQUIRED here: a production-mode
+# backend refuses to start a WebAuthn ceremony without them (#197), and pointing
+# them at the wrong host silently breaks every registered passkey.
+#
+# Back up the SECRET_ENCRYPTION_KEY wherever JWT_SECRET is backed up: it cannot
+# be rotated without re-entering every stored integration credential (#111).
+
+frontend:
+  replicaCount: 2
+  existingSecret: infrashelf-prod-frontend
+  env:
+    nextauthUrl: "https://portal.example.com"
+    apiUrl: "http://infrashelf-backend:3001"
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 6
+    targetCPUUtilizationPercentage: 70
+
+backend:
+  replicaCount: 2
+  existingSecret: infrashelf-prod-backend
+  env:
+    adminEmail: "admin@example.com"
+    frontendUrl: "https://portal.example.com"
+  webauthn:
+    rpId: "example.com"
+    rpOrigin: "https://portal.example.com"
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 6
+    targetCPUUtilizationPercentage: 70
+
+# Every scheduled path that acts on the estate must be ON in production:
+# an approved order whose window opens with no sweep waits for ever, and a
+# decommission scheduled months ago never runs.
+decommissionSweep:
+  enabled: true
+  secret: "prod-decommission-sweep-secret"
+deploymentWindowSweep:
+  enabled: true
+  secret: "prod-deployment-window-sweep-secret"
+
+ingress:
+  className: "nginx"
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+  hosts:
+    - host: portal.example.com
+  tls:
+    - secretName: infrashelf-prod-tls
+      hosts:
+        - portal.example.com
