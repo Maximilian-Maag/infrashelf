@@ -1,0 +1,17 @@
+{
+  "checker": 3,
+  "plugin": false,
+  "shell_style": false,
+  "shebang": null,
+  "ignore": [],
+  "allow": {
+    "abs_path": {
+      ".github/workflows/ci.yml": "container-internal path (/home/wiremock), not a host path",
+      "infra/docker-compose.dev.yml": "container-internal path (/home/wiremock), not a host path"
+    },
+    "secrets": {
+      "apps/backend/src/lib/services/admin/ciSourceSecrets.test.ts": "test fixture: the fake token is literally 'glpat-SuperSecretValue123'",
+      "apps/frontend/src/app/(dashboard)/settings/TwoFactorCard.test.tsx": "canonical RFC 6238 TOTP test vector (public), not a credential"
+    }
+  }
+}
