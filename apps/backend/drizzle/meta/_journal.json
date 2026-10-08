@@ -309,6 +309,13 @@
       "when": 1790115060006,
       "tag": "0047_element_policy_verdict",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1790200000000,
+      "tag": "0048_integration_tenant",
+      "breakpoints": true
     }
   ]
 }

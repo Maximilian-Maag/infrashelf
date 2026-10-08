@@ -305,6 +305,12 @@ const integrationSchema = z.object({
       'Whether a credential is stored. The credential itself is never returned by any endpoint — ' +
       'it is encrypted at rest and read only server-side.',
   }),
+  tenant: z.string().nullable().openapi({
+    description:
+      'Loki multi-tenancy: the value sent as X-Scope-OrgID on every Loki query. ' +
+      'Null (the default) means single-tenant — no header is sent. ' +
+      'Ignored by all non-Loki integration kinds.',
+  }),
   environmentId: z.number().nullable().openapi({
     description: 'Deployment environment this instance serves; null means portal-wide.',
   }),
@@ -4522,6 +4528,11 @@ registry.registerPath({
             credential: z.string().min(1).optional().openapi({
               description: 'Token or password. Required unless authType is "none". Never returned.',
             }),
+            tenant: z.string().nullable().optional().openapi({
+              description:
+                'Loki tenant id (X-Scope-OrgID). Null or omitted means single-tenant. ' +
+                'Ignored by non-Loki kinds.',
+            }),
             environmentId: z.number().int().positive().nullable().optional().openapi({
               description: 'Bind to one environment, or null/omitted for portal-wide.',
             }),
@@ -4586,6 +4597,11 @@ registry.registerPath({
             authType: z.enum(integrationAuthTypes).optional(),
             username: z.string().optional(),
             credential: z.string().min(1).optional(),
+            tenant: z.string().nullable().optional().openapi({
+              description:
+                'Loki tenant id (X-Scope-OrgID). Null or empty string clears it. ' +
+                'Ignored by non-Loki kinds.',
+            }),
             environmentId: z.number().int().positive().nullable().optional(),
             enabled: z.boolean().optional(),
             failureMode: z.enum(integrationFailureModes).optional(),

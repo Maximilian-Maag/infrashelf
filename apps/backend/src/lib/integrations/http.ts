@@ -19,6 +19,11 @@ export interface IntegrationTarget {
   username: string
   /** Decrypted. No client ever sees the envelope. */
   credential: string | null
+  /**
+   * Loki multi-tenancy: forwarded as `X-Scope-OrgID` when non-null.
+   * Other integration kinds ignore this field.
+   */
+  tenant: string | null
 }
 
 /**

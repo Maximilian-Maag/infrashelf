@@ -61,6 +61,11 @@ export interface IntegrationPublic {
   username: string
   /** Whether a credential is stored, without saying anything about its value. */
   hasCredential: boolean
+  /**
+   * Loki multi-tenancy: sent as `X-Scope-OrgID` when non-null.
+   * NULL means single-tenant (no header sent). Ignored by all non-Loki kinds.
+   */
+  tenant: string | null
   environmentId: number | null
   enabled: boolean
   failureMode: IntegrationFailureMode
@@ -77,6 +82,11 @@ export interface CreateIntegrationInput {
   authType: IntegrationAuthType
   username?: string
   credential?: string
+  /**
+   * Loki multi-tenancy. NULL (or omitted) means single-tenant.
+   * Pass an empty string to clear an existing value.
+   */
+  tenant?: string | null
   environmentId?: number | null
   enabled?: boolean
   /** Required, not defaulted — see the schema comment on the column. */
@@ -92,6 +102,11 @@ export interface UpdateIntegrationInput {
    *  "set to empty", because a blank credential is what `authType: 'none'` is
    *  for and an accidental empty string would silently break every call. */
   credential?: string
+  /**
+   * Loki multi-tenancy. Omit to leave unchanged. Pass null or empty string
+   * to clear (revert to single-tenant).
+   */
+  tenant?: string | null
   environmentId?: number | null
   enabled?: boolean
   failureMode?: IntegrationFailureMode
@@ -110,6 +125,7 @@ const publicColumns = {
   authType: integrations.authType,
   username: integrations.username,
   hasCredential: sql<boolean>`(${integrations.credential} IS NOT NULL)`.as('has_credential'),
+  tenant: integrations.tenant,
   environmentId: integrations.environmentId,
   enabled: integrations.enabled,
   failureMode: integrations.failureMode,
@@ -244,6 +260,7 @@ export const createIntegration = async (
         // unambiguous. Storing it would be the real mistake — an encrypted
         // secret nothing ever sends.
         credential: wantsCredential && input.credential ? encryptSecret(input.credential) : null,
+        tenant: input.tenant !== undefined ? (input.tenant || null) : null,
         environmentId,
         enabled: input.enabled ?? true,
         failureMode: input.failureMode,
@@ -353,6 +370,8 @@ export const updateIntegration = async (
           : nextCredential !== null
             ? { credential: encryptSecret(nextCredential) }
             : {}),
+        // An empty string clears the tenant (reverts to single-tenant behaviour).
+        ...(input.tenant !== undefined ? { tenant: input.tenant || null } : {}),
         ...(input.environmentId !== undefined ? { environmentId: input.environmentId } : {}),
         ...(input.enabled !== undefined ? { enabled: input.enabled } : {}),
         ...(input.failureMode !== undefined ? { failureMode: input.failureMode } : {}),
@@ -415,7 +434,7 @@ export const updateIntegration = async (
  * they were looking at.
  */
 const describeChanges = (before: IntegrationPublic, after: IntegrationPublic): string => {
-  const fields = ['name', 'baseUrl', 'authType', 'username', 'environmentId', 'enabled', 'failureMode'] as const
+  const fields = ['name', 'baseUrl', 'authType', 'username', 'tenant', 'environmentId', 'enabled', 'failureMode'] as const
   const changed = fields.filter((f) => before[f] !== after[f])
   return changed.length > 0 ? `Changed: ${changed.join(', ')}` : 'No fields changed'
 }
@@ -480,6 +499,7 @@ export const probeIntegrationById = async (
       authType: integrations.authType,
       username: integrations.username,
       credential: integrations.credential,
+      tenant: integrations.tenant,
       enabled: integrations.enabled,
     })
     .from(integrations)
@@ -533,6 +553,7 @@ export const probeIntegrationById = async (
     authType: row.authType,
     username: row.username,
     credential,
+    tenant: row.tenant,
   })
 
   const health = await recordProbe(id, result)
@@ -584,6 +605,11 @@ export interface ResolvedIntegration {
   authType: IntegrationAuthType
   username: string
   credential: string | null
+  /**
+   * Loki multi-tenancy: sent as `X-Scope-OrgID` when non-null.
+   * NULL means single-tenant (no header sent).
+   */
+  tenant: string | null
   /**
    * Which environment this row is bound to, or NULL for a portal-wide one.
    *
@@ -652,6 +678,7 @@ export const resolveIntegration = async (
       authType: integrations.authType,
       username: integrations.username,
       credential: integrations.credential,
+      tenant: integrations.tenant,
       failureMode: integrations.failureMode,
       environmentId: integrations.environmentId,
       enabled: integrations.enabled,
@@ -688,6 +715,7 @@ export const resolveIntegration = async (
     authType: row.authType,
     username: row.username,
     credential,
+    tenant: row.tenant,
     environmentId: row.environmentId,
     failureMode: row.failureMode,
     blocking: blocksProvisioning(row),

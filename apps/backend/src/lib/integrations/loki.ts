@@ -32,12 +32,10 @@ import {
  *
  * ── What is deliberately not sent ──────────────────────────────────────────
  *
- * `X-Scope-OrgID`, for a multi-tenant Loki. Which tenant a portal should read is
- * a modelling decision (#551: environment? project? one per installation?) and
- * there is no field in the integration registry to hold the answer, so a
- * multi-tenant deployment needs a single-tenant gateway in front of Loki for now.
- * Sending a guessed tenant would read another tenant's logs or none at all, and
- * both look like "the pipeline shipped nothing".
+ * `X-Scope-OrgID`, for a multi-tenant Loki. The decision is now held in the
+ * integration registry as `target.tenant` (#551). When set, it is forwarded
+ * on every request. When null (the default), no header is sent — which is the
+ * correct single-tenant behaviour and was the only behaviour before #551.
  *
  * ── Read-only ──────────────────────────────────────────────────────────────
  *
@@ -148,7 +146,13 @@ export const queryLokiLogs = async (
   let res: Response
   try {
     res = await fetch(`${url.toString()}?${params.toString()}`, {
-      headers: { Accept: 'application/json', ...authHeaders(target) },
+      headers: {
+        Accept: 'application/json',
+        ...authHeaders(target),
+        // Multi-tenancy (#551): forward the stored tenant id when set.
+        // Loki reads this as the org to query; omitting it is the single-tenant default.
+        ...(target.tenant ? { 'X-Scope-OrgID': target.tenant } : {}),
+      },
       // Not followed, like every other client here: a 302 to a login page is the
       // usual answer to a bad credential, and following it would turn
       // "unauthorised" into a 200 carrying HTML.
