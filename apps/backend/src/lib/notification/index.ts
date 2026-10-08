@@ -1,4 +1,9 @@
-import nodemailer from 'nodemailer'
+// Transporter as a named import, not `nodemailer.Transporter`. nodemailer 10
+// ships its own declarations and exports Transporter as a named type; the
+// default export is a plain object without a `Transporter` member, so the old
+// namespace access no longer resolves and `@types/nodemailer` no longer covers
+// it (#572).
+import nodemailer, { type Transporter } from 'nodemailer'
 import { db } from '@/lib/db/client'
 import { appConfig } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
@@ -13,7 +18,7 @@ interface SmtpSettings {
   tls: boolean
 }
 
-let transporterCache: nodemailer.Transporter | null = null
+let transporterCache: Transporter | null = null
 let smtpSettingsCache: SmtpSettings | null = null
 
 // Clear the cached SMTP settings/transporter so the next send picks up config
@@ -65,7 +70,7 @@ const getSmtpSettings = async (): Promise<SmtpSettings | null> => {
   return smtpSettingsCache
 }
 
-const getTransporter = async (): Promise<nodemailer.Transporter | null> => {
+const getTransporter = async (): Promise<Transporter | null> => {
   if (transporterCache) return transporterCache
 
   const settings = await getSmtpSettings()
