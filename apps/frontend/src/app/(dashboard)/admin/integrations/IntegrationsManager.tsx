@@ -58,6 +58,7 @@ const emptyForm = () => ({
   authType: 'bearer' as IntegrationAuthType,
   username: '',
   credential: '',
+  tenant: '',
   environmentId: PORTAL_WIDE,
   enabled: true,
   // No default worth having: the API refuses a create without it on purpose, and
@@ -159,6 +160,7 @@ export function IntegrationsManager({
       // Never prefilled: the stored one is not readable, and an empty field is
       // what "leave it alone" means on the way back out.
       credential: '',
+      tenant: row.tenant ?? '',
       environmentId: row.environmentId === null ? PORTAL_WIDE : String(row.environmentId),
       enabled: row.enabled,
       failureMode: row.failureMode,
@@ -169,8 +171,15 @@ export function IntegrationsManager({
 
   async function handleAdd(e: React.FormEvent) {
     e.preventDefault()
-    setSaving(true)
     setFormError(null)
+    // A tenant id travels as the X-Scope-OrgID header verbatim, so whitespace in
+    // it becomes a header the server rejects at query time — far from this form.
+    // Refuse it here, where the field is (#563).
+    if (form.kind === 'loki' && /\s/.test(form.tenant.trim())) {
+      setFormError(t('lokiTenantInvalid', lang))
+      return
+    }
+    setSaving(true)
     try {
       const body: CreateIntegrationRequest = {
         kind: form.kind,
@@ -190,6 +199,7 @@ export function IntegrationsManager({
         // part of it then fails to authenticate with nothing on screen to
         // explain why. CodeRabbit, on PR #498.
         ...(form.credential ? { credential: form.credential } : {}),
+        ...(form.kind === 'loki' && form.tenant.trim() ? { tenant: form.tenant.trim() } : {}),
       }
       await post('/api/admin/integrations', body)
       setAddOpen(false)
@@ -204,8 +214,12 @@ export function IntegrationsManager({
   async function handleEdit(e: React.FormEvent) {
     e.preventDefault()
     if (!editTarget) return
-    setSaving(true)
     setFormError(null)
+    if (form.kind === 'loki' && /\s/.test(form.tenant.trim())) {
+      setFormError(t('lokiTenantInvalid', lang))
+      return
+    }
+    setSaving(true)
     try {
       // `kind` is not sent: the API refuses to change it, and a Foreman that
       // became a Nexus would keep the credential and health of neither.
@@ -219,6 +233,10 @@ export function IntegrationsManager({
         failureMode: form.failureMode as IntegrationFailureMode,
         // Verbatim, for the reason given on the create above.
         ...(form.credential ? { credential: form.credential } : {}),
+        // Always sent for a Loki, `null` when the field is blank: on edit, an
+        // absent tenant means "leave it", and there is no other way to CLEAR a
+        // tenant and go back to single-tenant (#563).
+        ...(form.kind === 'loki' ? { tenant: form.tenant.trim() || null } : {}),
       }
       await put(`/api/admin/integrations/${editTarget.id}`, body)
       /*
@@ -364,6 +382,16 @@ export function IntegrationsManager({
           value={form.credential}
           onChange={(e) => setField('credential', e.target.value)}
           required={mode === 'add'}
+        />
+      )}
+      {/* Only a Loki reads a tenant; the column is ignored by every other kind,
+          so the field would be noise on the rest (#563). */}
+      {form.kind === 'loki' && (
+        <Input
+          label={t('lokiTenant', lang)}
+          value={form.tenant}
+          onChange={(e) => setField('tenant', e.target.value)}
+          hint={t('lokiTenantHint', lang)}
         />
       )}
       <Select

@@ -21,6 +21,7 @@ const integration = (over: Partial<Integration> = {}): Integration =>
     authType: 'bearer',
     username: '',
     hasCredential: true,
+    tenant: null,
     environmentId: null,
     enabled: true,
     failureMode: 'best_effort',
@@ -226,6 +227,86 @@ describe('IntegrationsManager', () => {
 
     await u.selectOptions(within(dialog).getByLabelText(/^Authentication/), 'basic')
     expect(within(dialog).getByLabelText(/^Username/)).toBeInTheDocument()
+  })
+
+  it('asks for a Loki tenant only for a Loki system', async () => {
+    // The column is read by no other kind (#563), and a field that cannot matter
+    // is noise on a form that already carries a credential and a failure mode.
+    const u = userEvent.setup()
+    render(<IntegrationsManager initial={[]} environments={environments} />)
+
+    await u.click(screen.getByRole('button', { name: 'Add integration' }))
+    const dialog = screen.getByRole('dialog', { name: 'Add integration' })
+    expect(within(dialog).queryByLabelText(/^Tenant/)).not.toBeInTheDocument()
+
+    await u.selectOptions(within(dialog).getByLabelText(/^System/), 'loki')
+    expect(within(dialog).getByLabelText(/^Tenant/)).toBeInTheDocument()
+  })
+
+  it('sends the tenant a Loki was given', async () => {
+    const u = userEvent.setup()
+    render(<IntegrationsManager initial={[]} environments={environments} />)
+
+    await u.click(screen.getByRole('button', { name: 'Add integration' }))
+    const dialog = screen.getByRole('dialog', { name: 'Add integration' })
+    await u.selectOptions(within(dialog).getByLabelText(/^System/), 'loki')
+    await u.type(within(dialog).getByLabelText(/^Name/), 'Central Loki')
+    await u.type(within(dialog).getByLabelText(/^URL/), 'https://loki.example.com')
+    await u.type(within(dialog).getByLabelText(/^Credential/), 'loki-token')
+    await u.type(within(dialog).getByLabelText(/^Tenant/), '  team-a  ')
+    await u.selectOptions(within(dialog).getByLabelText(/^On failure/), 'best_effort')
+    await u.click(within(dialog).getByRole('button', { name: 'Save' }))
+
+    await waitFor(() =>
+      expect(post).toHaveBeenCalledWith(
+        '/api/admin/integrations',
+        expect.objectContaining({ kind: 'loki', tenant: 'team-a' }),
+      ),
+    )
+  })
+
+  it('refuses a Loki tenant that contains whitespace', async () => {
+    // The tenant travels as the X-Scope-OrgID header verbatim, so a space in it
+    // is a header the server rejects at query time, far from this form.
+    const u = userEvent.setup()
+    render(<IntegrationsManager initial={[]} environments={environments} />)
+
+    await u.click(screen.getByRole('button', { name: 'Add integration' }))
+    const dialog = screen.getByRole('dialog', { name: 'Add integration' })
+    await u.selectOptions(within(dialog).getByLabelText(/^System/), 'loki')
+    await u.type(within(dialog).getByLabelText(/^Name/), 'Central Loki')
+    await u.type(within(dialog).getByLabelText(/^URL/), 'https://loki.example.com')
+    await u.type(within(dialog).getByLabelText(/^Credential/), 'loki-token')
+    await u.type(within(dialog).getByLabelText(/^Tenant/), 'team one')
+    await u.selectOptions(within(dialog).getByLabelText(/^On failure/), 'best_effort')
+    await u.click(within(dialog).getByRole('button', { name: 'Save' }))
+
+    expect(await within(dialog).findByText(/cannot contain spaces/)).toBeInTheDocument()
+    expect(post).not.toHaveBeenCalled()
+  })
+
+  it('clears a Loki tenant when the field is emptied on edit', async () => {
+    // On edit an absent tenant means "leave it", so the only way back to
+    // single-tenant is to send an explicit null (#563).
+    const u = userEvent.setup()
+    render(
+      <IntegrationsManager
+        initial={[integration({ kind: 'loki', tenant: 'team-a' })]}
+        environments={environments}
+      />,
+    )
+
+    await u.click(screen.getByRole('button', { name: 'Edit' }))
+    const dialog = screen.getByRole('dialog', { name: 'Edit integration' })
+    await u.clear(within(dialog).getByLabelText(/^Tenant/))
+    await u.click(within(dialog).getByRole('button', { name: 'Save' }))
+
+    await waitFor(() =>
+      expect(put).toHaveBeenCalledWith(
+        '/api/admin/integrations/7',
+        expect.objectContaining({ tenant: null }),
+      ),
+    )
   })
 
   it('asks for no credential at all when the system needs none', async () => {
