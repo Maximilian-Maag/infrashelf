@@ -58,6 +58,7 @@ const emptyForm = () => ({
   authType: 'bearer' as IntegrationAuthType,
   username: '',
   credential: '',
+  tenant: '',
   environmentId: PORTAL_WIDE,
   enabled: true,
   // No default worth having: the API refuses a create without it on purpose, and
@@ -159,6 +160,7 @@ export function IntegrationsManager({
       // Never prefilled: the stored one is not readable, and an empty field is
       // what "leave it alone" means on the way back out.
       credential: '',
+      tenant: row.tenant ?? '',
       environmentId: row.environmentId === null ? PORTAL_WIDE : String(row.environmentId),
       enabled: row.enabled,
       failureMode: row.failureMode,
@@ -167,10 +169,30 @@ export function IntegrationsManager({
     setEditTarget(row)
   }
 
+  /**
+   * Whitespace a user typed into the tenant is either a mistake or a header the
+   * server rejects at query time. Blank means single-tenant and is allowed — an
+   * empty field on edit is how a tenant is cleared. A value that only TRIMS to
+   * blank is neither of those: it is spaces somebody typed, and treating it as
+   * "clear" would wipe a configured tenant without saying so. Internal
+   * whitespace is refused for the same reason as the header it would become.
+   */
+  const tenantError = (): string | null => {
+    if (form.kind !== 'loki') return null
+    const trimmed = form.tenant.trim()
+    if (trimmed === '') return form.tenant === '' ? null : t('lokiTenantInvalid', lang)
+    return /\s/.test(trimmed) ? t('lokiTenantInvalid', lang) : null
+  }
+
   async function handleAdd(e: React.FormEvent) {
     e.preventDefault()
-    setSaving(true)
     setFormError(null)
+    const tenantProblem = tenantError()
+    if (tenantProblem) {
+      setFormError(tenantProblem)
+      return
+    }
+    setSaving(true)
     try {
       const body: CreateIntegrationRequest = {
         kind: form.kind,
@@ -190,6 +212,7 @@ export function IntegrationsManager({
         // part of it then fails to authenticate with nothing on screen to
         // explain why. CodeRabbit, on PR #498.
         ...(form.credential ? { credential: form.credential } : {}),
+        ...(form.kind === 'loki' && form.tenant.trim() ? { tenant: form.tenant.trim() } : {}),
       }
       await post('/api/admin/integrations', body)
       setAddOpen(false)
@@ -204,8 +227,13 @@ export function IntegrationsManager({
   async function handleEdit(e: React.FormEvent) {
     e.preventDefault()
     if (!editTarget) return
-    setSaving(true)
     setFormError(null)
+    const tenantProblem = tenantError()
+    if (tenantProblem) {
+      setFormError(tenantProblem)
+      return
+    }
+    setSaving(true)
     try {
       // `kind` is not sent: the API refuses to change it, and a Foreman that
       // became a Nexus would keep the credential and health of neither.
@@ -219,6 +247,10 @@ export function IntegrationsManager({
         failureMode: form.failureMode as IntegrationFailureMode,
         // Verbatim, for the reason given on the create above.
         ...(form.credential ? { credential: form.credential } : {}),
+        // Always sent for a Loki, `null` when the field is blank: on edit, an
+        // absent tenant means "leave it", and there is no other way to CLEAR a
+        // tenant and go back to single-tenant (#563).
+        ...(form.kind === 'loki' ? { tenant: form.tenant.trim() || null } : {}),
       }
       await put(`/api/admin/integrations/${editTarget.id}`, body)
       /*
@@ -364,6 +396,16 @@ export function IntegrationsManager({
           value={form.credential}
           onChange={(e) => setField('credential', e.target.value)}
           required={mode === 'add'}
+        />
+      )}
+      {/* Only a Loki reads a tenant; the column is ignored by every other kind,
+          so the field would be noise on the rest (#563). */}
+      {form.kind === 'loki' && (
+        <Input
+          label={t('lokiTenant', lang)}
+          value={form.tenant}
+          onChange={(e) => setField('tenant', e.target.value)}
+          hint={t('lokiTenantHint', lang)}
         />
       )}
       <Select

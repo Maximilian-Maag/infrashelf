@@ -579,6 +579,12 @@ export interface Integration {
   authType: IntegrationAuthType
   username: string
   hasCredential: boolean
+  /**
+   * The Loki tenant a query reads, sent as `X-Scope-OrgID` (#551). NULL means
+   * single-tenant — no header is sent. Only a Loki integration uses it; every
+   * other kind ignores it.
+   */
+  tenant: string | null
   /** NULL means portal-wide — one instance serving the whole installation. */
   environmentId: number | null
   enabled: boolean
@@ -598,6 +604,8 @@ export interface CreateIntegrationRequest {
   authType: IntegrationAuthType
   username?: string
   credential?: string
+  /** Loki only. Omit or null for single-tenant. */
+  tenant?: string | null
   environmentId?: number | null
   enabled?: boolean
   /** Required, and deliberately not defaulted — somebody has to decide it. */
@@ -612,6 +620,8 @@ export interface UpdateIntegrationRequest {
   username?: string
   /** Sending this rotates the credential; omitting it leaves the stored one. */
   credential?: string
+  /** Loki only. Omit to leave unchanged; null or '' clears it. */
+  tenant?: string | null
   environmentId?: number | null
   enabled?: boolean
   failureMode?: IntegrationFailureMode
