@@ -62,7 +62,7 @@ jobs:
 
       - name: Upload handbook artifact
         if: steps.changed.outputs.changed == 'true'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: handbook-pdf
           path: docs/handbook.pdf
@@ -252,7 +252,7 @@ jobs:
       # `.next/cache` is excluded: it is the incremental-build cache, the bulk of
       # the directory, and unread by anything that only serves a build.
       - name: Publish the builds for the test jobs
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: next-builds
           path: |
@@ -551,7 +551,7 @@ jobs:
       # name, so one name for all four would fail three of them.
       - name: Upload this shard's blob report
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: blob-report-${{ matrix.shard }}
           path: blob-report/
@@ -635,7 +635,7 @@ jobs:
 
       - name: Upload the merged report
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: playwright-report
           # The JSON alongside the HTML. The skip budget reads it, so when that is
@@ -801,7 +801,7 @@ jobs:
 
       - name: Upload accessibility report
         if: failure()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: a11y-report
           path: |
