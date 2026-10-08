@@ -48,7 +48,7 @@ spec:
             - name: DECOMMISSION_SWEEP_SECRET
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "infrashelf.backend.fullname" . }}
+                  name: {{ include "infrashelf.backend.secretName" . }}
                   key: DECOMMISSION_SWEEP_SECRET
             {{- end }}
             {{- if .Values.deploymentWindowSweep.enabled }}
@@ -58,7 +58,7 @@ spec:
             - name: DEPLOYMENT_WINDOW_SWEEP_SECRET
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "infrashelf.backend.fullname" . }}
+                  name: {{ include "infrashelf.backend.secretName" . }}
                   key: DEPLOYMENT_WINDOW_SWEEP_SECRET
             {{- end }}
             {{- if .Values.driftReport.secret }}
@@ -69,7 +69,7 @@ spec:
             - name: DRIFT_REPORT_SECRET
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "infrashelf.backend.fullname" . }}
+                  name: {{ include "infrashelf.backend.secretName" . }}
                   key: DRIFT_REPORT_SECRET
             {{- end }}
             {{- with .Values.backend.env.smtp }}
@@ -89,23 +89,23 @@ spec:
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "infrashelf.backend.fullname" . }}
+                  name: {{ include "infrashelf.backend.secretName" . }}
                   key: DATABASE_URL
             - name: JWT_SECRET
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "infrashelf.backend.fullname" . }}
+                  name: {{ include "infrashelf.backend.secretName" . }}
                   key: JWT_SECRET
             - name: ADMIN_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "infrashelf.backend.fullname" . }}
+                  name: {{ include "infrashelf.backend.secretName" . }}
                   key: ADMIN_PASSWORD
             {{- with .Values.backend.secrets.totpEncryptionKey }}
             - name: TOTP_ENCRYPTION_KEY
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "infrashelf.backend.fullname" $ }}
+                  name: {{ include "infrashelf.backend.secretName" $ }}
                   key: TOTP_ENCRYPTION_KEY
             {{- end }}
             {{- with .Values.backend.webauthn }}
@@ -125,7 +125,7 @@ spec:
             - name: SMTP_PASS
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "infrashelf.backend.fullname" $ }}
+                  name: {{ include "infrashelf.backend.secretName" $ }}
                   key: SMTP_PASS
             {{- end }}
             {{- end }}
@@ -137,7 +137,7 @@ spec:
             - name: SECRET_ENCRYPTION_KEY
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "infrashelf.backend.fullname" . }}
+                  name: {{ include "infrashelf.backend.secretName" . }}
                   key: SECRET_ENCRYPTION_KEY
             {{- end }}
           livenessProbe:

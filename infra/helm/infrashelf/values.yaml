@@ -36,6 +36,12 @@ frontend:
   secrets:
     nextauthSecret: ""    # NEXTAUTH_SECRET  32+ random bytes
 
+  # Name of a pre-existing Secret the frontend reads its environment from
+  # (key: NEXTAUTH_SECRET). When set, the chart creates no Secret of its own and
+  # every reference points at this one — the standard way to keep a per-
+  # environment credential out of a values file. See values-<env>.yaml.
+  existingSecret: ""
+
 # ── Scheduled decommissioning (issue #30) ─────────────────────────────────────
 # Drives POST /api/internal/decommission-sweep, which tears down infrastructure
 # whose scheduled_decommission_at has arrived.
@@ -170,6 +176,18 @@ backend:
     # from jwtSecret, which works but means rotating jwtSecret invalidates every
     # enrolled authenticator.
     totpEncryptionKey: ""
+
+  # Name of a pre-existing Secret the backend reads its environment from —
+  # DATABASE_URL above all. When set, the chart creates no Secret of its own and
+  # every reference (the Deployment, the migrate hook and the three sweep
+  # CronJobs) points at this one. This is how a release is bound to one
+  # environment's database: the DATABASE_URL lives in a per-environment Secret
+  # the operator manages, never in a values file. The Secret must carry the same
+  # keys the chart would have written: DATABASE_URL, JWT_SECRET, ADMIN_PASSWORD,
+  # and — when the matching feature is on — DECOMMISSION_SWEEP_SECRET,
+  # DEPLOYMENT_WINDOW_SWEEP_SECRET, DRIFT_REPORT_SECRET, METRICS_SECRET,
+  # SECRET_ENCRYPTION_KEY, TOTP_ENCRYPTION_KEY, SMTP_PASS.
+  existingSecret: ""
 
   # ── Security keys / passkeys (issue #197) ───────────────────────────────────
   # WEBAUTHN_RP_ID is a bare domain — no scheme, no port. WEBAUTHN_RP_ORIGIN is
