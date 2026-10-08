@@ -722,6 +722,16 @@ describe('ProductEditForm parameter types', () => {
 
 describe('ProductEditForm pipeline stacks', () => {
   /**
+   * The two tests below drive the whole Add-Stack dialog with `userEvent`, one
+   * real delay per keystroke. Under a full parallel run the machine is
+   * oversubscribed and that interaction alone can eat Vitest's default 5000 ms
+   * budget — they pass in isolation in ~750 ms but were timing out at ~5.1 s in
+   * `pnpm --filter frontend test` (#568). The interaction is the point here, so
+   * the budget is raised rather than the dialog shortened.
+   */
+  const STACK_DIALOG_TIMEOUT_MS = 15_000
+
+  /**
    * The interleaving that duplicated a row in CI (#384), driven directly.
    *
    * Both requests are deferred so the test decides the order: the create is
@@ -782,7 +792,7 @@ describe('ProductEditForm pipeline stacks', () => {
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Add Pipeline Stack' })).not.toBeInTheDocument())
     expect(screen.getAllByTestId('stack-item')).toHaveLength(1)
     expect(screen.getAllByText(created.name)).toHaveLength(1)
-  })
+  }, STACK_DIALOG_TIMEOUT_MS)
 
   it('appends a created stack that the list does not already carry', async () => {
     const user = userEvent.setup()
@@ -811,5 +821,5 @@ describe('ProductEditForm pipeline stacks', () => {
     await waitFor(() => expect(screen.getAllByTestId('stack-item')).toHaveLength(2))
     expect(screen.getByText('Gateway VM')).toBeInTheDocument()
     expect(screen.getByText('Payments VM')).toBeInTheDocument()
-  })
+  }, STACK_DIALOG_TIMEOUT_MS)
 })
