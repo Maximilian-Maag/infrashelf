@@ -309,6 +309,27 @@ describe('IntegrationsManager', () => {
     )
   })
 
+  it('refuses a tenant that is only whitespace, rather than clearing the tenant', async () => {
+    // CodeRabbit on #583: '   ' trims to '' and would otherwise be sent as a
+    // null tenant, silently clearing a configured one.
+    const u = userEvent.setup()
+    render(
+      <IntegrationsManager
+        initial={[integration({ kind: 'loki', tenant: 'team-a' })]}
+        environments={environments}
+      />,
+    )
+
+    await u.click(screen.getByRole('button', { name: 'Edit' }))
+    const dialog = screen.getByRole('dialog', { name: 'Edit integration' })
+    await u.clear(within(dialog).getByLabelText(/^Tenant/))
+    await u.type(within(dialog).getByLabelText(/^Tenant/), '   ')
+    await u.click(within(dialog).getByRole('button', { name: 'Save' }))
+
+    expect(await within(dialog).findByText(/cannot contain spaces/)).toBeInTheDocument()
+    expect(put).not.toHaveBeenCalled()
+  })
+
   it('asks for no credential at all when the system needs none', async () => {
     // `auth_type = 'none'` is the one shape where the row legitimately holds no
     // credential, and the database CHECK forbids the opposite pairing. A field

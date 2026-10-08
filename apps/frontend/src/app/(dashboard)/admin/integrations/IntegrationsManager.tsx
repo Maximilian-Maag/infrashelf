@@ -169,14 +169,27 @@ export function IntegrationsManager({
     setEditTarget(row)
   }
 
+  /**
+   * Whitespace a user typed into the tenant is either a mistake or a header the
+   * server rejects at query time. Blank means single-tenant and is allowed — an
+   * empty field on edit is how a tenant is cleared. A value that only TRIMS to
+   * blank is neither of those: it is spaces somebody typed, and treating it as
+   * "clear" would wipe a configured tenant without saying so. Internal
+   * whitespace is refused for the same reason as the header it would become.
+   */
+  const tenantError = (): string | null => {
+    if (form.kind !== 'loki') return null
+    const trimmed = form.tenant.trim()
+    if (trimmed === '') return form.tenant === '' ? null : t('lokiTenantInvalid', lang)
+    return /\s/.test(trimmed) ? t('lokiTenantInvalid', lang) : null
+  }
+
   async function handleAdd(e: React.FormEvent) {
     e.preventDefault()
     setFormError(null)
-    // A tenant id travels as the X-Scope-OrgID header verbatim, so whitespace in
-    // it becomes a header the server rejects at query time — far from this form.
-    // Refuse it here, where the field is (#563).
-    if (form.kind === 'loki' && /\s/.test(form.tenant.trim())) {
-      setFormError(t('lokiTenantInvalid', lang))
+    const tenantProblem = tenantError()
+    if (tenantProblem) {
+      setFormError(tenantProblem)
       return
     }
     setSaving(true)
@@ -215,8 +228,9 @@ export function IntegrationsManager({
     e.preventDefault()
     if (!editTarget) return
     setFormError(null)
-    if (form.kind === 'loki' && /\s/.test(form.tenant.trim())) {
-      setFormError(t('lokiTenantInvalid', lang))
+    const tenantProblem = tenantError()
+    if (tenantProblem) {
+      setFormError(tenantProblem)
       return
     }
     setSaving(true)
