@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
-import { readFileSync, readdirSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { METRIC_NAMES } from './catalog'
 import {
   ELEMENT_DASHBOARD_UID,
@@ -28,18 +28,37 @@ import {
  * in a way that would complain, which is exactly the shape that needs a test.
  *
  */
-// import.meta.url rather than process.cwd(): Stryker copies each mutant into
-// .stryker-tmp/sandbox-*/ and runs vitest from there. process.cwd() inside the
-// sandbox does not point at the workspace root, so the two-level-up path to
-// infra/grafana/ resolves to a path that does not exist and Stryker fails the
-// dry run before mutating anything. import.meta.url is file-relative and
-// survives the sandbox copy unchanged.
+// Where infra/ is, found by walking up from THIS FILE — neither process.cwd()
+// nor a fixed `../` count is right under Stryker.
 //
-// This file lives at apps/backend/src/lib/metrics/dashboards.test.ts.
-// Five levels up (metrics/ -> lib/ -> src/ -> backend/ -> apps/ -> repo root)
-// reaches the repo root, where infra/ lives.
-const INFRA_ROOT = fileURLToPath(new URL('../../../../../infra', import.meta.url))
-const DASHBOARD_DIR = join(INFRA_ROOT, 'grafana', 'dashboards')
+// Stryker copies the project into `apps/backend/.stryker-tmp/sandbox-*/` and
+// runs vitest with the sandbox as its working directory, so `process.cwd()` is
+// the sandbox root, not the workspace root: a cwd-relative path to infra/ does
+// not exist, which is what killed every nightly until now.
+//
+// A fixed `../` count fails too, and that is subtler. The sandbox is a copy of
+// `apps/backend` ALONE, so it contains no `infra/` at any depth, while the real
+// checkout has infra/ five levels up. The two runs need different counts and no
+// single constant is correct for both.
+//
+// Walking up until `infra/grafana/dashboards` appears is correct for both,
+// because the sandbox is nested inside the real checkout: from
+// `.stryker-tmp/sandbox-*/src/lib/metrics/` the search climbs through the
+// sandbox, out to `apps/backend`, then `apps/`, and finally the repository root
+// that does hold infra/.
+const findUp = (relative: string): string => {
+  const start = dirname(fileURLToPath(import.meta.url))
+  for (let dir = start; ; ) {
+    const candidate = join(dir, relative)
+    if (existsSync(candidate)) return candidate
+    const parent = dirname(dir)
+    if (parent === dir) throw new Error(`Could not find ${relative} above ${start}`)
+    dir = parent
+  }
+}
+
+const DASHBOARD_DIR = findUp(join('infra', 'grafana', 'dashboards'))
+const INFRA_ROOT = dirname(dirname(DASHBOARD_DIR)) // …/infra
 const PROVISIONING = join(INFRA_ROOT, 'grafana', 'provisioning')
 
 interface Dashboard {
