@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
-import { readFileSync, readdirSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { dirname, join } from 'node:path'
 import { METRIC_NAMES } from './catalog'
 import {
   ELEMENT_DASHBOARD_UID,
@@ -13,7 +14,6 @@ import {
  * The contract between the portal, the metric endpoint and the two dashboards
  * somebody provisions into their Grafana (#548).
  *
- * ── Why this is a test and not a paragraph in a README ──────────────────────
  *
  * Nothing here is checked by anything that runs: Grafana loads a dashboard whose
  * PromQL names a metric that does not exist and renders "No data" for ever, which
@@ -26,9 +26,40 @@ import {
  * The dashboards live in `infra/`, the metrics in `src/lib/metrics`, and the
  * links in `src/lib/integrations` — three artefacts that never meet at runtime
  * in a way that would complain, which is exactly the shape that needs a test.
+ *
  */
-const DASHBOARD_DIR = join(process.cwd(), '..', '..', 'infra', 'grafana', 'dashboards')
-const PROVISIONING = join(process.cwd(), '..', '..', 'infra', 'grafana', 'provisioning')
+// Where infra/ is, found by walking up from THIS FILE — neither process.cwd()
+// nor a fixed `../` count is right under Stryker.
+//
+// Stryker copies the project into `apps/backend/.stryker-tmp/sandbox-*/` and
+// runs vitest with the sandbox as its working directory, so `process.cwd()` is
+// the sandbox root, not the workspace root: a cwd-relative path to infra/ does
+// not exist, which is what killed every nightly until now.
+//
+// A fixed `../` count fails too, and that is subtler. The sandbox is a copy of
+// `apps/backend` ALONE, so it contains no `infra/` at any depth, while the real
+// checkout has infra/ five levels up. The two runs need different counts and no
+// single constant is correct for both.
+//
+// Walking up until `infra/grafana/dashboards` appears is correct for both,
+// because the sandbox is nested inside the real checkout: from
+// `.stryker-tmp/sandbox-*/src/lib/metrics/` the search climbs through the
+// sandbox, out to `apps/backend`, then `apps/`, and finally the repository root
+// that does hold infra/.
+const findUp = (relative: string): string => {
+  const start = dirname(fileURLToPath(import.meta.url))
+  for (let dir = start; ; ) {
+    const candidate = join(dir, relative)
+    if (existsSync(candidate)) return candidate
+    const parent = dirname(dir)
+    if (parent === dir) throw new Error(`Could not find ${relative} above ${start}`)
+    dir = parent
+  }
+}
+
+const DASHBOARD_DIR = findUp(join('infra', 'grafana', 'dashboards'))
+const INFRA_ROOT = dirname(dirname(DASHBOARD_DIR)) // …/infra
+const PROVISIONING = join(INFRA_ROOT, 'grafana', 'provisioning')
 
 interface Dashboard {
   uid: string
