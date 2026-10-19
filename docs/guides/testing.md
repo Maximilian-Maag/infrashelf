@@ -109,6 +109,16 @@ including unused destructured ones.
   module. `src/test/treeGuard.ts` now refuses such a run and names the files that
   differ. Start a full run only in a checkout nobody will touch, or in a
   `git worktree`.
+- **The frontend budget is 15 s, and load — not a slow test — is why (#584).**
+  A file that drives the Add-Stack dialog with `userEvent` runs in ~750 ms alone
+  and crosses Vitest's 5000 ms default only when all 138 files are in flight; the
+  same for RTL's 1000 ms `waitFor` default. So `apps/frontend/vitest.config.ts`
+  sets `testTimeout` and `hookTimeout` to 15 s (60 s under Stryker, which
+  activates the same variable the config already keyed on) and `src/test/setup.ts`
+  sets `configure({ asyncUtilTimeout: 5000 })`. Do not "fix" a red full run by
+  raising these again, and do not lower them to catch a genuinely slow test — the
+  failures here were all `Test timed out in … ms`, never a failed assertion. A
+  per-test override (#568) only moved the problem to the next slow file.
 - **A wholesale module mock hides shared constants.** `vi.mock('@/lib/ci', () =>
   ({…}))` appears in a dozen files; a constant exported from that module is
   `undefined` in all of them, and the failure is not a mock complaint but a

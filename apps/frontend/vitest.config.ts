@@ -12,15 +12,23 @@ import path from 'path'
  * that, so `thresholds.break = 80` was enforcing nothing at all.
  *
  * Raised only under Stryker, which sets STRYKER_MUTATOR_WORKER in each test
- * runner process. An ordinary run keeps the strict 5s, because a test that
- * genuinely takes six seconds is worth being told about.
+ * runner process.
+ *
+ * The ordinary-run budget is 15s, not the default 5s, and the reason is load
+ * rather than slow assertions (#584). The same tests run in ~750ms alone and
+ * cross 5s only with all 138 files in flight, so the strict limit was reporting
+ * the machine rather than the test — the suite is green with `--testTimeout`
+ * raised, and the failures were all "Test timed out in 5000ms", never a failed
+ * assertion. 15s leaves the parallel run room to settle while a genuinely stuck
+ * test still fails, and still far inside the Stryker budget it is replacing.
  */
-const underMutationTesting = process.env.STRYKER_MUTATOR_WORKER !== undefined
+const testTimeoutMs = process.env.STRYKER_MUTATOR_WORKER !== undefined ? 60_000 : 15_000
 
 export default defineConfig({
   plugins: [react()],
   test: {
-    ...(underMutationTesting ? { testTimeout: 60_000, hookTimeout: 60_000 } : {}),
+    testTimeout: testTimeoutMs,
+    hookTimeout: testTimeoutMs,
     globals: true,
     environment: 'jsdom',
     // Stryker copies the whole source tree into .stryker-tmp/sandbox-*/ while a
