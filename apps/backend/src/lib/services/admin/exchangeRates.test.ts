@@ -4,7 +4,7 @@ vi.mock('@/lib/exchange', () => ({
   refreshRates: vi.fn().mockResolvedValue(0),
 }))
 
-import { getExchangeRates, refreshExchangeRates } from './exchangeRates'
+import { getExchangeRates, refreshExchangeRates, getCurrencySettings, setBaseCurrency } from './exchangeRates'
 import { refreshRates } from '@/lib/exchange'
 import { db } from '@/lib/db/client'
 import { exchangeRates, auditLog } from '@/lib/db/schema'
@@ -109,5 +109,90 @@ describe('refreshExchangeRates', () => {
     const rows = await db.select().from(auditLog).where(eq(auditLog.userId, actor.id))
     expect(rows.length).toBe(1)
     expect(rows[0].action).toBe('exchange_rate.refreshed')
+  })
+})
+
+/**
+ * The base currency is what every stored price means (FA-11.3). It was
+ * hardcoded to EUR everywhere; these cover it becoming a setting, and the
+ * re-base that has to happen with it — changing the anchor without re-basing
+ * would silently reinterpret every rate.
+ */
+describe('base currency (FA-11.3)', () => {
+  it('is EUR until root sets something else', async () => {
+    const result = await getCurrencySettings()
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.data.baseCurrency).toBe('EUR')
+  })
+
+  it('refuses a value that is not a three-letter code', async () => {
+    const result = await setBaseCurrency('euro', null)
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.status).toBe(400)
+  })
+
+  it('normalizes case and stores the new base', async () => {
+    await db
+      .insert(exchangeRates)
+      .values([
+        { currencyCode: 'EUR', rate: '1' },
+        { currencyCode: 'USD', rate: '1.1' },
+      ])
+
+    const result = await setBaseCurrency('usd', null)
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.data.baseCurrency).toBe('USD')
+
+    // Persisted, not just returned.
+    const settings = await getCurrencySettings()
+    if (settings.ok) expect(settings.data.baseCurrency).toBe('USD')
+  })
+
+  it('re-bases every stored rate onto the new currency', async () => {
+    await db
+      .insert(exchangeRates)
+      .values([
+        { currencyCode: 'EUR', rate: '1' },
+        { currencyCode: 'USD', rate: '1.1' },
+        { currencyCode: 'CHF', rate: '0.9' },
+      ])
+
+    await setBaseCurrency('USD', null)
+
+    const byCode = Object.fromEntries(
+      (await db.select().from(exchangeRates)).map((r) => [r.currencyCode, Number(r.rate)]),
+    )
+    // The new base is 1 by construction.
+    expect(byCode.USD).toBeCloseTo(1, 6)
+    // 1 USD was 1/1.1 EUR under the old anchor. Compared at the column's scale
+    // (numeric), not full float precision.
+    expect(byCode.EUR).toBeCloseTo(1 / 1.1, 6)
+    // And CHF keeps its value: 0.9 EUR per USD.
+    expect(byCode.CHF).toBeCloseTo(0.9 / 1.1, 6)
+  })
+
+  it('refuses when no usable rate is stored for the requested currency', async () => {
+    await db.insert(exchangeRates).values([{ currencyCode: 'EUR', rate: '1' }])
+
+    const result = await setBaseCurrency('USD', null)
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.status).toBe(409)
+  })
+
+  it('audits the change with both currencies, inside the write', async () => {
+    const actor = await createUser({ role: 'root' })
+    await db
+      .insert(exchangeRates)
+      .values([
+        { currencyCode: 'EUR', rate: '1' },
+        { currencyCode: 'USD', rate: '1.1' },
+      ])
+
+    await setBaseCurrency('USD', actor.id)
+
+    const rows = await db.select().from(auditLog).where(eq(auditLog.userId, actor.id))
+    const entry = rows.find((r) => r.action === 'currency.base_currency_updated')
+    expect(entry).toBeDefined()
+    expect(entry?.details).toBe('Base currency EUR → USD')
   })
 })

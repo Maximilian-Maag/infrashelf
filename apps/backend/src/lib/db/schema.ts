@@ -1358,6 +1358,12 @@ export const appConfig = pgTable('app_config', {
   // operator says otherwise — a window means nothing without a zone, and no
   // other default is defensible.
   deploymentTimeZone: text('deployment_time_zone').notNull().default('UTC'),
+  // The currency prices are stored in and exchange rates are quoted against
+  // (FA-11.3). EUR until root says otherwise: it is what everything was
+  // hardcoded to, so the default keeps every existing installation reading its
+  // own numbers the same way. `rateToBase` for this code is 1 by construction —
+  // `refreshRates` re-bases the fetched rates onto it.
+  baseCurrency: text('base_currency').notNull().default('EUR'),
 })
 
 export type User = typeof users.$inferSelect
