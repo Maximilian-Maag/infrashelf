@@ -1499,13 +1499,38 @@ registry.registerPath({
   method: 'get',
   path: '/orders',
   summary: 'List orders (admins see all, project managers see own)',
+  description:
+    'Filtered and paged in the database (#158). `total` counts every match, not the page, so a ' +
+    'caller can say "1–50 of 3,914" without asking for 3,914 rows. Two orders created in the same ' +
+    'millisecond are tie-broken on id, so a row cannot appear on two pages and be missing from all ' +
+    'of them.',
   tags: ['Orders'],
   security: bearerAuth,
+  request: {
+    query: z.object({
+      projectId: z.string().optional(),
+      status: z
+        .enum(['pending', 'provisioning', 'completed', 'failed', 'rejected', 'all'])
+        .optional(),
+      limit: z.string().optional(),
+      offset: z.string().optional(),
+    }),
+  },
   responses: {
     200: {
-      description: 'List of orders',
-      content: { 'application/json': { schema: z.array(orderSchema) } },
+      description: 'One page of orders, with the total number of matches',
+      content: {
+        'application/json': {
+          schema: z.object({
+            items: z.array(orderSchema),
+            total: z.number(),
+            limit: z.number(),
+            offset: z.number(),
+          }),
+        },
+      },
     },
+    400: { description: 'Invalid filter' },
     401: { description: 'Unauthorized' },
   },
 })
@@ -2182,12 +2207,23 @@ registry.registerPath({
       }),
       sort: z.enum(['date', 'name', 'status']).optional(),
       direction: z.enum(['asc', 'desc']).optional(),
+      limit: z.string().optional(),
+      offset: z.string().optional(),
     }),
   },
   responses: {
     200: {
-      description: 'List of infrastructure elements',
-      content: { 'application/json': { schema: z.array(infraSchema) } },
+      description: 'One page of infrastructure elements, with the total number of matches',
+      content: {
+        'application/json': {
+          schema: z.object({
+            items: z.array(infraSchema),
+            total: z.number(),
+            limit: z.number(),
+            offset: z.number(),
+          }),
+        },
+      },
     },
     400: { description: 'Invalid filter' },
     401: { description: 'Unauthorized' },

@@ -289,3 +289,42 @@ describe('the exchange-rate schema names the columns the endpoint returns (#537)
     expect(documentedColumns(method, path)).toEqual(columns)
   })
 })
+
+/**
+ * The response half of a paginated list, which nothing checked (#589).
+ *
+ * `#158` gave `/orders` and `/infrastructure` a page envelope and left their spec
+ * entries saying `z.array(...)`, so the document promised an array where the
+ * service returns `{ items, total, limit, offset }` — wrong for exactly the two
+ * endpoints that were paginated, and unnoticed because this file states that it
+ * does not check response shapes. `/catalog`, paged before #158, documents the
+ * envelope correctly, which is what made the two an oversight.
+ *
+ * Declared rather than derived, like the refusals above: which lists are paged is
+ * a fact about the service, and the set is small enough that naming it is clearer
+ * than walking the import graph. Add a row here when a list gains a page window —
+ * the point is that a paginated list cannot be re-documented as a bare array.
+ */
+const PAGE_ENVELOPES: Array<{ method: string; path: string }> = [
+  { method: 'get', path: '/catalog' },
+  { method: 'get', path: '/orders' },
+  { method: 'get', path: '/infrastructure' },
+]
+
+describe('every paginated list documents the page envelope (#589)', () => {
+  it.each(PAGE_ENVELOPES)('$method $path', ({ method, path }) => {
+    const operation = (document.paths[path] as Record<string, Record<string, unknown>>)[method]
+    const responses = operation.responses as Record<
+      string,
+      { content: Record<string, { schema: { properties?: object; items?: unknown } }> }
+    >
+    const schema = responses['200'].content['application/json'].schema
+
+    // Exactly the four envelope keys: `items` alone would be the old array shape
+    // wearing a wrapper, and a missing `total` is what makes "1–50 of ?" unanswerable.
+    expect(Object.keys(schema.properties ?? {}).sort()).toEqual(['items', 'limit', 'offset', 'total'])
+    // Not an array: `z.array(x)` renders with `items` too, so the keys alone would
+    // not tell the two apart.
+    expect(schema.items).toBeUndefined()
+  })
+})
