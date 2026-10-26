@@ -77,16 +77,18 @@ Three kinds have consumers, and each is complete:
 - **Grafana** — `lib/integrations/grafana.ts` ✔
 - **Foreman** — `lib/integrations/foreman.ts` + `services/admin/foremanReconcile.ts` ✔
 
-Two declared kinds have **no implementation module**:
+Two unfinished workstreams cover **three declared kinds with no implementation
+module** — `nexus` and `pulp` are separate `INTEGRATION_KINDS` values but one
+item, so the count of kinds and the count of workstreams differ:
 
-- **Ansible** (#113) — no day-2 actions on an element (patch, restart, re-run).
+- **Ansible** (#113) — one kind, `ansible`. No day-2 actions on an element (patch, restart, re-run).
   The infrastructure list is still read-only apart from retry / schedule /
   tear-down. Open question before any code: AWX / Automation Controller vs. a
   playbook run as just another pipeline step — very different amounts of work.
-- **Nexus / Pulp** (#114) — nothing records what content an order was built
-  from; "rebuild it the way it was" is not answerable for the artefact side. Open
-  question: read-only reference first (the smaller, safer step, already unlocks
-  the snapshot and policy uses) vs. writing on order.
+- **Nexus / Pulp** (#114) — two kinds, `nexus` and `pulp`. Nothing records what
+  content an order was built from; "rebuild it the way it was" is not answerable
+  for the artefact side. Open question: read-only reference first (the smaller,
+  safer step, already unlocks the snapshot and policy uses) vs. writing on order.
 - **OPA** — declared kind; the portal's own policy engine is in-process
   (`lib/policy/*`) with an optional external evaluator (`policy/client.ts`). Fine
   as-is.
@@ -168,8 +170,8 @@ product deliberately diverged. None should be built blind:
 ### Wave 2 — the design conversation for the half-built registry (#111)
 
 3. **Ansible (#113) and Nexus/Pulp (#114).** Settle the open questions first
-   (AWX vs pipeline step; read-only vs write), then build the consumer. Numbers
-   first, then one implementation each.
+   (AWX vs pipeline step; read-only vs write), then build the consumer.
+   Decisions first, then one implementation each.
 
 ### Wave 3 — drift that needs a decision (the owner's call)
 
