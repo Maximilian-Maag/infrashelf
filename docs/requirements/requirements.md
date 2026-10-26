@@ -11,7 +11,7 @@
 | FA-01.3 | The Root uses a local account. Local accounts can only be created by the Root. | Shipped — `apps/frontend/src/app/(dashboard)/admin/users/UsersManager.tsx` (root-only page) |
 | FA-01.4 | Admins can see all orders, projects, and infrastructure elements of all users. | Shipped — `apps/backend/src/lib/services/orders.ts:77,107` |
 | FA-01.5 | Project Managers can only see their own orders, projects, and infrastructure elements. | Shipped — same scoping in `orders.ts` |
-| FA-01.6 | The Root can see all projects and infrastructure elements, but cannot place orders. | Partially shipped — the UI never offers ordering to Root, but `POST /api/orders` has no role check and treats `root` the same as `admin` (`apps/backend/src/lib/services/orders.ts:77,298`), so a Root session can place an order directly through the API today. |
+| FA-01.6 | The Root can see all projects and infrastructure elements, but cannot place orders. | Partially shipped — the UI never offers ordering to Root, but `POST /api/orders` has no role check and treats `root` the same as `admin` (`apps/backend/src/lib/services/orders.ts`), so a Root session can place an order through the API today. That is deliberately not a bug to "fix": root's audited escape from a policy refusal (`overridePolicy`) and from an exhausted budget (`overrideBudget`) exist only on the order path (`services/orders.ts:1231`, `:1314`), so blocking root would remove them. **Decide** whether root ordering is intended (and this requirement is stale) or the two override rights need another home — do not simply add a role check. |
 
 ---
 
@@ -204,7 +204,7 @@
 
 | ID | Requirement | Traceability |
 |----|-------------|--------------|
-| FA-17.1 | After a successful OpenTofu apply, the CI pipeline writes key-value outputs that the webhook handler parses and stores per infrastructure element. | Partially shipped — this only happens for a **GitLab**-backed environment. `supportsJobTrace` (`apps/backend/src/lib/ci/index.ts:82-83`) is `provider === 'gitlab'` only; on GitHub/Bitbucket, `fetchJobTraces` returns `[]` (same file, lines 106-110), so no outputs are ever parsed there. |
+| FA-17.1 | After a successful OpenTofu apply, the CI pipeline writes key-value outputs that the webhook handler parses and stores per infrastructure element. | Shipped — the apply log is read from whichever source the environment has. A **Loki** integration (#111) is asked first and is provider-independent; the CI provider's own job API is the fallback and remains **GitLab**-only (`supportsJobTrace`, `apps/backend/src/lib/ci/index.ts:83`). So an element on GitHub/Bitbucket gets parsed outputs once its environment has a Loki, and a GitLab one needs neither. Both callers resolve the integration and pass it (`webhook/settle.ts:200`, `services/infrastructure.ts:1077`). This row read "Partially shipped — GitLab only" until this pass, when the Loki path (`lib/webhook/outputs.ts`, `lib/integrations/loki.ts`) was found already built. |
 | FA-17.2 | Outputs are stored per infrastructure element in `infrastructure_elements.outputs` (JSONB). | Shipped |
 | FA-17.3 | Outputs (e.g. IP addresses, hostnames, resource IDs) are displayed on the order detail page and the infrastructure element detail page. | Shipped, when there are any to show (see FA-17.1) |
 
