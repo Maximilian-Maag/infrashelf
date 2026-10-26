@@ -5956,3 +5956,46 @@ registry.registerPath({
     403: { description: 'Forbidden' },
   },
 })
+
+const baseCurrencySchema = z.object({ baseCurrency: z.string() })
+
+registry.registerPath({
+  method: 'get',
+  path: '/admin/exchange-rates/base-currency',
+  summary: '[root] Read the base currency',
+  description:
+    'The currency product prices are stored in and the stored exchange rates are quoted against ' +
+    '(FA-11.3). EUR until root sets otherwise.',
+  tags: ['Admin'],
+  security: bearerAuth,
+  responses: {
+    200: {
+      description: 'The configured base currency',
+      content: { 'application/json': { schema: baseCurrencySchema } },
+    },
+    401: { description: 'Unauthorized' },
+    403: { description: 'Forbidden' },
+  },
+})
+
+registry.registerPath({
+  method: 'put',
+  path: '/admin/exchange-rates/base-currency',
+  summary: '[root] Set the base currency',
+  description:
+    'Re-bases every stored exchange rate onto the new currency (`rate[CUR] := rate[CUR] / ' +
+    'rate[NEW]`), so the new currency becomes the anchor and its own rate 1. Refused with 409 when ' +
+    'no usable rate is stored for the requested currency — refresh the rates first.',
+  tags: ['Admin'],
+  security: bearerAuth,
+  request: {
+    body: { content: { 'application/json': { schema: baseCurrencySchema } } },
+  },
+  responses: {
+    200: { description: 'The new base currency', content: { 'application/json': { schema: baseCurrencySchema } } },
+    400: { description: 'Not a three-letter ISO 4217 code' },
+    401: { description: 'Unauthorized' },
+    403: { description: 'Forbidden' },
+    409: { description: 'No usable rate is stored for that currency' },
+  },
+})

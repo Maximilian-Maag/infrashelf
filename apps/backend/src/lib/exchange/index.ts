@@ -1,5 +1,10 @@
 import { db } from '@/lib/db/client'
 import { exchangeRates } from '@/lib/db/schema'
+import {
+  DEFAULT_BASE_CURRENCY,
+  isCurrencyCode,
+  readBaseCurrency,
+} from '@/lib/exchange/baseCurrency'
 
 interface ExchangeRateApiResponse {
   rates: Record<string, number>
@@ -45,6 +50,36 @@ const readRates = (raw: unknown): [string, number][] => {
 }
 
 /**
+ * Rates quoted against `apiBase` → rates quoted against `base`.
+ *
+ * A no-op when the two agree, which is the common case: the default API quotes
+ * EUR and EUR is the default base. Otherwise every rate is divided by the
+ * configured base's rate — one unit of the base was worth that many units of the
+ * API base, and is 1 unit of itself, so the base's own rate becomes 1.
+ *
+ * Refused rather than approximated when the API did not return the configured
+ * base: without its rate there is nothing to divide by, and assuming 1 would put
+ * a wrong figure in front of every price in the portal.
+ */
+const reBaseOnto = (
+  rates: [string, number][],
+  apiBase: string,
+  base: string,
+): [string, number][] => {
+  if (apiBase === base) return rates
+
+  const anchor = rates.find(([code]) => code === base)?.[1]
+  if (anchor === undefined || !Number.isFinite(anchor) || anchor <= 0) {
+    throw new Error(
+      `The exchange rate API quotes ${apiBase} and did not return ${base}, so its ` +
+        `rates cannot be re-based onto the configured base currency.`,
+    )
+  }
+
+  return rates.map(([code, rate]) => [code, rate / anchor])
+}
+
+/**
  * Refresh the stored rates, and say how many were written.
  *
  * The count is returned because the audit line that reports this refresh used to
@@ -59,7 +94,18 @@ export const refreshRates = async (): Promise<number> => {
   if (!res.ok) throw new Error(`Exchange rate fetch failed: ${res.status}`)
 
   const data = await res.json() as ExchangeRateApiResponse
-  const rates = readRates(data.rates)
+  const apiRates = readRates(data.rates)
+
+  // Rates arrive quoted against the API's own base (its `base` field, EUR when
+  // it does not say). The portal stores them quoted against the CONFIGURED base
+  // (FA-11.3), so there is one anchor for every conversion and the base's own
+  // rate is 1. With the default API and the default base this is a no-op.
+  const apiBase =
+    typeof data.base === 'string' && isCurrencyCode(data.base.toUpperCase())
+      ? data.base.toUpperCase()
+      : DEFAULT_BASE_CURRENCY
+  const baseCurrency = await readBaseCurrency()
+  const rates = reBaseOnto(apiRates, apiBase, baseCurrency)
 
   const now = new Date()
 
