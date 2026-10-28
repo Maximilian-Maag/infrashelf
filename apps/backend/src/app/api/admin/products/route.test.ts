@@ -26,13 +26,27 @@ describe('GET /api/admin/products', () => {
     expect(res.status).toBe(403)
   })
 
-  it('returns product list for root', async () => {
+  it('returns a page of products for root', async () => {
     const root = await createUser({ role: 'root' })
     const auth = await makeAuthHeader(root)
     const res = await GET(makeReq('GET', undefined, auth))
     expect(res.status).toBe(200)
+    // A page envelope, not a bare array (#158): the response is bounded, and the
+    // caller reads `items`.
     const body = await res.json()
-    expect(Array.isArray(body)).toBe(true)
+    expect(body).toMatchObject({ items: expect.any(Array), total: expect.any(Number) })
+    expect(body.limit).toBeGreaterThan(0)
+  })
+
+  it('returns 400 for a malformed limit rather than page one under a new size', async () => {
+    const root = await createUser({ role: 'root' })
+    const auth = await makeAuthHeader(root)
+    const res = await GET(
+      new NextRequest('http://localhost/api/admin/products?limit=fifty', {
+        headers: { authorization: auth },
+      }),
+    )
+    expect(res.status).toBe(400)
   })
 })
 

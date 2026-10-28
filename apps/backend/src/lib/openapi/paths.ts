@@ -833,6 +833,7 @@ registry.registerPath({
     400: { description: 'Invalid filter or format' },
     401: { description: 'Unauthorized' },
     403: { description: 'Not the caller\'s project' },
+    413: { description: 'The filters match more orders than one export can carry' },
   },
 })
 
@@ -3150,14 +3151,30 @@ const adminProductSchema = productSchema.extend({
 registry.registerPath({
   method: 'get',
   path: '/admin/products',
-  summary: '[root] List all products',
+  summary: '[root] List products (paged)',
+  description:
+    'Paged in the database (#158): `total` counts every product, not the page, so the response ' +
+    'does not grow with the size of the installation. Retired products are included, marked.',
   tags: ['Admin'],
   security: bearerAuth,
+  request: {
+    query: z.object({ limit: z.string().optional(), offset: z.string().optional() }),
+  },
   responses: {
     200: {
-      description: 'List of products',
-      content: { 'application/json': { schema: z.array(adminProductSchema) } },
+      description: 'One page of products, with the total number of matches',
+      content: {
+        'application/json': {
+          schema: z.object({
+            items: z.array(adminProductSchema),
+            total: z.number(),
+            limit: z.number(),
+            offset: z.number(),
+          }),
+        },
+      },
     },
+    400: { description: 'Invalid limit or offset' },
     401: { description: 'Unauthorized' },
     403: { description: 'Forbidden' },
   },

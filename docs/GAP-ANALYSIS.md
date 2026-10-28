@@ -120,12 +120,16 @@ product deliberately diverged. None should be built blind:
 
 ### C. Non-functional tail (small, concrete, real)
 
-- **NFA-02.5 — unbounded list endpoints.** The pagination machinery is fully
-  built and used by `orders.ts` and `infrastructure.ts` (`pageWindow` / `toPage`
-  / `parsePageWindow` in `services/page.ts`). **The rest return whole tables:**
-  approvals, projects, cart, favourites, comments, product versions, admin
-  products, and the cost rows. A list's response still grows with the
-  installation there. This is the cleanest, most bounded remaining item.
+- **NFA-02.5 — unbounded list endpoints.** Mostly closed. The machinery
+  (`pageWindow` / `toPage` / `parsePageWindow` in `services/page.ts`) now backs
+  the catalogue, orders, infrastructure, audit, the admin product list and the
+  cost-row export (counted, refused 413 past `EXPORT_MAX_ROWS`). What an
+  inspection of the rest found: the approval queue is already the paged
+  `/api/orders?status=pending` (`GET /api/approvals` is unused), and `projects`,
+  `cart`, `favourites`, `comments` and product `versions` are bounded by one
+  user's or one entity's data rather than by the installation — `projects` also
+  feeds four dropdowns, so it is not pageable as-is. The remaining real work here
+  is small.
 - **NFA-02.1 — the login rate limiter is in-process** (see §0): a documented
   trade-off; act only when replica count makes it binding.
 

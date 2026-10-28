@@ -169,7 +169,7 @@ describe('every surface that names a product honours the reader\'s language (#16
 
     const list = await listProducts('de')
     expect(list.ok).toBe(true)
-    if (list.ok) expect(list.data.find((p) => p.id === product.id)?.name).toBe(NAME_DE)
+    if (list.ok) expect(list.data.items.find((p) => p.id === product.id)?.name).toBe(NAME_DE)
 
     const detail = await getProductAdmin(product.id, 'de')
     expect(detail.ok).toBe(true)

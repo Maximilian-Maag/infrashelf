@@ -33,14 +33,26 @@ const product = {
 }
 const category = { id: 1, name: 'Databases' }
 
-/** Answer each of the page's two fetches, by URL. */
+/**
+ * Answer each of the page's two fetches, by URL.
+ *
+ * The product list is paged (#158), so a bare array stands in for one page of
+ * itself; an object is passed through so a test can set `total`/`offset` too.
+ */
+const asPage = (items: unknown) =>
+  Array.isArray(items) ? { items, total: items.length, limit: 50, offset: 0 } : items
+
 const answer = (products: unknown, categories: unknown) => {
   get.mockImplementation((path: string) =>
     path.startsWith('/api/admin/products')
-      ? (products instanceof Error ? Promise.reject(products) : Promise.resolve(products))
+      ? (products instanceof Error ? Promise.reject(products) : Promise.resolve(asPage(products)))
       : (categories instanceof Error ? Promise.reject(categories) : Promise.resolve(categories)),
   )
 }
+
+/** Render the page the way Next calls it — with the resolved search params. */
+const renderPage = async (searchParams: Record<string, string> = {}) =>
+  render(await AdminProductsPage({ searchParams: Promise.resolve(searchParams) }))
 
 beforeEach(() => {
   get.mockReset()
@@ -56,7 +68,7 @@ beforeEach(() => {
 describe('AdminProductsPage when a fetch fails', () => {
   it('says the products could not be loaded instead of showing an empty table', async () => {
     answer(new ApiError(502, 'Bad Gateway'), [category])
-    render(await AdminProductsPage())
+    await renderPage()
 
     const alert = screen.getByRole('alert')
     expect(alert).toHaveTextContent('HTTP 502: Bad Gateway')
@@ -66,7 +78,7 @@ describe('AdminProductsPage when a fetch fails', () => {
 
   it('leaves a trace in the server log for a failure the user reloads past', async () => {
     answer(new ApiError(500, 'boom'), [category])
-    render(await AdminProductsPage())
+    await renderPage()
 
     expect(console.error).toHaveBeenCalledWith(
       '[page] could not load admin products: HTTP 500: boom',
@@ -75,7 +87,7 @@ describe('AdminProductsPage when a fetch fails', () => {
 
   it('keeps the products when only the categories fail', async () => {
     answer([product], new ApiError(403, 'Forbidden'))
-    render(await AdminProductsPage())
+    await renderPage()
 
     // One panel failing must not blank the other — that is why this page uses
     // allSettled at all.
@@ -85,9 +97,40 @@ describe('AdminProductsPage when a fetch fails', () => {
 
   it('still says "no products yet" when the fetch succeeds and returns none', async () => {
     answer([], [category])
-    render(await AdminProductsPage())
+    await renderPage()
 
     expect(screen.getByText('No products yet.')).toBeInTheDocument()
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+})
+
+describe('AdminProductsPage paging (#158)', () => {
+  const fifty = () =>
+    Array.from({ length: 50 }, (_, i) => ({ ...product, id: i + 1, name: `Product ${i + 1}` }))
+
+  it('asks the API for the page the URL names', async () => {
+    answer({ items: [product], total: 120, limit: 50, offset: 50 }, [category])
+    await renderPage({ offset: '50' })
+
+    expect(get).toHaveBeenCalledWith('/api/admin/products?lang=en&offset=50')
+  })
+
+  it('offers the next page when there is more than one', async () => {
+    answer({ items: fifty(), total: 120, limit: 50, offset: 0 }, [category])
+    await renderPage()
+
+    expect(screen.getByRole('link', { name: /next/i })).toHaveAttribute(
+      'href',
+      '/admin/products?offset=50',
+    )
+    // Back to page one is not offered from page one.
+    expect(screen.queryByRole('link', { name: /previous/i })).not.toBeInTheDocument()
+  })
+
+  it('renders no pager when everything fits on one page', async () => {
+    answer([product], [category])
+    await renderPage()
+
+    expect(screen.queryByRole('link', { name: /next/i })).not.toBeInTheDocument()
   })
 })

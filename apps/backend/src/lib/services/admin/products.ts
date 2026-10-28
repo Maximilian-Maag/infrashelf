@@ -26,6 +26,7 @@ import { fireDestroyTriggers, destroyVariables } from '@/lib/services/teardown'
 import { recordProductVersion } from '@/lib/services/versions'
 import { logAudit, logAuditWith, changedFields } from '@/lib/audit'
 import { isEmptyUpdate, EMPTY_UPDATE_MESSAGE } from '@/lib/services/updates'
+import { pageWindow, toPage, type Page } from '@/lib/services/page'
 import {
   ALLOWED_IMAGE_MIMES,
   MAX_IMAGE_BYTES,
@@ -151,7 +152,16 @@ const adminProductSelect = (lang: string) => ({
   retiredAt: products.retiredAt,
 })
 
-export const listProducts = async (lang = 'en'): Promise<Result<ProductAdminRow[]>> => {
+export const listProducts = async (
+  lang = 'en',
+  window: { limit?: number; offset?: number } = {},
+): Promise<Result<Page<ProductAdminRow>>> => {
+  const page = pageWindow(window.limit, window.offset)
+
+  // Counted over `products` alone, not the join: the join only supplies the
+  // category NAME for the rows on the page, and a count wants none of it (#158).
+  const total = await countWhere(db.select({ n: sql<number>`count(*)::int` }).from(products))
+
   const rows = await db
     .select(adminProductSelect(lang))
     .from(products)
@@ -160,9 +170,12 @@ export const listProducts = async (lang = 'en'): Promise<Result<ProductAdminRow[
     // is the only screen from which they can be put back (#251). Hiding them here
     // was what made retirement a one-way trapdoor. `listCatalog` and `getProduct`
     // still filter, which is the filter that was always meant.
+    // Ordered by id, which is unique, so the page boundary is stable.
     .orderBy(products.id)
+    .limit(page.limit)
+    .offset(page.offset)
 
-  return ok(rows as ProductAdminRow[])
+  return ok(toPage(rows as ProductAdminRow[], total, page))
 }
 
 export const createProduct = async (
