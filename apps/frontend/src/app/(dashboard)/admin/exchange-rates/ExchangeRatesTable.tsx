@@ -92,6 +92,11 @@ export function ExchangeRatesTable({ initial, initialError = null, initialBaseCu
       setBaseCurrency(saved.baseCurrency)
       setDraft(saved.baseCurrency)
       setBaseSaved(true)
+      // The rows on screen are quoted against the OLD base, so they are wrong under
+      // the new header the moment this succeeds. Drop them before the reload: if the
+      // reload fails, an empty table with an error beats stale figures wearing a new
+      // currency's label.
+      setRates([])
       await load()
     } catch (err) {
       setBaseError(err instanceof Error ? err.message : t('failedToSaveBaseCurrency', lang))
@@ -104,7 +109,7 @@ export function ExchangeRatesTable({ initial, initialError = null, initialBaseCu
     <Card
       title={t('exchangeRates', lang)}
       action={
-        <Button size="sm" variant="secondary" onClick={handleRefresh} disabled={refreshing || loading}>
+        <Button size="sm" variant="secondary" onClick={handleRefresh} disabled={refreshing || loading || savingBase}>
           {refreshing ? t('refreshing', lang) : t('refreshRates', lang)}
         </Button>
       }
@@ -125,7 +130,9 @@ export function ExchangeRatesTable({ initial, initialError = null, initialBaseCu
               className="font-mono uppercase"
             />
           </div>
-          <Button type="submit" size="sm" disabled={savingBase || draft.trim() === ''}>
+          {/* Disabled while a refresh is in flight too: a refresh landing mid-save
+              would apply rows re-based onto the old base under the new header. */}
+          <Button type="submit" size="sm" disabled={savingBase || refreshing || loading || draft.trim() === ''}>
             {savingBase ? t('saving', lang) : t('save', lang)}
           </Button>
         </div>

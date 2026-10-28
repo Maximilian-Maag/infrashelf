@@ -169,4 +169,21 @@ describe('ExchangeRatesTable — the base currency', () => {
     await u.clear(baseField())
     expect(saveBase()).toBeDisabled()
   })
+
+  it('drops the old-base rows when the reload after a save fails', async () => {
+    // The rows on screen were quoted against EUR; under a USD header they would be
+    // wrong. An empty table with an error beats stale figures wearing the new label.
+    vi.mocked(put).mockResolvedValue({ baseCurrency: 'USD' } as never)
+    vi.mocked(get).mockRejectedValue(new Error('offline'))
+    const u = userEvent.setup()
+    render(<ExchangeRatesTable initial={[rate()]} initialBaseCurrency="EUR" />)
+    expect(screen.getByText('SEK')).toBeInTheDocument()
+
+    await u.clear(baseField())
+    await u.type(baseField(), 'USD')
+    await u.click(saveBase())
+
+    expect(await screen.findByText('offline')).toBeInTheDocument()
+    expect(screen.queryByText('SEK')).not.toBeInTheDocument()
+  })
 })
