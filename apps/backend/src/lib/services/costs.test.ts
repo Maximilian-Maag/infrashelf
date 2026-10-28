@@ -307,6 +307,30 @@ describe('getCostReport — currency conversion', () => {
   })
 })
 
+describe('getCostRows — the export is bounded (#158)', () => {
+  it('refuses an export that matches more rows than one export can carry', async () => {
+    // A file that quietly stops short of the end looks complete, so it is refused
+    // rather than truncated. The cap is a parameter, so the test does not need
+    // ten thousand orders to cross it.
+    const ctx = await setup()
+    await spend(ctx, { projectId: ctx.mine.id, productId: ctx.nginx.id, price: '10.00' })
+    await spend(ctx, { projectId: ctx.mine.id, productId: ctx.postgres.id, price: '20.00' })
+
+    const result = await getCostRows(makeSession(ctx.admin), {}, 'en', 1)
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.status).toBe(413)
+  })
+
+  it('returns the rows when they fit inside the cap', async () => {
+    const ctx = await setup()
+    await spend(ctx, { projectId: ctx.mine.id, productId: ctx.nginx.id, price: '10.00' })
+    await spend(ctx, { projectId: ctx.mine.id, productId: ctx.postgres.id, price: '20.00' })
+
+    const result = await getCostRows(makeSession(ctx.admin), {}, 'en', 2)
+    expect(result.ok && result.data.length).toBe(2)
+  })
+})
+
 describe('getCostReport — breakdowns', () => {
   it('groups by project, product, environment and cost centre', async () => {
     const ctx = await setup()

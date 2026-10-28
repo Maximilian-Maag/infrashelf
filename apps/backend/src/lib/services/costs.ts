@@ -14,6 +14,8 @@ import { ok, err, type Result } from '@/lib/services/result'
 import { linePriceSql, lineCurrencySql } from '@/lib/services/sizes'
 import { productNameSql } from '@/lib/db/productText'
 import { readBaseCurrency } from '@/lib/exchange/baseCurrency'
+import { countWhere } from '@/lib/db/queries'
+import { EXPORT_MAX_ROWS } from '@/lib/services/page'
 
 /**
  * Spending overview (issue #32).
@@ -564,6 +566,7 @@ export const getCostRows = async (
   session: SessionUser,
   filters: CostFilters = {},
   lang = 'en',
+  maxRows = EXPORT_MAX_ROWS,
 ): Promise<Result<CostRowExport[]>> => {
   const isAdmin = session.role === 'admin' || session.role === 'root'
 
@@ -572,6 +575,26 @@ export const getCostRows = async (
   if (filters.projectId !== undefined) conditions.push(eq(orders.projectId, filters.projectId))
   if (filters.from) conditions.push(gte(orders.createdAt, filters.from))
   if (filters.to) conditions.push(lte(orders.createdAt, filters.to))
+  const where = and(...conditions)
+
+  // Bounded, like the infrastructure export (#158): an export asks for the whole
+  // filtered set, and the count is what stands between a large download and the
+  // container building it in memory. Counted over the same join the filter can
+  // name, so the number is the number of rows the export would carry.
+  const total = await countWhere(
+    db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(orders)
+      .leftJoin(projects, eq(orders.projectId, projects.id))
+      .where(where),
+  )
+  if (total > maxRows) {
+    return err(
+      413,
+      `This export matches ${total.toLocaleString('en-US')} orders, which is more than one export can ` +
+        `carry. Narrow it with the project or date filters and take the report a slice at a time.`,
+    )
+  }
 
   const rows = await db
     .select({
@@ -606,8 +629,9 @@ export const getCostRows = async (
         eq(orders.environmentId, productEnvironments.environmentId),
       ),
     )
-    .where(and(...conditions))
+    .where(where)
     .orderBy(sql`${orders.createdAt} DESC`, sql`${orders.id} DESC`)
+    .limit(maxRows)
 
   const rates = await loadRates()
   const baseCurrency = await readBaseCurrency()

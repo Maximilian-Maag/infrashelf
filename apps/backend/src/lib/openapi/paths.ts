@@ -833,6 +833,7 @@ registry.registerPath({
     400: { description: 'Invalid filter or format' },
     401: { description: 'Unauthorized' },
     403: { description: 'Not the caller\'s project' },
+    413: { description: 'The filters match more orders than one export can carry' },
   },
 })
 
