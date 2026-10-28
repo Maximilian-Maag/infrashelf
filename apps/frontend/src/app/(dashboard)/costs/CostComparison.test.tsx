@@ -13,18 +13,18 @@ import { CHART_PRIMARY, CHART_MUTED } from '@/lib/chartTokens'
  * still in progress — a figure the reader would otherwise compare against a
  * complete month as though it were one.
  */
-const period = (over: { period: string; totalEur: number; partial?: boolean }) => ({
+const period = (over: { period: string; totalBase: number; partial?: boolean }) => ({
   period: over.period,
-  totalEur: over.totalEur,
+  totalBase: over.totalBase,
   partial: over.partial ?? false,
   orderCount: 1,
 })
 
-const comparison = (over: Partial<Comparison> & { currentEur: number; previousEur: number; changeEur: number; changePct: number | null; currentPartial?: boolean }) =>
+const comparison = (over: Partial<Comparison> & { currentBase: number; previousBase: number; changeBase: number; changePct: number | null; currentPartial?: boolean }) =>
   ({
-    current: period({ period: '2026-09', totalEur: over.currentEur, partial: over.currentPartial }),
-    previous: period({ period: '2026-08', totalEur: over.previousEur }),
-    changeEur: over.changeEur,
+    current: period({ period: '2026-09', totalBase: over.currentBase, partial: over.currentPartial }),
+    previous: period({ period: '2026-08', totalBase: over.previousBase }),
+    changeBase: over.changeBase,
     changePct: over.changePct,
   }) as unknown as Comparison
 
@@ -61,7 +61,7 @@ describe('with nothing to compare', () => {
 describe('the direction of the change', () => {
   it('marks a rise with an up arrow and a plus', () => {
     const { container } = renderCard(
-      comparison({ currentEur: 150, previousEur: 100, changeEur: 50, changePct: 50 }),
+      comparison({ currentBase: 150, previousBase: 100, changeBase: 50, changePct: 50 }),
     )
     expect(screen.getByText('▲')).toBeInTheDocument()
     expect(headline(container)).toContain('+')
@@ -71,7 +71,7 @@ describe('the direction of the change', () => {
     // A minus, not a hyphen: the hyphen renders too short to read as negative at
     // this size, which is the whole reason the component picks the character.
     const { container } = renderCard(
-      comparison({ currentEur: 60, previousEur: 100, changeEur: -40, changePct: -40 }),
+      comparison({ currentBase: 60, previousBase: 100, changeBase: -40, changePct: -40 }),
     )
     expect(screen.getByText('▼')).toBeInTheDocument()
     expect(headline(container)).toContain('−')
@@ -80,7 +80,7 @@ describe('the direction of the change', () => {
 
   it('marks no change with a dash and no sign at all', () => {
     const { container } = renderCard(
-      comparison({ currentEur: 100, previousEur: 100, changeEur: 0, changePct: 0 }),
+      comparison({ currentBase: 100, previousBase: 100, changeBase: 0, changePct: 0 }),
     )
     expect(screen.getByText('–')).toBeInTheDocument()
     expect(screen.queryByText('▲')).not.toBeInTheDocument()
@@ -97,14 +97,14 @@ describe('the direction of the change', () => {
   it('always prints the money as a magnitude, with the sign carried separately', () => {
     // `Math.abs`, so a fall reads "− 40.00" rather than "− -40.00".
     const { container } = renderCard(
-      comparison({ currentEur: 60, previousEur: 100, changeEur: -40, changePct: -40 }),
+      comparison({ currentBase: 60, previousBase: 100, changeBase: -40, changePct: -40 }),
     )
     expect(headline(container)).toContain('40.00 EUR')
     expect(headline(container)).not.toContain('-40.00')
   })
 
   it('hides the arrow from assistive technology, because the sign already says it', () => {
-    renderCard(comparison({ currentEur: 150, previousEur: 100, changeEur: 50, changePct: 50 }))
+    renderCard(comparison({ currentBase: 150, previousBase: 100, changeBase: 50, changePct: 50 }))
     expect(screen.getByText('▲')).toHaveAttribute('aria-hidden', 'true')
   })
 })
@@ -115,7 +115,7 @@ describe('the percentage beside the change', () => {
     // through `sharePercent(pct, 100)`, so 50 renders as "50%". Written as 0.5
     // this asserted "0.5%" and the test was the thing that was wrong.
     const { container } = renderCard(
-      comparison({ currentEur: 150, previousEur: 100, changeEur: 50, changePct: 50 }),
+      comparison({ currentBase: 150, previousBase: 100, changeBase: 50, changePct: 50 }),
     )
     expect(headline(container)).toContain('50%')
   })
@@ -124,7 +124,7 @@ describe('the percentage beside the change', () => {
     // A change from nothing has no percentage — the API sends null rather than
     // infinity, and the card must not print "Infinity%".
     const { container } = renderCard(
-      comparison({ currentEur: 150, previousEur: 0, changeEur: 150, changePct: null }),
+      comparison({ currentBase: 150, previousBase: 0, changeBase: 150, changePct: null }),
     )
     expect(headline(container)).not.toContain('%')
   })
@@ -133,7 +133,7 @@ describe('the percentage beside the change', () => {
 describe('the two bars', () => {
   it('scales each against the larger month', () => {
     const { container } = renderCard(
-      comparison({ currentEur: 50, previousEur: 100, changeEur: -50, changePct: -50 }),
+      comparison({ currentBase: 50, previousBase: 100, changeBase: -50, changePct: -50 }),
     )
     const [previous, current] = bars(container)
     // 320 viewBox units wide: the bigger month fills it, the smaller takes half.
@@ -144,7 +144,7 @@ describe('the two bars', () => {
   it('never draws a bar thinner than three units', () => {
     // A month with almost nothing in it still has to be visible as a bar.
     const { container } = renderCard(
-      comparison({ currentEur: 0.01, previousEur: 10_000, changeEur: -9999.99, changePct: -100 }),
+      comparison({ currentBase: 0.01, previousBase: 10_000, changeBase: -9999.99, changePct: -100 }),
     )
     for (const bar of bars(container)) {
       expect(Number(bar.getAttribute('width'))).toBeGreaterThanOrEqual(3)
@@ -153,7 +153,7 @@ describe('the two bars', () => {
 
   it('draws no bar at all for a month with nothing in it', () => {
     const { container } = renderCard(
-      comparison({ currentEur: 0, previousEur: 100, changeEur: -100, changePct: -100 }),
+      comparison({ currentBase: 0, previousBase: 100, changeBase: -100, changePct: -100 }),
     )
     // Only the previous month's bar; a zero-width rect would be a smudge.
     expect(bars(container)).toHaveLength(1)
@@ -161,7 +161,7 @@ describe('the two bars', () => {
 
   it('emphasises the current month and mutes the previous one', () => {
     const { container } = renderCard(
-      comparison({ currentEur: 100, previousEur: 50, changeEur: 50, changePct: 100 }),
+      comparison({ currentBase: 100, previousBase: 50, changeBase: 50, changePct: 100 }),
     )
     const [previous, current] = bars(container)
     expect(previous.getAttribute('fill')).toBe(CHART_MUTED)
@@ -175,7 +175,7 @@ describe('the two bars', () => {
      * and it beats the emphasis colour rather than the other way round.
      */
     const { container } = renderCard(
-      comparison({ currentEur: 40, previousEur: 100, changeEur: -60, changePct: -60, currentPartial: true }),
+      comparison({ currentBase: 40, previousBase: 100, changeBase: -60, changePct: -60, currentPartial: true }),
     )
     const [, current] = bars(container)
     expect(current.getAttribute('fill')).toContain('url(#')
@@ -185,20 +185,20 @@ describe('the two bars', () => {
 
 describe('both months are named as text', () => {
   it('labels each row with its own month', () => {
-    renderCard(comparison({ currentEur: 150, previousEur: 100, changeEur: 50, changePct: 50 }))
+    renderCard(comparison({ currentBase: 150, previousBase: 100, changeBase: 50, changePct: 50 }))
     expect(screen.getByText(/August 2026/)).toBeInTheDocument()
     expect(screen.getByText(/September 2026/)).toBeInTheDocument()
   })
 
   it('prints each month total beside its label', () => {
-    renderCard(comparison({ currentEur: 150, previousEur: 100, changeEur: 50, changePct: 50 }))
+    renderCard(comparison({ currentBase: 150, previousBase: 100, changeBase: 50, changePct: 50 }))
     expect(screen.getByText('150.00 EUR')).toBeInTheDocument()
     expect(screen.getByText('100.00 EUR')).toBeInTheDocument()
   })
 
   it('hides the bars from assistive technology, since the figures are already text', () => {
     const { container } = renderCard(
-      comparison({ currentEur: 150, previousEur: 100, changeEur: 50, changePct: 50 }),
+      comparison({ currentBase: 150, previousBase: 100, changeBase: 50, changePct: 50 }),
     )
     for (const svg of container.querySelectorAll('svg')) {
       expect(svg).toHaveAttribute('aria-hidden', 'true')

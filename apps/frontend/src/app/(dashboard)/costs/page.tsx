@@ -14,7 +14,7 @@ import { SectionError } from '@/components/ui/SectionError'
 import { section } from '@/lib/section'
 import { getLang } from '@/lib/getLang'
 import { t } from '@/lib/i18n'
-import { localeToCurrency, convertPrice } from '@/lib/locale'
+import { localeToCurrency, convertPrice, baseCurrencyFromRates } from '@/lib/locale'
 
 // The range and project filters live in the URL (see CostFilters), so every
 // filter combination is its own render — nothing here may be cached across them.
@@ -68,11 +68,13 @@ export default async function CostsPage({ searchParams }: Props) {
     ratesRes.status === 'fulfilled'
       ? Object.fromEntries((ratesRes.value ?? []).map((r) => [r.currencyCode, parseFloat(r.rate)]))
       : {}
-  // The report sums every order into the configured base currency (FA-11.3) — the
-  // field is still named `totalEur` for history, but it is base-currency amounts —
-  // so the figure is converted FROM the base. EUR by default, which is what the
-  // page always assumed.
-  const baseCurrency = (currencyRes.status === 'fulfilled' ? currencyRes.value?.baseCurrency : null) ?? 'EUR'
+  // The report sums every order into the configured base currency (FA-11.3), so
+  // the figure is converted FROM the base — EUR by default, which is what the page
+  // always assumed before the base became a setting.
+  const baseCurrency =
+    (currencyRes.status === 'fulfilled' ? currencyRes.value?.baseCurrency : null) ??
+    baseCurrencyFromRates(rates) ??
+    'EUR'
 
   /** Base-currency amount from the API → the viewer's currency, in their locale. */
   const money = (amount: number) => {
@@ -105,7 +107,7 @@ export default async function CostsPage({ searchParams }: Props) {
             <Card>
               <div className="space-y-2">
                 <p className="text-sm font-medium text-slate-600">{t('totalSpend', lang)}</p>
-                <p className="text-3xl font-bold text-slate-900">{money(report.totalEur)}</p>
+                <p className="text-3xl font-bold text-slate-900">{money(report.totalBase)}</p>
                 <p className="text-sm text-slate-600">
                   {report.orderCount} {t('ordersCounted', lang)}
                 </p>
@@ -201,7 +203,7 @@ function Breakdown({
   // Bars are relative to the largest bucket, not to the total: with one dominant
   // project every other bar would be a sliver and the comparison — the point of
   // the breakdown — would be unreadable. The API already sorts by spend.
-  const max = buckets.reduce((m, b) => Math.max(m, b.totalEur), 0)
+  const max = buckets.reduce((m, b) => Math.max(m, b.totalBase), 0)
   return (
     <Card title={title}>
       {buckets.length === 0 ? (
@@ -212,7 +214,7 @@ function Breakdown({
             <li key={`${bucket.id ?? 'none'}-${bucket.label}`}>
               <div className="flex items-baseline justify-between gap-3 text-sm">
                 <span className="text-slate-900">{bucket.label}</span>
-                <span className="whitespace-nowrap font-medium text-slate-900">{money(bucket.totalEur)}</span>
+                <span className="whitespace-nowrap font-medium text-slate-900">{money(bucket.totalBase)}</span>
               </div>
               <div className="mt-1 flex items-center gap-2">
                 {/* Decoration only — the figure beside it is the accessible value,
@@ -220,7 +222,7 @@ function Breakdown({
                 <div className="h-1.5 flex-1 rounded-full bg-slate-100" aria-hidden="true">
                   <div
                     className="h-1.5 rounded-full bg-blue-500"
-                    style={{ width: `${max > 0 ? Math.max(2, (bucket.totalEur / max) * 100) : 0}%` }}
+                    style={{ width: `${max > 0 ? Math.max(2, (bucket.totalBase / max) * 100) : 0}%` }}
                   />
                 </div>
                 <span className="text-xs text-slate-600 whitespace-nowrap">

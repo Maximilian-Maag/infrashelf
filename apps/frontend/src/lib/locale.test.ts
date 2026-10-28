@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { convertPrice, localeToCurrency, priceInBase, sortByValue } from './locale'
+import { convertPrice, localeToCurrency, priceInBase, sortByValue, baseCurrencyFromRates } from './locale'
 
 const rates = { USD: 1.1, GBP: 0.85 } // relative to EUR
 
@@ -51,6 +51,27 @@ describe('convertPrice', () => {
 
   it('returns the raw price for a non-numeric input', () => {
     expect(convertPrice('n/a', 'EUR', 'USD', rates)).toEqual({ amount: 'n/a', currency: 'EUR' })
+  })
+
+  it('does not convert when the SOURCE currency has no rate', () => {
+    // Assuming parity (1:1 with the base) would invent a figure and label it as
+    // converted. The amount is shown as stored, in its own currency, so the
+    // reader can see it is not the display currency.
+    expect(convertPrice('100', 'JPY', 'USD', rates)).toEqual({ amount: '100', currency: 'JPY' })
+    expect(convertPrice('100', 'JPY', 'EUR', rates)).toEqual({ amount: '100', currency: 'JPY' })
+  })
+})
+
+describe('baseCurrencyFromRates', () => {
+  it('finds the currency whose rate is 1 — the base, by construction', () => {
+    expect(baseCurrencyFromRates({ USD: 1, EUR: 0.9, GBP: 0.8 })).toBe('USD')
+    expect(baseCurrencyFromRates({ EUR: 1 })).toBe('EUR')
+  })
+
+  it('is null when no rate is exactly 1, so the caller keeps its own fallback', () => {
+    // `rates` quotes USD and GBP but carries no currency at parity.
+    expect(baseCurrencyFromRates(rates)).toBeNull()
+    expect(baseCurrencyFromRates({})).toBeNull()
   })
 })
 

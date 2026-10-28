@@ -339,7 +339,7 @@ describe('sizing through the order flow (issue #98)', () => {
     expect(report.ok).toBe(true)
     if (!report.ok) return
     // 2 × 400, the price that applied — not 2 × 800, which would restate history.
-    expect(report.data.totalEur).toBe(800)
+    expect(report.data.totalBase).toBe(800)
     expect(report.data.estimatedOrders).toBe(0)
   })
 
@@ -359,7 +359,7 @@ describe('sizing through the order flow (issue #98)', () => {
 
     const report = await getCostReport(makeSession(admin))
     if (!report.ok) throw new Error('report failed')
-    expect(report.data.totalEur).toBe(100)
+    expect(report.data.totalBase).toBe(100)
 
     const rows = await getCostRows(makeSession(admin))
     if (!rows.ok) throw new Error('rows failed')
@@ -367,7 +367,7 @@ describe('sizing through the order flow (issue #98)', () => {
     // The unit price stays the unit price; the line total is what reconciles.
     expect(rows.data[0].price).toBe('25.00')
     expect(rows.data[0].quantity).toBe(4)
-    expect(rows.data[0].lineTotalEur).toBe(100)
+    expect(rows.data[0].lineTotalBase).toBe(100)
     expect(rows.data[0].size).toBe('Medium')
   })
 
@@ -393,7 +393,7 @@ describe('sizing through the order flow (issue #98)', () => {
 
     const report = await getCostReport(makeSession(admin))
     if (!report.ok) throw new Error('report failed')
-    expect(report.data.totalEur).toBe(400)
+    expect(report.data.totalBase).toBe(400)
     expect(report.data.estimatedOrders).toBe(1)
   })
 
@@ -418,14 +418,14 @@ describe('sizing through the order flow (issue #98)', () => {
     if (!report.ok) throw new Error('report failed')
     // Not the offering's 99: that is the price of an unsized line, and this order
     // named a size. Nothing is a truer answer here than the wrong thing.
-    expect(report.data.totalEur).toBe(0)
+    expect(report.data.totalBase).toBe(0)
 
     // The export reports an unpriceable line as zero and flags it estimated — the
     // same `?? '0'` an order whose offering was withdrawn entirely has always hit.
     const rows = await getCostRows(makeSession(admin))
     if (!rows.ok) throw new Error('rows failed')
     expect(rows.data[0].price).toBe('0')
-    expect(rows.data[0].lineTotalEur).toBe(0)
+    expect(rows.data[0].lineTotalBase).toBe(0)
     expect(rows.data[0].estimated).toBe(true)
   })
 
@@ -442,7 +442,7 @@ describe('sizing through the order flow (issue #98)', () => {
 
     const report = await getCostReport(makeSession(admin))
     if (!report.ok) throw new Error('report failed')
-    expect(report.data.totalEur).toBe(99)
+    expect(report.data.totalBase).toBe(99)
   })
 })
 

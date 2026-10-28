@@ -14,7 +14,7 @@ import { CHART_STEPS } from '@/lib/chartTokens'
  * and the accessibility contract the file's own header commits to: nothing
  * knowable only from a hue, and the bar reaching 100% of its width.
  */
-const bucket = (over: Partial<CostBucket> & { label: string; totalEur: number }): CostBucket =>
+const bucket = (over: Partial<CostBucket> & { label: string; totalBase: number }): CostBucket =>
   ({ id: 1, orderCount: 1, ...over }) as CostBucket
 
 const money = (eur: number) => `${eur.toFixed(2)} EUR`
@@ -47,8 +47,8 @@ const axis = (container: HTMLElement) =>
 describe('the bar encodes share as width', () => {
   it('gives each segment a width proportional to its share', () => {
     const { container } = renderChart([
-      bucket({ id: 1, label: 'Alpha', totalEur: 75 }),
-      bucket({ id: 2, label: 'Beta', totalEur: 25 }),
+      bucket({ id: 1, label: 'Alpha', totalBase: 75 }),
+      bucket({ id: 2, label: 'Beta', totalBase: 25 }),
     ])
 
     const [first, second] = segments(container)
@@ -61,8 +61,8 @@ describe('the bar encodes share as width', () => {
 
   it('lays the segments out cumulatively, with no gap at the left edge', () => {
     const { container } = renderChart([
-      bucket({ id: 1, label: 'Alpha', totalEur: 60 }),
-      bucket({ id: 2, label: 'Beta', totalEur: 40 }),
+      bucket({ id: 1, label: 'Alpha', totalBase: 60 }),
+      bucket({ id: 2, label: 'Beta', totalBase: 40 }),
     ])
 
     const [first, second] = segments(container)
@@ -74,8 +74,8 @@ describe('the bar encodes share as width', () => {
 
   it('keeps the last segment full width, so the bar reaches 100%', () => {
     const { container } = renderChart([
-      bucket({ id: 1, label: 'Alpha', totalEur: 50 }),
-      bucket({ id: 2, label: 'Beta', totalEur: 50 }),
+      bucket({ id: 1, label: 'Alpha', totalBase: 50 }),
+      bucket({ id: 2, label: 'Beta', totalBase: 50 }),
     ])
 
     const rects = segments(container)
@@ -88,9 +88,9 @@ describe('the bar encodes share as width', () => {
     // A rounding floor, so a tiny-but-real share is still visible rather than
     // vanishing into the gap subtraction.
     const { container } = renderChart([
-      bucket({ id: 1, label: 'Huge', totalEur: 100_000 }),
-      bucket({ id: 2, label: 'Sliver', totalEur: 1 }),
-      bucket({ id: 3, label: 'Tail', totalEur: 1 }),
+      bucket({ id: 1, label: 'Huge', totalBase: 100_000 }),
+      bucket({ id: 2, label: 'Sliver', totalBase: 1 }),
+      bucket({ id: 3, label: 'Tail', totalBase: 1 }),
     ])
 
     for (const rect of segments(container)) {
@@ -111,7 +111,7 @@ describe('the bar encodes share as width', () => {
      * something WAS recorded and priced at nothing — the rows still have to
      * appear, or a reader cannot tell "no orders" from "orders worth nothing".
      */
-    const { container } = renderChart([bucket({ label: 'Nothing', totalEur: 0 })])
+    const { container } = renderChart([bucket({ label: 'Nothing', totalBase: 0 })])
 
     expect(container.querySelector('svg')).toBeNull()
     expect(screen.queryByText(/no spending recorded/i)).not.toBeInTheDocument()
@@ -128,7 +128,7 @@ describe('the tail is folded rather than dropped', () => {
     // Segments that do not add up to the total make a share chart a lie, so the
     // tail is summed rather than cut.
     const many = Array.from({ length: CHART_STEPS + 3 }, (_, i) =>
-      bucket({ id: i + 1, label: `B${i}`, totalEur: 10 }),
+      bucket({ id: i + 1, label: `B${i}`, totalBase: 10 }),
     )
     renderChart(many)
 
@@ -142,8 +142,8 @@ describe('the tail is folded rather than dropped', () => {
 
   it('leaves the buckets alone when there are few enough to show', () => {
     renderChart([
-      bucket({ id: 1, label: 'Alpha', totalEur: 10 }),
-      bucket({ id: 2, label: 'Beta', totalEur: 10 }),
+      bucket({ id: 1, label: 'Alpha', totalBase: 10 }),
+      bucket({ id: 2, label: 'Beta', totalBase: 10 }),
     ])
     expect(screen.queryByText('Other')).not.toBeInTheDocument()
   })
@@ -152,8 +152,8 @@ describe('the tail is folded rather than dropped', () => {
 describe('everything on the chart is also there as text', () => {
   it('names each segment with its amount and its share in the table', () => {
     renderChart([
-      bucket({ id: 1, label: 'Alpha', totalEur: 75 }),
-      bucket({ id: 2, label: 'Beta', totalEur: 25 }),
+      bucket({ id: 1, label: 'Alpha', totalBase: 75 }),
+      bucket({ id: 2, label: 'Beta', totalBase: 25 }),
     ])
 
     const alpha = screen.getByText('Alpha').closest('tr') as HTMLElement
@@ -168,22 +168,22 @@ describe('everything on the chart is also there as text', () => {
     // The SVG is one image to assistive technology; the per-segment title is what
     // a pointer user gets, and it must not disagree with the table.
     const { container } = renderChart([
-      bucket({ id: 1, label: 'Alpha', totalEur: 75 }),
-      bucket({ id: 2, label: 'Beta', totalEur: 25 }),
+      bucket({ id: 1, label: 'Alpha', totalBase: 75 }),
+      bucket({ id: 2, label: 'Beta', totalBase: 25 }),
     ])
     const titles = [...container.querySelectorAll('svg title')].map((n) => n.textContent)
     expect(titles).toEqual(['Alpha: 75.00 EUR — 75%', 'Beta: 25.00 EUR — 25%'])
   })
 
   it('labels the bar with the dimension it is splitting', () => {
-    const { container } = renderChart([bucket({ label: 'Alpha', totalEur: 10 })])
+    const { container } = renderChart([bucket({ label: 'Alpha', totalBase: 10 })])
     const svg = container.querySelector('svg[role="img"]')
     expect(svg?.getAttribute('aria-label')).toContain('Per project')
   })
 
   it('hides the swatch and the axis from assistive technology', () => {
     // Both only restate what the table says in words; announced, they are noise.
-    const { container } = renderChart([bucket({ label: 'Alpha', totalEur: 10 })])
+    const { container } = renderChart([bucket({ label: 'Alpha', totalBase: 10 })])
     const axisRow = container.querySelector('[aria-hidden="true"].relative')
     expect(axisRow).not.toBeNull()
     expect(container.querySelector('span.rounded-sm')).toHaveAttribute('aria-hidden', 'true')
@@ -192,14 +192,14 @@ describe('everything on the chart is also there as text', () => {
 
 describe('the percentage axis', () => {
   it('prints all five ticks', () => {
-    const { container } = renderChart([bucket({ label: 'Alpha', totalEur: 10 })])
+    const { container } = renderChart([bucket({ label: 'Alpha', totalBase: 10 })])
     for (const label of ['0%', '25%', '50%', '75%', '100%']) {
       expect(axis(container).getByText(label)).toBeInTheDocument()
     }
   })
 
   it('positions each tick at its true fraction, not evenly spaced', () => {
-    const { container } = renderChart([bucket({ label: 'Alpha', totalEur: 10 })])
+    const { container } = renderChart([bucket({ label: 'Alpha', totalBase: 10 })])
     expect(axis(container).getByText('25%').getAttribute('style')).toContain('left: 25%')
     expect(axis(container).getByText('75%').getAttribute('style')).toContain('left: 75%')
   })
@@ -207,7 +207,7 @@ describe('the percentage axis', () => {
   it('pulls the end labels inside the bar and leaves the first one alone', () => {
     // `justify-between` distributes the GAPS, which puts a wide "100 %" and a
     // narrow "0 %" off their own marks.
-    const { container } = renderChart([bucket({ label: 'Alpha', totalEur: 10 })])
+    const { container } = renderChart([bucket({ label: 'Alpha', totalBase: 10 })])
     expect(axis(container).getByText('0%').getAttribute('style')).not.toContain('translateX')
     expect(axis(container).getByText('100%').getAttribute('style')).toContain('translateX(-100%)')
     expect(axis(container).getByText('50%').getAttribute('style')).toContain('translateX(-50%)')
@@ -216,7 +216,7 @@ describe('the percentage axis', () => {
 
 describe('the caveats travel with the figures', () => {
   it('passes the estimated-order count through', () => {
-    renderChart([bucket({ label: 'Alpha', totalEur: 10 })], { estimatedOrders: 3 })
+    renderChart([bucket({ label: 'Alpha', totalBase: 10 })], { estimatedOrders: 3 })
     expect(screen.getByText(/3/)).toBeInTheDocument()
   })
 })

@@ -13,6 +13,7 @@ import { alias } from 'drizzle-orm/pg-core'
 import { ok, err, type Result } from '@/lib/services/result'
 import { linePriceSql, lineCurrencySql } from '@/lib/services/sizes'
 import { productNameSql } from '@/lib/db/productText'
+import { readBaseCurrency } from '@/lib/exchange/baseCurrency'
 
 /**
  * Spending overview (issue #32).
@@ -59,8 +60,8 @@ export interface CostFilters {
 export interface CostBucket {
   id: number | null
   label: string
-  /** Total in EUR, the rate base. The client converts to the viewer's currency. */
-  totalEur: number
+  /** Total in the configured base currency (FA-11.3). The client converts it to the viewer's currency. */
+  totalBase: number
   orderCount: number
 }
 
@@ -78,7 +79,7 @@ export interface CostBucket {
 export interface CostPeriod {
   /** Calendar month in UTC, `YYYY-MM`. UTC because the boundaries the filters use are. */
   period: string
-  totalEur: number
+  totalBase: number
   orderCount: number
   /** Orders in this month priced from the live offering because they predate snapshots. */
   estimatedOrders: number
@@ -94,8 +95,8 @@ export interface CostPeriod {
 export interface CostComparison {
   current: CostPeriod
   previous: CostPeriod
-  /** current − previous, EUR. */
-  changeEur: number
+  /** current − previous, in the base currency. */
+  changeBase: number
   /**
    * Percentage change, or null when the previous month was zero — there is no
    * honest percentage from a zero base, and 100 % or Infinity would both be lies.
@@ -104,7 +105,7 @@ export interface CostComparison {
 }
 
 export interface CostReport {
-  totalEur: number
+  totalBase: number
   orderCount: number
   /** Orders whose price came from the live offering because they predate snapshots. */
   estimatedOrders: number
@@ -112,7 +113,7 @@ export interface CostReport {
    * Spend per calendar month over the filtered window, oldest first, with the
    * empty months in between filled in — a trend that silently omits a zero month
    * draws a straight line through a gap and misstates the slope. Sums exactly to
-   * `totalEur`, because it is computed from the same de-duplicated rows as the
+   * `totalBase`, because it is computed from the same de-duplicated rows as the
    * breakdowns rather than by a second query that could disagree.
    */
   series: CostPeriod[]
@@ -136,7 +137,7 @@ export interface CostReport {
    * Orders counted in `orderCount` for which no price could be recovered at all
    * — neither a snapshot nor a live offering (#189).
    *
-   * They contribute nothing to `totalEur`, which is unavoidable: there is no
+   * They contribute nothing to `totalBase`, which is unavoidable: there is no
    * amount to add. What is avoidable is doing that SILENTLY. An order reaches
    * this state when it predates `product_snapshot` and the offering it was placed
    * against has since been withdrawn — `deleteProductEnvironment` and the retire
@@ -248,8 +249,12 @@ export const getCostReport = async (
     .where(and(...conditions))) as CostRow[]
 
   const rates = await loadRates()
+  // The currency the stored prices are kept in and the rates are quoted against
+  // (FA-11.3). The report sums into it; EUR by default, and the anchor the old
+  // hardcoded 'EUR' always assumed it was (#592).
+  const baseCurrency = await readBaseCurrency()
 
-  let totalEur = 0
+  let totalBase = 0
   let estimatedOrders = 0
   let unpricedOrders = 0
   const unconverted = new Map<string, number>()
@@ -299,8 +304,8 @@ export const getCostReport = async (
       continue
     }
 
-    const eur = toEur(amount, currency, rates)
-    if (eur === null) {
+    const base = toBase(amount, currency, rates, baseCurrency)
+    if (base === null) {
       unconverted.set(currency, (unconverted.get(currency) ?? 0) + amount)
       addTo(buckets, row, 0)
       // Counted at zero, exactly as the breakdowns do: the amount is reported in
@@ -309,15 +314,15 @@ export const getCostReport = async (
       continue
     }
 
-    totalEur += eur
-    addTo(buckets, row, eur)
-    bumpMonth(months, row, eur, usingSnapshot, now)
+    totalBase += base
+    addTo(buckets, row, base)
+    bumpMonth(months, row, base, usingSnapshot, now)
   }
 
   const series = fillMonths(months, now)
 
   return ok({
-    totalEur: round(totalEur),
+    totalBase: round(totalBase),
     // Was `seen.size` — the count of DISTINCT orders left after the JS dedupe.
     // One row per order now, so the two are the same number.
     orderCount: rows.length,
@@ -366,11 +371,11 @@ const bump = (
   const key = String(id ?? 'none')
   const existing = bucket.get(key)
   if (existing) {
-    existing.totalEur += eur
+    existing.totalBase += eur
     existing.orderCount += 1
     return
   }
-  bucket.set(key, { id, label, totalEur: eur, orderCount: 1 })
+  bucket.set(key, { id, label, totalBase: eur, orderCount: 1 })
 }
 
 /** `YYYY-MM` in UTC. */
@@ -382,7 +387,7 @@ const monthKey = (date: Date): string =>
  *
  * An order with no `created_at` cannot be placed on a timeline, so it is left out
  * of the series rather than dropped into an arbitrary month — it still counts in
- * `totalEur`, which is why the series is documented as summing to the total only
+ * `totalBase`, which is why the series is documented as summing to the total only
  * over the orders that have a date. The column is NOT NULL, so this is defensive.
  */
 const bumpMonth = (
@@ -396,14 +401,14 @@ const bumpMonth = (
   const period = monthKey(row.createdAt)
   const existing = months.get(period)
   if (existing) {
-    existing.totalEur += eur
+    existing.totalBase += eur
     existing.orderCount += 1
     if (!usingSnapshot) existing.estimatedOrders += 1
     return
   }
   months.set(period, {
     period,
-    totalEur: eur,
+    totalBase: eur,
     orderCount: 1,
     estimatedOrders: usingSnapshot ? 0 : 1,
     partial: period === monthKey(now),
@@ -440,8 +445,8 @@ const fillMonths = (months: Map<string, CostPeriod>, now: Date): CostPeriod[] =>
     const found = months.get(period)
     out.push(
       found
-        ? { ...found, totalEur: round(found.totalEur) }
-        : { period, totalEur: 0, orderCount: 0, estimatedOrders: 0, partial: period === currentPeriod },
+        ? { ...found, totalBase: round(found.totalBase) }
+        : { period, totalBase: 0, orderCount: 0, estimatedOrders: 0, partial: period === currentPeriod },
     )
   }
   return out
@@ -462,19 +467,19 @@ const compare = (series: CostPeriod[]): CostComparison | null => {
   return {
     current,
     previous,
-    changeEur: round(current.totalEur - previous.totalEur),
+    changeBase: round(current.totalBase - previous.totalBase),
     changePct:
-      previous.totalEur === 0
+      previous.totalBase === 0
         ? null
-        : Math.round(((current.totalEur - previous.totalEur) / previous.totalEur) * 1000) / 10,
+        : Math.round(((current.totalBase - previous.totalBase) / previous.totalBase) * 1000) / 10,
   }
 }
 
 /** Largest spend first — the point of the page is to see where the money goes. */
 const finalise = (bucket: Map<string, CostBucket>): CostBucket[] =>
   [...bucket.values()]
-    .map((b) => ({ ...b, totalEur: round(b.totalEur) }))
-    .sort((a, b) => b.totalEur - a.totalEur || a.label.localeCompare(b.label))
+    .map((b) => ({ ...b, totalBase: round(b.totalBase) }))
+    .sort((a, b) => b.totalBase - a.totalBase || a.label.localeCompare(b.label))
 
 const loadRates = async (): Promise<Record<string, number>> => {
   const rows = await db.select().from(exchangeRates)
@@ -487,14 +492,23 @@ const loadRates = async (): Promise<Record<string, number>> => {
 }
 
 /**
- * Convert to EUR, the base the stored rates are relative to.
+ * Convert an amount into the base currency, the anchor the stored rates are
+ * quoted against (FA-11.3).
  *
  * Returns null when no rate is stored, so the caller can report the amount as
- * unconverted instead of quietly treating it as EUR — which would misstate the
- * total by whatever the exchange rate happens to be.
+ * unconverted instead of quietly treating it as the base — which would misstate
+ * the total by whatever the exchange rate happens to be. The base itself is 1 by
+ * construction, so it needs no rate entry; the currency named here used to be a
+ * literal `'EUR'`, which was only right while EUR was the only base there could
+ * be (#592).
  */
-const toEur = (amount: number, currency: string, rates: Record<string, number>): number | null => {
-  if (currency === 'EUR') return amount
+const toBase = (
+  amount: number,
+  currency: string,
+  rates: Record<string, number>,
+  baseCurrency: string,
+): number | null => {
+  if (currency === baseCurrency) return amount
   const rate = rates[currency]
   if (!rate) return null
   return amount / rate
@@ -525,23 +539,23 @@ export interface CostRowExport {
   price: string
   currency: string
   /**
-   * The unit price in EUR, ROUNDED. Kept as it was so an existing consumer of the
-   * CSV is not silently handed a different number under the same name.
+   * The unit price in the base currency, ROUNDED. Kept as it was so an existing
+   * consumer of the CSV is not silently handed a different number under the name.
    *
    * Do not multiply this by `quantity` — round-then-multiply and
    * multiply-then-round disagree by a cent at exactly the rates that make it hard
    * to spot: 33.33 USD at 1.09, quantity 3, gives 91.74 that way and 91.73 the
-   * right way. `lineTotalEur` below is the right way, and is the field that
+   * right way. `lineTotalBase` below is the right way, and is the field that
    * reconciles.
    */
-  priceEur: number | null
+  priceBase: number | null
   /**
-   * unit × quantity, in EUR — the figure that reconciles with the report.
+   * unit × quantity, in the base currency — the figure that reconciles with the report.
    *
    * Computed from the UNROUNDED conversion, so it agrees with the report's
-   * `toEur(unit × quantity)` rather than with `priceEur × quantity`.
+   * `toBase(unit × quantity)` rather than with `priceBase × quantity`.
    */
-  lineTotalEur: number | null
+  lineTotalBase: number | null
   /** True when the price came from the live offering, not the order's snapshot. */
   estimated: boolean
 }
@@ -596,6 +610,7 @@ export const getCostRows = async (
     .orderBy(sql`${orders.createdAt} DESC`, sql`${orders.id} DESC`)
 
   const rates = await loadRates()
+  const baseCurrency = await readBaseCurrency()
 
   return ok(
     rows.map((row) => {
@@ -603,7 +618,7 @@ export const getCostRows = async (
       const price = (usingSnapshot ? row.snapshotPrice : row.livePrice) ?? '0'
       const currency = (usingSnapshot ? row.snapshotCurrency : row.liveCurrency) ?? 'EUR'
       const amount = Number(price)
-      const eur = Number.isFinite(amount) ? toEur(amount, currency, rates) : null
+      const base = Number.isFinite(amount) ? toBase(amount, currency, rates, baseCurrency) : null
       const quantity = row.quantity !== null && row.quantity >= 1 ? row.quantity : 1
       return {
         orderId: row.orderId,
@@ -622,8 +637,8 @@ export const getCostRows = async (
         quantity,
         price,
         currency,
-        priceEur: eur === null ? null : round(eur),
-        lineTotalEur: eur === null ? null : round(eur * quantity),
+        priceBase: base === null ? null : round(base),
+        lineTotalBase: base === null ? null : round(base * quantity),
         estimated: !usingSnapshot,
       }
     }),

@@ -81,7 +81,7 @@ export function CostTrend({ series, money, lang, estimatedOrders, unconverted }:
     )
   }
 
-  const max = series.reduce((m, p) => Math.max(m, p.totalEur), 0)
+  const max = series.reduce((m, p) => Math.max(m, p.totalBase), 0)
   const slot = VIEW_W / series.length
   const barW = Math.max(2, Math.min(BAR_MAX, slot - GAP * 2))
   const topOf = (value: number) =>
@@ -149,15 +149,15 @@ export function CostTrend({ series, money, lang, estimatedOrders, unconverted }:
         />
 
         {series.map((period, i) => {
-          if (period.totalEur <= 0) return null
+          if (period.totalBase <= 0) return null
           return (
             <path
               key={period.period}
-              d={columnPath(slot * i + (slot - barW) / 2, barW, topOf(period.totalEur))}
+              d={columnPath(slot * i + (slot - barW) / 2, barW, topOf(period.totalBase))}
               fill={period.partial ? `url(#${HATCH_ID})` : CHART_PRIMARY}
             >
               <title>
-                {`${monthLabel(period.period, lang, 'long')}: ${money(period.totalEur)} — ${
+                {`${monthLabel(period.period, lang, 'long')}: ${money(period.totalBase)} — ${
                   period.orderCount
                 } ${t('ordersCounted', lang)}${
                   period.partial ? ` — ${t('monthInProgress', lang)}` : ''
@@ -215,7 +215,7 @@ export function CostTrend({ series, money, lang, estimatedOrders, unconverted }:
             {series.map((period) => (
               <tr key={period.period} className="border-t border-slate-100">
                 <td className="py-1 text-slate-900">{monthLabel(period.period, lang, 'long')}</td>
-                <td className="py-1 text-right tabular-nums text-slate-900">{money(period.totalEur)}</td>
+                <td className="py-1 text-right tabular-nums text-slate-900">{money(period.totalBase)}</td>
                 <td className="py-1 text-right tabular-nums text-slate-600">{period.orderCount}</td>
               </tr>
             ))}

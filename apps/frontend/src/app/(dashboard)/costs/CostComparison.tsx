@@ -66,7 +66,7 @@ const Row = ({
           {monthLabel(period.period, lang, 'long')}
         </span>
         <span className="whitespace-nowrap font-medium tabular-nums text-slate-900">
-          {money(period.totalEur)}
+          {money(period.totalBase)}
         </span>
       </div>
       {/* The bar restates the figure beside it, so it is hidden from assistive
@@ -78,11 +78,11 @@ const Row = ({
         style={{ height: 'auto' }}
       >
         <rect x="0" y="0" width={BAR_W} height={BAR_H} rx="4" fill="#f1f5f9" />
-        {period.totalEur > 0 && max > 0 && (
+        {period.totalBase > 0 && max > 0 && (
           <rect
             x="0"
             y="0"
-            width={Math.max(3, (period.totalEur / max) * BAR_W)}
+            width={Math.max(3, (period.totalBase / max) * BAR_W)}
             height={BAR_H}
             rx="4"
             fill={period.partial ? `url(#${HATCH_ID})` : emphasis ? CHART_PRIMARY : CHART_MUTED}
@@ -103,12 +103,12 @@ export function CostComparison({ comparison, money, lang, estimatedOrders, uncon
     )
   }
 
-  const { current, previous, changeEur, changePct } = comparison
-  const max = Math.max(current.totalEur, previous.totalEur)
+  const { current, previous, changeBase, changePct } = comparison
+  const max = Math.max(current.totalBase, previous.totalBase)
   // A real minus sign, not a hyphen: this is a number, and the hyphen renders as a
   // dash too short to read as negative at this size.
-  const sign = changeEur > 0 ? '+' : changeEur < 0 ? '−' : ''
-  const arrow = changeEur > 0 ? '▲' : changeEur < 0 ? '▼' : '–'
+  const sign = changeBase > 0 ? '+' : changeBase < 0 ? '−' : ''
+  const arrow = changeBase > 0 ? '▲' : changeBase < 0 ? '▼' : '–'
 
   return (
     <Card title={title}>
@@ -131,7 +131,7 @@ export function CostComparison({ comparison, money, lang, estimatedOrders, uncon
       <p className="text-2xl font-bold text-slate-900">
         <span aria-hidden="true" className="mr-1 text-lg">{arrow}</span>
         {sign}
-        {money(Math.abs(changeEur))}
+        {money(Math.abs(changeBase))}
         {changePct !== null && (
           <span className="ml-2 text-base font-medium text-slate-600">
             ({sign}

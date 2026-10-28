@@ -23,15 +23,15 @@ vi.mock('@/components/ui/Toast', () => ({ useToast: () => ({ toast: vi.fn() }) }
 const get = vi.fn()
 vi.mock('@/lib/serverApi', () => ({ get: (path: string) => get(path) }))
 
-const period = (month: string, totalEur: number, partial = false) =>
-  ({ period: month, totalEur, orderCount: 1, estimatedOrders: 0, partial })
+const period = (month: string, totalBase: number, partial = false) =>
+  ({ period: month, totalBase, orderCount: 1, estimatedOrders: 0, partial })
 
-const bucket = (id: number | null, label: string, totalEur: number) =>
-  ({ id, label, totalEur, orderCount: 1 })
+const bucket = (id: number | null, label: string, totalBase: number) =>
+  ({ id, label, totalBase, orderCount: 1 })
 
 const report = (over: Partial<CostReport> = {}): CostReport =>
   ({
-    totalEur: 1234.5,
+    totalBase: 1234.5,
     orderCount: 3,
     estimatedOrders: 0,
     unpricedOrders: 0,
@@ -140,7 +140,7 @@ describe('CostsPage', () => {
         comparison: {
           current: period('2026-02', 834.5, true),
           previous: period('2026-01', 400),
-          changeEur: 434.5,
+          changeBase: 434.5,
           changePct: 108.625,
         },
       }),
@@ -178,7 +178,7 @@ describe('CostsPage', () => {
   })
 
   it('says there was no spend rather than drawing empty charts', async () => {
-    answer({ report: report({ orderCount: 0, totalEur: 0 }) })
+    answer({ report: report({ orderCount: 0, totalBase: 0 }) })
     render(await CostsPage({ searchParams: params() }))
 
     expect(screen.getByText(/no spend/i)).toBeInTheDocument()

@@ -73,10 +73,14 @@ export function convertPrice(
   if (isNaN(numPrice)) return { amount: price, currency: fromCurrency }
 
   // rates are quoted against the base currency; convert from → base → to
-  const fromRate = fromCurrency === baseCurrency ? 1 : (rates[fromCurrency] ?? 1)
+  const fromRate = fromCurrency === baseCurrency ? 1 : (rates[fromCurrency] ?? null)
   const toRate = toCurrency === baseCurrency ? 1 : (rates[toCurrency] ?? null)
 
-  if (toRate === null) return { amount: price, currency: fromCurrency }
+  // A missing rate on either side means the conversion cannot be made honestly.
+  // Return the amount as stored, labelled with its own currency, rather than
+  // assuming parity: a wrong figure that looks converted is worse than an
+  // unconverted one the reader can see is in another currency.
+  if (fromRate === null || toRate === null) return { amount: price, currency: fromCurrency }
 
   const base = numPrice / fromRate
   const converted = base * toRate
@@ -108,6 +112,21 @@ export function priceInBase(
   // A zero rate is treated as missing rather than divided by: it converts every
   // amount to Infinity, which is not a price.
   return rate ? amount / rate : null
+}
+
+/**
+ * The base currency inferred from a stored rate table, or null when it cannot be.
+ *
+ * The base's own rate is 1 by construction — the backend re-bases every rate onto
+ * it and inserts `rate = 1` for it — so the code whose rate is exactly 1 IS the
+ * base. This exists as a FALLBACK for when the base could not be read: the rates
+ * and the base come from the same backend, and anchoring a conversion on the base
+ * derived from the very rates being converted is more trustworthy than assuming
+ * EUR. Null (an empty table, or no rate of exactly 1) leaves the caller to decide.
+ */
+export function baseCurrencyFromRates(rates: Record<string, number>): string | null {
+  for (const [code, rate] of Object.entries(rates)) if (rate === 1) return code
+  return null
 }
 
 /**

@@ -1160,7 +1160,7 @@ export interface CostBucket {
   id: number | null
   label: string
   /** EUR, the exchange-rate base. Convert client-side for display. */
-  totalEur: number
+  totalBase: number
   orderCount: number
 }
 
@@ -1174,7 +1174,7 @@ export interface CostBucket {
 export interface CostPeriod {
   /** Calendar month in UTC, `YYYY-MM`. */
   period: string
-  totalEur: number
+  totalBase: number
   orderCount: number
   /** Orders in this month priced from the live offering rather than a snapshot. */
   estimatedOrders: number
@@ -1186,14 +1186,14 @@ export interface CostPeriod {
 export interface CostComparison {
   current: CostPeriod
   previous: CostPeriod
-  /** current − previous, EUR. */
-  changeEur: number
+  /** current − previous, in the base currency (FA-11.3). */
+  changeBase: number
   /** Percentage change, or null when the previous month was zero. */
   changePct: number | null
 }
 
 export interface CostReport {
-  totalEur: number
+  totalBase: number
   orderCount: number
   /**
    * Orders whose price came from the live offering because they predate snapshots.
@@ -1202,7 +1202,7 @@ export interface CostReport {
   estimatedOrders: number
   /**
    * Spend per calendar month, oldest first, empty months in between filled in.
-   * Sums to `totalEur`, so a trend and a total cannot disagree.
+   * Sums to `totalBase`, so a trend and a total cannot disagree.
    */
   series: CostPeriod[]
   /** Null when the window covers fewer than two months. */
@@ -1217,7 +1217,7 @@ export interface CostReport {
    * Orders counted in `orderCount` with no recoverable price at all — no snapshot
    * and no live offering (#189).
    *
-   * They contribute nothing to `totalEur` because there is nothing to add. What
+   * They contribute nothing to `totalBase` because there is nothing to add. What
    * this field buys is that they do so out loud: an order reaches this state when
    * it predates snapshots and its offering has since been withdrawn, and before
    * this the money simply left the total with the order still in the count.

@@ -6,7 +6,7 @@ import { CartView } from './CartView'
 import { SectionError } from '@/components/ui/SectionError'
 import { section } from '@/lib/section'
 import { getLang } from '@/lib/getLang'
-import { localeToCurrency } from '@/lib/locale'
+import { localeToCurrency, baseCurrencyFromRates } from '@/lib/locale'
 
 // The cart is per user and changes on every add, so it must never be cached.
 export const dynamic = 'force-dynamic'
@@ -45,7 +45,10 @@ export default async function CartPage() {
   )
   // The anchor the stored rates are quoted against (FA-11.3); EUR is the default
   // and the previous behaviour, so a failed read degrades rather than mis-converts.
-  const baseCurrency = (currencyRes.status === 'fulfilled' ? currencyRes.value?.baseCurrency : null) ?? 'EUR'
+  const baseCurrency =
+    (currencyRes.status === 'fulfilled' ? currencyRes.value?.baseCurrency : null) ??
+    baseCurrencyFromRates(rates) ??
+    'EUR'
 
   return (
     <div className="max-w-screen-xl mx-auto space-y-4">

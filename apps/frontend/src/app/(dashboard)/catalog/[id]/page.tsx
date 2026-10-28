@@ -23,7 +23,7 @@ import { SectionError } from '@/components/ui/SectionError'
 import { section } from '@/lib/section'
 import { getLang } from '@/lib/getLang'
 import { t } from '@/lib/i18n'
-import { localeToCurrency, convertPrice, sortByValue } from '@/lib/locale'
+import { localeToCurrency, convertPrice, sortByValue, baseCurrencyFromRates } from '@/lib/locale'
 
 interface Props {
   params: Promise<{ id: string }>
@@ -106,7 +106,10 @@ export default async function ProductDetailPage({ params, searchParams }: Props)
   // The anchor the stored rates are quoted against (FA-11.3). Falls back to EUR —
   // both the default and what every installation meant before it was a setting —
   // so a failed read degrades to the previous behaviour rather than a wrong figure.
-  const baseCurrency = (currencyRes.status === 'fulfilled' ? currencyRes.value?.baseCurrency : null) ?? 'EUR'
+  const baseCurrency =
+    (currencyRes.status === 'fulfilled' ? currencyRes.value?.baseCurrency : null) ??
+    baseCurrencyFromRates(ratesMap) ??
+    'EUR'
 
   /** One amount in the viewer's currency, with the original alongside. */
   const priceOf = (amount: { price: string; currency: string }) => {

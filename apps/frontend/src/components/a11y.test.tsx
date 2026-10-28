@@ -320,17 +320,17 @@ describe('Table', () => {
  * lib/contrast.test.ts, and the painted result in the e2e axe gate.
  */
 const money = (eur: number) => `${eur.toFixed(2)} EUR`
-const period = (p: string, totalEur: number, partial = false) => ({
+const period = (p: string, totalBase: number, partial = false) => ({
   period: p,
-  totalEur,
+  totalBase,
   orderCount: 1,
   estimatedOrders: 0,
   partial,
 })
-const bucket = (id: number, label: string, totalEur: number) => ({
+const bucket = (id: number, label: string, totalBase: number) => ({
   id,
   label,
-  totalEur,
+  totalBase,
   orderCount: 1,
 })
 
@@ -423,7 +423,7 @@ describe('CostComparison', () => {
   const comparison = {
     previous: period('2026-07', 40),
     current: period('2026-08', 50, true),
-    changeEur: 10,
+    changeBase: 10,
     changePct: 25,
   }
 

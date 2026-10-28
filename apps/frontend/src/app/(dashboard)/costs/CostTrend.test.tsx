@@ -11,9 +11,9 @@ import { CHART_PRIMARY } from '@/lib/chartTokens'
  * picture is also in the table, and the unfinished month is marked so a shorter
  * last column cannot read as a fall in spend. Untested until now.
  */
-const month = (over: { period: string; totalEur: number; partial?: boolean; orderCount?: number }) => ({
+const month = (over: { period: string; totalBase: number; partial?: boolean; orderCount?: number }) => ({
   period: over.period,
-  totalEur: over.totalEur,
+  totalBase: over.totalBase,
   partial: over.partial ?? false,
   orderCount: over.orderCount ?? 1,
 })
@@ -52,8 +52,8 @@ describe('with nothing to draw', () => {
 describe('height encodes the amount', () => {
   it('draws the tallest column for the largest month', () => {
     const { container } = renderTrend([
-      month({ period: '2026-07', totalEur: 50 }),
-      month({ period: '2026-08', totalEur: 100 }),
+      month({ period: '2026-07', totalBase: 50 }),
+      month({ period: '2026-08', totalBase: 100 }),
     ])
     const [small, large] = columns(container).map((p) => p.getAttribute('d') ?? '')
     // The path starts at the baseline and rises to `top`; a smaller `top` is a
@@ -63,7 +63,7 @@ describe('height encodes the amount', () => {
   })
 
   it('scales the largest month to the full plot height', () => {
-    const { container } = renderTrend([month({ period: '2026-08', totalEur: 100 })])
+    const { container } = renderTrend([month({ period: '2026-08', totalBase: 100 })])
     const d = columns(container)[0].getAttribute('d') ?? ''
     /*
      * The apex, not the left edge: a column is centred in its slot, so its `x`
@@ -77,8 +77,8 @@ describe('height encodes the amount', () => {
   it('leaves a month with no spend undrawn rather than flat', () => {
     // A zero-height column is a smudge on the axis, not information.
     const { container } = renderTrend([
-      month({ period: '2026-07', totalEur: 0 }),
-      month({ period: '2026-08', totalEur: 100 }),
+      month({ period: '2026-07', totalBase: 0 }),
+      month({ period: '2026-08', totalBase: 100 }),
     ])
     expect(columns(container)).toHaveLength(1)
   })
@@ -86,8 +86,8 @@ describe('height encodes the amount', () => {
   it('prints the top of the scale as text', () => {
     // The one y tick worth having — the figure every column is drawn against.
     const { container } = renderTrend([
-      month({ period: '2026-07', totalEur: 40 }),
-      month({ period: '2026-08', totalEur: 90 }),
+      month({ period: '2026-07', totalBase: 40 }),
+      month({ period: '2026-08', totalBase: 90 }),
     ])
     // Scoped: the same figure is in the table too, as the August row's amount.
     expect(container.querySelector('p.text-xs')?.textContent).toBe('90.00 EUR')
@@ -102,8 +102,8 @@ describe('the unfinished month is marked', () => {
      * A hatch survives greyscale and forced-colors; a hue does not.
      */
     const { container } = renderTrend([
-      month({ period: '2026-07', totalEur: 100 }),
-      month({ period: '2026-08', totalEur: 40, partial: true }),
+      month({ period: '2026-07', totalBase: 100 }),
+      month({ period: '2026-08', totalBase: 40, partial: true }),
     ])
     const [complete, partial] = columns(container)
     expect(complete.getAttribute('fill')).toBe(CHART_PRIMARY)
@@ -111,12 +111,12 @@ describe('the unfinished month is marked', () => {
   })
 
   it('says it in words as well, on the column title', () => {
-    const { container } = renderTrend([month({ period: '2026-08', totalEur: 40, partial: true })])
+    const { container } = renderTrend([month({ period: '2026-08', totalBase: 40, partial: true })])
     expect(container.querySelector('svg title')?.textContent).toContain('not over')
   })
 
   it('says nothing about it for a month that is finished', () => {
-    const { container } = renderTrend([month({ period: '2026-08', totalEur: 40 })])
+    const { container } = renderTrend([month({ period: '2026-08', totalBase: 40 })])
     expect(container.querySelector('svg title')?.textContent).not.toContain('not over')
   })
 })
@@ -124,7 +124,7 @@ describe('the unfinished month is marked', () => {
 describe('every column carries its own figures', () => {
   it('names the month, the amount and the order count', () => {
     const { container } = renderTrend([
-      month({ period: '2026-08', totalEur: 250, orderCount: 7 }),
+      month({ period: '2026-08', totalBase: 250, orderCount: 7 }),
     ])
     const title = container.querySelector('svg title')?.textContent ?? ''
     expect(title).toContain('August 2026')
@@ -134,8 +134,8 @@ describe('every column carries its own figures', () => {
 
   it('names the whole range on the picture itself', () => {
     const { container } = renderTrend([
-      month({ period: '2026-06', totalEur: 10 }),
-      month({ period: '2026-08', totalEur: 20 }),
+      month({ period: '2026-06', totalBase: 10 }),
+      month({ period: '2026-08', totalBase: 20 }),
     ])
     const label = container.querySelector('svg[role="img"]')?.getAttribute('aria-label') ?? ''
     expect(label).toContain('June 2026')
@@ -148,7 +148,7 @@ describe('the x axis', () => {
     // Labels are counted BACK from the last, because that is the one a reader
     // looks for first. Counted forward, a 7-month series would leave it blank.
     const series = Array.from({ length: 7 }, (_, i) =>
-      month({ period: `2026-0${i + 1}`, totalEur: 10 }),
+      month({ period: `2026-0${i + 1}`, totalBase: 10 }),
     )
     const { container } = renderTrend(series)
     const cells = axisCells(container)
@@ -157,7 +157,7 @@ describe('the x axis', () => {
 
   it('thins the labels out rather than printing all of them', () => {
     const series = Array.from({ length: 12 }, (_, i) =>
-      month({ period: `2026-${String(i + 1).padStart(2, '0')}`, totalEur: 10 }),
+      month({ period: `2026-${String(i + 1).padStart(2, '0')}`, totalBase: 10 }),
     )
     const { container } = renderTrend(series)
     const named = axisCells(container).filter(Boolean)
@@ -170,8 +170,8 @@ describe('the x axis', () => {
 
   it('names every month when there are few enough', () => {
     const { container } = renderTrend([
-      month({ period: '2026-07', totalEur: 10 }),
-      month({ period: '2026-08', totalEur: 20 }),
+      month({ period: '2026-07', totalBase: 10 }),
+      month({ period: '2026-08', totalBase: 20 }),
     ])
     expect(axisCells(container).filter(Boolean)).toHaveLength(2)
   })
@@ -180,8 +180,8 @@ describe('the x axis', () => {
 describe('the table is the data, not a second rendering of it', () => {
   it('lists every month with its amount and order count', () => {
     const { container } = renderTrend([
-      month({ period: '2026-07', totalEur: 10, orderCount: 2 }),
-      month({ period: '2026-08', totalEur: 20, orderCount: 3 }),
+      month({ period: '2026-07', totalBase: 10, orderCount: 2 }),
+      month({ period: '2026-08', totalBase: 20, orderCount: 3 }),
     ])
     const july = table(container).getByText(/July 2026/).closest('tr') as HTMLElement
     expect(within(july).getByText('10.00 EUR')).toBeInTheDocument()
@@ -192,8 +192,8 @@ describe('the table is the data, not a second rendering of it', () => {
     // The chart drops a zero column; the table must not, or the reader cannot
     // tell a quiet month from a missing one.
     const { container } = renderTrend([
-      month({ period: '2026-07', totalEur: 0, orderCount: 0 }),
-      month({ period: '2026-08', totalEur: 20 }),
+      month({ period: '2026-07', totalBase: 0, orderCount: 0 }),
+      month({ period: '2026-08', totalBase: 20 }),
     ])
     expect(table(container).getByText(/July 2026/)).toBeInTheDocument()
   })
@@ -203,7 +203,7 @@ describe('gaps the mutation run pointed at', () => {
   it('draws the gridlines only when there is a scale to draw them against', () => {
     // `max > 0`, not `>= 0`: with every month at zero there is no scale, and two
     // hairlines across an empty plot suggest one.
-    const { container } = renderTrend([month({ period: '2026-08', totalEur: 0 })])
+    const { container } = renderTrend([month({ period: '2026-08', totalBase: 0 })])
     // `svg > line`, not `svg line`: the hatch pattern inside <defs> is a <line>
     // too, and counting it made this assertion off by one.
     const grid = [...container.querySelectorAll('svg > line')]
@@ -212,7 +212,7 @@ describe('gaps the mutation run pointed at', () => {
   })
 
   it('draws both gridlines once there is spend', () => {
-    const { container } = renderTrend([month({ period: '2026-08', totalEur: 10 })])
+    const { container } = renderTrend([month({ period: '2026-08', totalBase: 10 })])
     expect(container.querySelectorAll('svg > line')).toHaveLength(3)
   })
 
@@ -223,7 +223,7 @@ describe('gaps the mutation run pointed at', () => {
      * WHICH months, and the most recent one has to be among them.
      */
     const series = Array.from({ length: 8 }, (_, i) =>
-      month({ period: `2026-0${i + 1}`, totalEur: 10 }),
+      month({ period: `2026-0${i + 1}`, totalBase: 10 }),
     )
     const { container } = renderTrend(series)
     const cells = axisCells(container)
@@ -238,7 +238,7 @@ describe('gaps the mutation run pointed at', () => {
   it('rounds the top corners rather than squaring or inverting them', () => {
     // `top + r`, not `top - r`: a negative radius turns the cap inside out, and
     // the column reads as a notch.
-    const { container } = renderTrend([month({ period: '2026-08', totalEur: 100 })])
+    const { container } = renderTrend([month({ period: '2026-08', totalBase: 100 })])
     const d = columns(container)[0].getAttribute('d') ?? ''
     // The straight segment stops BELOW the apex, so its y is greater than 0.
     const straightY = Number(/L \S+ (\S+)/.exec(d)?.[1])
@@ -249,7 +249,7 @@ describe('gaps the mutation run pointed at', () => {
   it('names each column of the table', () => {
     // Three headers, each its own string: an empty one leaves a column of
     // numbers with nothing saying what they are.
-    const { container } = renderTrend([month({ period: '2026-08', totalEur: 10 })])
+    const { container } = renderTrend([month({ period: '2026-08', totalBase: 10 })])
     const headers = [...(container.querySelectorAll('thead th') ?? [])].map((h) => h.textContent)
     expect(headers).toHaveLength(3)
     for (const header of headers) expect(header).toBeTruthy()

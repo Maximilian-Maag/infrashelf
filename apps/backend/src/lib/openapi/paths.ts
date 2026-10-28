@@ -739,13 +739,13 @@ registry.registerPath({
 const costBucketSchema = z.object({
   id: z.number().nullable(),
   label: z.string(),
-  totalEur: z.number(),
+  totalBase: z.number(),
   orderCount: z.number(),
 })
 
 const costPeriodSchema = z.object({
   period: z.string().openapi({ description: 'Calendar month in UTC, YYYY-MM.', example: '2026-08' }),
-  totalEur: z.number(),
+  totalBase: z.number(),
   orderCount: z.number(),
   estimatedOrders: z.number(),
   partial: z.boolean().openapi({
@@ -770,13 +770,13 @@ registry.registerPath({
     'Counts only orders that reached provisioning ("provisioning"/"completed") — a rejected, pending or ' +
     'failed order never delivered infrastructure. Prices come from each order\'s snapshot, so an admin ' +
     'editing a price cannot restate past spend; orders predating snapshots fall back to the live price and ' +
-    'are counted in estimatedOrders. Totals are in EUR (the exchange-rate base) and the client converts to ' +
+    'are counted in estimatedOrders. Totals are in the configured base currency (FA-11.3; EUR by default) and the client converts to ' +
     'the viewer\'s currency; an amount whose currency has no stored rate appears in unconverted[] rather ' +
-    'than being silently treated as EUR. These are sums of recorded prices, NOT a time-based projection — ' +
+    'than being silently treated as the base. These are sums of recorded prices, NOT a time-based projection — ' +
     'the catalogue stores no billing period. Scoped by role: a project manager sees the projects they own. ' +
     'series[] adds the same spend per calendar month (UTC), oldest first, with empty months in between filled ' +
     'in so a trend cannot draw a straight line through a gap; it is computed from the same de-duplicated rows ' +
-    'as the breakdowns and therefore sums to totalEur. comparison holds the last two months of that series and ' +
+    'as the breakdowns and therefore sums to totalBase. comparison holds the last two months of that series and ' +
     'is null when the window covers fewer than two — comparing against a month the filter excluded would read ' +
     'as "spend doubled".',
   tags: ['Costs'],
@@ -788,7 +788,7 @@ registry.registerPath({
       content: {
         'application/json': {
           schema: z.object({
-            totalEur: z.number(),
+            totalBase: z.number(),
             orderCount: z.number(),
             estimatedOrders: z.number(),
             series: z.array(costPeriodSchema),
@@ -796,7 +796,7 @@ registry.registerPath({
               .object({
                 current: costPeriodSchema,
                 previous: costPeriodSchema,
-                changeEur: z.number(),
+                changeBase: z.number(),
                 changePct: z.number().nullable(),
               })
               .nullable(),
@@ -823,7 +823,7 @@ registry.registerPath({
   summary: 'Export the cost breakdown as CSV or PDF',
   description:
     'One row per counted order rather than the aggregate, so a total can be reconciled. Uses the same ' +
-    'filter parser as GET /costs, so the two always cover the same orders. priceEur is blank when the ' +
+    'filter parser as GET /costs, so the two always cover the same orders. priceBase is blank when the ' +
     'currency has no stored rate — 0 would read as "free".',
   tags: ['Costs'],
   security: bearerAuth,

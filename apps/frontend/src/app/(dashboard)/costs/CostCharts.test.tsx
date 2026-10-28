@@ -20,18 +20,18 @@ import { CostComparison } from './CostComparison'
 
 const money = (eur: number) => `${eur.toFixed(2)} EUR`
 
-const period = (p: string, totalEur: number, partial = false, orderCount = 1): CostPeriod => ({
+const period = (p: string, totalBase: number, partial = false, orderCount = 1): CostPeriod => ({
   period: p,
-  totalEur,
+  totalBase,
   orderCount,
   estimatedOrders: 0,
   partial,
 })
 
-const bucket = (id: number, label: string, totalEur: number): CostBucket => ({
+const bucket = (id: number, label: string, totalBase: number): CostBucket => ({
   id,
   label,
-  totalEur,
+  totalBase,
   orderCount: 1,
 })
 
@@ -238,7 +238,7 @@ describe('CostComparison', () => {
   const comparison = {
     previous: period('2026-07', 40),
     current: period('2026-08', 50, true),
-    changeEur: 10,
+    changeBase: 10,
     changePct: 25,
   }
 
@@ -272,7 +272,7 @@ describe('CostComparison', () => {
 
   it('uses a real minus sign for a fall', () => {
     renderCompare({
-      comparison: { ...comparison, changeEur: -30, changePct: -75 },
+      comparison: { ...comparison, changeBase: -30, changePct: -75 },
     })
     // U+2212, not a hyphen: at this size a hyphen does not read as negative.
     expect(screen.getByText(/−30\.00 EUR/)).toBeTruthy()
@@ -285,7 +285,7 @@ describe('CostComparison', () => {
       comparison: {
         previous: period('2026-07', 0),
         current: period('2026-08', 30),
-        changeEur: 30,
+        changeBase: 30,
         changePct: null,
       },
     })
