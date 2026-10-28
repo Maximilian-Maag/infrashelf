@@ -2,10 +2,10 @@ import { describe, it, expect } from 'vitest'
 import type { CostBucket } from '@infrashelf/types'
 import { monthLabel, foldTail, sharePercent } from './chartData'
 
-const bucket = (id: number, label: string, totalEur: number, orderCount = 1): CostBucket => ({
+const bucket = (id: number, label: string, totalBase: number, orderCount = 1): CostBucket => ({
   id,
   label,
-  totalEur,
+  totalBase,
   orderCount,
 })
 
@@ -54,8 +54,8 @@ describe('foldTail', () => {
 
   it('preserves the total, so the shares still add up', () => {
     // A share chart whose segments do not sum to the total is a lie about the total.
-    const before = many.reduce((s, b) => s + b.totalEur, 0)
-    const after = foldTail(many, 6, 'Other').reduce((s, b) => s + b.totalEur, 0)
+    const before = many.reduce((s, b) => s + b.totalBase, 0)
+    const after = foldTail(many, 6, 'Other').reduce((s, b) => s + b.totalBase, 0)
     expect(after).toBeCloseTo(before, 2)
   })
 
@@ -68,14 +68,14 @@ describe('foldTail', () => {
     // 0.1 + 0.2 is 0.30000000000000004 in binary floating point, and that tail
     // would be printed verbatim by a currency formatter with no maximum digits.
     const cents = [bucket(1, 'a', 1), bucket(2, 'b', 0.1), bucket(3, 'c', 0.2)]
-    expect(foldTail(cents, 2, 'Other')[1].totalEur).toBe(0.3)
+    expect(foldTail(cents, 2, 'Other')[1].totalBase).toBe(0.3)
   })
 
   it('folds at exactly one over the limit, not two', () => {
     const seven = many.slice(0, 7)
     const folded = foldTail(seven, 6, 'Other')
     expect(folded).toHaveLength(6)
-    expect(folded[5].totalEur).toBeCloseTo(seven[5].totalEur + seven[6].totalEur, 2)
+    expect(folded[5].totalBase).toBeCloseTo(seven[5].totalBase + seven[6].totalBase, 2)
   })
 
   it('gives the fold no id, because it is not a row in any table', () => {

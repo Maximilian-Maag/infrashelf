@@ -7,6 +7,7 @@ import type {
   Project,
   CostCenter,
   ExchangeRate,
+  CurrencySettings,
   Category,
   CatalogPage,
   Role,
@@ -22,7 +23,7 @@ import { SectionError } from '@/components/ui/SectionError'
 import { section } from '@/lib/section'
 import { getLang } from '@/lib/getLang'
 import { t } from '@/lib/i18n'
-import { localeToCurrency, convertPrice, sortByValue } from '@/lib/locale'
+import { localeToCurrency, convertPrice, sortByValue, baseCurrencyFromRates } from '@/lib/locale'
 
 interface Props {
   params: Promise<{ id: string }>
@@ -52,11 +53,12 @@ export default async function ProductDetailPage({ params, searchParams }: Props)
   const lang = await getLang()
   const localeCurrency = localeToCurrency(lang)
 
-  const [productRes, projectsRes, costCentersRes, ratesRes, categoriesRes] = await Promise.allSettled([
+  const [productRes, projectsRes, costCentersRes, ratesRes, currencyRes, categoriesRes] = await Promise.allSettled([
     get<ProductDetail>(`/api/catalog/${id}?lang=${lang}`),
     get<Project[]>('/api/projects'),
     get<CostCenter[]>('/api/admin/cost-centers'),
     get<ExchangeRate[]>('/api/admin/exchange-rates'),
+    get<CurrencySettings>('/api/public/currency-settings'),
     get<Category[]>('/api/admin/categories'),
   ])
 
@@ -101,10 +103,17 @@ export default async function ProductDetailPage({ params, searchParams }: Props)
   const ratesMap: Record<string, number> = Object.fromEntries(
     rates.data.map((r) => [r.currencyCode, parseFloat(r.rate)]),
   )
+  // The anchor the stored rates are quoted against (FA-11.3). Falls back to EUR —
+  // both the default and what every installation meant before it was a setting —
+  // so a failed read degrades to the previous behaviour rather than a wrong figure.
+  const baseCurrency =
+    (currencyRes.status === 'fulfilled' ? currencyRes.value?.baseCurrency : null) ??
+    baseCurrencyFromRates(ratesMap) ??
+    'EUR'
 
   /** One amount in the viewer's currency, with the original alongside. */
   const priceOf = (amount: { price: string; currency: string }) => {
-    const converted = convertPrice(amount.price, amount.currency, localeCurrency, ratesMap, lang)
+    const converted = convertPrice(amount.price, amount.currency, localeCurrency, ratesMap, lang, baseCurrency)
     return {
       display: `${converted.amount} ${converted.currency}`,
       original: converted.currency !== amount.currency ? `${amount.price} ${amount.currency}` : null,
@@ -132,9 +141,9 @@ export default async function ProductDetailPage({ params, searchParams }: Props)
       ? env.sizes.map((size) => ({ price: size.price, currency: size.currency }))
       : [{ price: env.price, currency: env.currency }]
 
-  // Compared in EUR rather than by the digits: each size carries its own
-  // currency, so the smallest number is not the cheapest offer.
-  const cheapestOf = (env: Offering) => sortByValue(amountsOf(env), ratesMap)[0]
+  // Compared in the base currency rather than by the digits: each size carries
+  // its own currency, so the smallest number is not the cheapest offer.
+  const cheapestOf = (env: Offering) => sortByValue(amountsOf(env), ratesMap, baseCurrency)[0]
 
   /**
    * An offering's price as a shopper reads it: one figure, or a range across its
@@ -144,7 +153,7 @@ export default async function ProductDetailPage({ params, searchParams }: Props)
    * word and therefore no twenty-fifth translation of one.
    */
   const rangeOf = (env: Offering): { display: string; original: string | null } => {
-    const sorted = sortByValue(amountsOf(env), ratesMap)
+    const sorted = sortByValue(amountsOf(env), ratesMap, baseCurrency)
     const cheapest = sorted[0]
     const dearest = sorted[sorted.length - 1]
     const low = priceOf(cheapest)
@@ -161,6 +170,7 @@ export default async function ProductDetailPage({ params, searchParams }: Props)
   const cheapest = sortByValue(
     product.environments.map((env) => ({ ...cheapestOf(env), env })),
     ratesMap,
+    baseCurrency,
   )[0]?.env
 
   return (
@@ -302,7 +312,7 @@ export default async function ProductDetailPage({ params, searchParams }: Props)
                     renders it and it follows the choice. */}
                 {/* Environment plus one click, and nothing else: parameters are
                     what checkout is for (issue #28). */}
-                <AddToCart product={product} ratesMap={ratesMap} lang={lang} />
+                <AddToCart product={product} ratesMap={ratesMap} baseCurrency={baseCurrency} lang={lang} />
                 {/* Styled as a link, not a Button inside a Link: nested
                     interactives fail the axe gate in e2e/a11y.spec.ts. Outlined
                     rather than filled — it is the second action, and it only jumps
@@ -348,6 +358,7 @@ export default async function ProductDetailPage({ params, searchParams }: Props)
             role={role}
             exchangeRates={ratesMap}
             localeCurrency={localeCurrency}
+            baseCurrency={baseCurrency}
             fromInfraId={fromInfraId}
             initialProjectId={initialProjectId}
           />

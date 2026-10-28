@@ -66,6 +66,7 @@ const renderCart = (items: CartItem[], p: Project[] = projects) =>
       lang="en"
       exchangeRates={{}}
       localeCurrency="EUR"
+      baseCurrency="EUR"
     />,
   )
 
@@ -108,7 +109,11 @@ describe('CartView', () => {
     // The convertible item is the whole subtotal; the rest is reported beside it.
     expect(within(screen.getByTestId('cart-item-1')).getByText('10.00 EUR')).toBeInTheDocument()
     expect(screen.getByText(/subtotal \(2 items\)/i)).toBeInTheDocument()
-    expect(screen.getByText(/900.00 SEK/)).toBeInTheDocument()
+    // The un-summable line shows 900 SEK in its OWN currency, not a converted
+    // figure that assumed parity with the base — and it is named beside the
+    // subtotal too, so both the row and the notice carry it.
+    expect(within(screen.getByTestId('cart-item-2')).getByText('900.00 SEK')).toBeInTheDocument()
+    expect(screen.getAllByText(/900.00 SEK/).length).toBeGreaterThanOrEqual(2)
   })
 
   it('shows no subtotal panel for an empty cart', () => {

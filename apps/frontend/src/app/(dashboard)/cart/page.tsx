@@ -1,12 +1,12 @@
 import { auth } from '@/lib/auth'
 import { get } from '@/lib/serverApi'
 import { redirect } from 'next/navigation'
-import type { CartItem, Project, CostCenter, ExchangeRate } from '@infrashelf/types'
+import type { CartItem, Project, CostCenter, ExchangeRate, CurrencySettings } from '@infrashelf/types'
 import { CartView } from './CartView'
 import { SectionError } from '@/components/ui/SectionError'
 import { section } from '@/lib/section'
 import { getLang } from '@/lib/getLang'
-import { localeToCurrency } from '@/lib/locale'
+import { localeToCurrency, baseCurrencyFromRates } from '@/lib/locale'
 
 // The cart is per user and changes on every add, so it must never be cached.
 export const dynamic = 'force-dynamic'
@@ -17,11 +17,12 @@ export default async function CartPage() {
 
   const lang = await getLang()
 
-  const [cartRes, projectsRes, costCentersRes, ratesRes] = await Promise.allSettled([
+  const [cartRes, projectsRes, costCentersRes, ratesRes, currencyRes] = await Promise.allSettled([
     get<CartItem[]>(`/api/cart?lang=${lang}`),
     get<Project[]>('/api/projects'),
     get<CostCenter[]>('/api/admin/cost-centers'),
     get<ExchangeRate[]>('/api/public/exchange-rates'),
+    get<CurrencySettings>('/api/public/currency-settings'),
   ])
 
   // An empty cart and a cart that could not be fetched look identical, and the
@@ -42,6 +43,12 @@ export default async function CartPage() {
   const rates: Record<string, number> = Object.fromEntries(
     ratesSection.data.map((r) => [r.currencyCode, parseFloat(r.rate)]),
   )
+  // The anchor the stored rates are quoted against (FA-11.3); EUR is the default
+  // and the previous behaviour, so a failed read degrades rather than mis-converts.
+  const baseCurrency =
+    (currencyRes.status === 'fulfilled' ? currencyRes.value?.baseCurrency : null) ??
+    baseCurrencyFromRates(rates) ??
+    'EUR'
 
   return (
     <div className="max-w-screen-xl mx-auto space-y-4">
@@ -53,6 +60,7 @@ export default async function CartPage() {
         lang={lang}
         exchangeRates={rates}
         localeCurrency={localeToCurrency(lang)}
+        baseCurrency={baseCurrency}
       />
     </div>
   )

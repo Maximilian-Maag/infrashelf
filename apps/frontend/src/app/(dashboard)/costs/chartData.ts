@@ -52,7 +52,7 @@ export const foldTail = (buckets: CostBucket[], max: number, otherLabel: string)
     {
       id: null,
       label: otherLabel,
-      totalEur: Math.round(tail.reduce((sum, b) => sum + b.totalEur, 0) * 100) / 100,
+      totalBase: Math.round(tail.reduce((sum, b) => sum + b.totalBase, 0) * 100) / 100,
       orderCount: tail.reduce((sum, b) => sum + b.orderCount, 0),
     },
   ]

@@ -142,7 +142,7 @@ describe('GET /api/costs/export', () => {
     // Pinned exactly, including order: this file is fed to whatever the finance
     // side points at it, and a renamed or shuffled column breaks that silently.
     expect(text.split('\n')[0]).toBe(
-      'orderId,createdAt,project,costCenter,product,environment,size,quantity,status,price,currency,priceEur,lineTotalEur,estimated',
+      'orderId,createdAt,project,costCenter,product,environment,size,quantity,status,price,currency,priceBase,lineTotalBase,estimated',
     )
 
     const header = text.split('\n')[0].split(',')
@@ -159,15 +159,15 @@ describe('GET /api/costs/export', () => {
     expect(col('size')).toBe('Large')
     expect(col('quantity')).toBe('3')
 
-    // The property the row exists for: `price`/`priceEur` are the UNIT price and
-    // `lineTotalEur` is what the order actually cost. They have to multiply out,
+    // The property the row exists for: `price`/`priceBase` are the UNIT price and
+    // `lineTotalBase` is what the order actually cost. They have to multiply out,
     // or the CSV and the cost report disagree about the same order.
     expect(col('price')).toBe('10.00')
     expect(col('currency')).toBe('EUR')
-    expect(col('priceEur')).toBe('10')
-    expect(col('lineTotalEur')).toBe('30')
-    expect(Number(col('lineTotalEur'))).toBeCloseTo(
-      Number(col('priceEur')) * Number(col('quantity')),
+    expect(col('priceBase')).toBe('10')
+    expect(col('lineTotalBase')).toBe('30')
+    expect(Number(col('lineTotalBase'))).toBeCloseTo(
+      Number(col('priceBase')) * Number(col('quantity')),
     )
   })
 

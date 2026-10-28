@@ -56,7 +56,7 @@ export function CostDistribution({
 }: Props) {
   const title = `${t('shareOfTotal', lang)} · ${dimension}`
   const shown = foldTail(buckets, CHART_STEPS, t('other', lang))
-  const total = shown.reduce((sum, b) => sum + b.totalEur, 0)
+  const total = shown.reduce((sum, b) => sum + b.totalBase, 0)
 
   if (shown.length === 0) {
     return (
@@ -82,7 +82,7 @@ export function CostDistribution({
     { bucket: (typeof shown)[number]; x: number; width: number; fill: string }[]
   >((acc, bucket, i) => {
     const previous = acc[acc.length - 1]
-    const width = total > 0 ? (bucket.totalEur / total) * VIEW_W : 0
+    const width = total > 0 ? (bucket.totalBase / total) * VIEW_W : 0
     const x = previous ? previous.x + previous.width : 0
     return [...acc, { bucket, x, width, fill: CHART_FILL[i % CHART_FILL.length] }]
   }, [])
@@ -122,8 +122,8 @@ export function CostDistribution({
                     fill={fill}
                   >
                     <title>
-                      {`${bucket.label}: ${money(bucket.totalEur)} — ${sharePercent(
-                        bucket.totalEur,
+                      {`${bucket.label}: ${money(bucket.totalBase)} — ${sharePercent(
+                        bucket.totalBase,
                         total,
                         lang,
                       )}`}
@@ -193,9 +193,9 @@ export function CostDistribution({
                   {bucket.label}
                 </span>
               </td>
-              <td className="py-1 text-right tabular-nums text-slate-900">{money(bucket.totalEur)}</td>
+              <td className="py-1 text-right tabular-nums text-slate-900">{money(bucket.totalBase)}</td>
               <td className="py-1 text-right tabular-nums text-slate-600">
-                {sharePercent(bucket.totalEur, total, lang)}
+                {sharePercent(bucket.totalBase, total, lang)}
               </td>
             </tr>
           ))}

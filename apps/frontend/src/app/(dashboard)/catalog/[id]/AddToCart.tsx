@@ -18,6 +18,8 @@ interface Props {
   product: ProductDetail
   /** Fetched server-side; needed here because the price now follows the choice. */
   ratesMap: Record<string, number>
+  /** The currency the stored rates are quoted against (FA-11.3), default EUR. */
+  baseCurrency: string
   lang: string
 }
 
@@ -33,7 +35,7 @@ const MAX_QUANTITY = 20
  * the cart as much work as ordering outright. The size is NOT in that category: it
  * decides the price the line is shown at, so a line without one has no price.
  */
-export function AddToCart({ product, ratesMap, lang }: Props) {
+export function AddToCart({ product, ratesMap, baseCurrency, lang }: Props) {
   const router = useRouter()
   const [environmentId, setEnvironmentId] = useState(
     product.environments.length === 1 ? String(product.environments[0].environmentId) : '',
@@ -106,12 +108,13 @@ export function AddToCart({ product, ratesMap, lang }: Props) {
   const amount = chosenSize
     ? { price: chosenSize.price, currency: chosenSize.currency }
     : sortByValue(
-        selectedEnv ? amountsIn(selectedEnv) : product.environments.flatMap(amountsIn),
-        ratesMap,
-      )[0]
+      selectedEnv ? amountsIn(selectedEnv) : product.environments.flatMap(amountsIn),
+      ratesMap,
+      baseCurrency,
+    )[0]
 
   const shown = amount
-    ? convertPrice(amount.price, amount.currency, localeToCurrency(lang), ratesMap, lang)
+    ? convertPrice(amount.price, amount.currency, localeToCurrency(lang), ratesMap, lang, baseCurrency)
     : null
   // Kept when the viewer's currency is not the one the offering is priced in:
   // the converted figure is a courtesy, the stored one is what is charged.

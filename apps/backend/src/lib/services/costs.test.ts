@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import type { SessionUser } from '@infrashelf/types'
 import { getCostReport, getCostRows, assertMaySeeProject } from './costs'
 import { db } from '@/lib/db/client'
-import { orders, exchangeRates, productEnvironments, projects } from '@/lib/db/schema'
+import { orders, exchangeRates, productEnvironments, projects, appConfig } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
 import type { ProductSnapshot } from './snapshot'
 import {
@@ -89,7 +89,7 @@ describe('getCostReport — what counts as spend', () => {
     await spend(ctx, { projectId: ctx.mine.id, productId: ctx.nginx.id, price: '5.00', status: 'provisioning' })
 
     const result = await getCostReport(makeSession(ctx.admin))
-    expect(result.ok && result.data.totalEur).toBe(15)
+    expect(result.ok && result.data.totalBase).toBe(15)
     expect(result.ok && result.data.orderCount).toBe(2)
   })
 
@@ -100,7 +100,7 @@ describe('getCostReport — what counts as spend', () => {
     await spend(ctx, { projectId: ctx.mine.id, productId: ctx.nginx.id, price: '99.00', status })
 
     const result = await getCostReport(makeSession(ctx.admin))
-    expect(result.ok && result.data.totalEur).toBe(0)
+    expect(result.ok && result.data.totalBase).toBe(0)
     expect(result.ok && result.data.orderCount).toBe(0)
   })
 
@@ -120,21 +120,21 @@ describe('getCostReport — what counts as spend', () => {
     await createInfraElement(order.id, ctx.mine.id, ctx.env.id, ctx.nginx.id)
 
     const result = await getCostReport(makeSession(ctx.admin))
-    expect(result.ok && result.data.totalEur).toBe(10)
+    expect(result.ok && result.data.totalBase).toBe(10)
     expect(result.ok && result.data.orderCount).toBe(1)
     if (result.ok) {
       expect(result.data.byProject).toEqual([
-        expect.objectContaining({ totalEur: 10, orderCount: 1 }),
+        expect.objectContaining({ totalBase: 10, orderCount: 1 }),
       ])
       expect(result.data.byProduct).toEqual([
-        expect.objectContaining({ totalEur: 10, orderCount: 1 }),
+        expect.objectContaining({ totalBase: 10, orderCount: 1 }),
       ])
       expect(result.data.byEnvironment).toEqual([
-        expect.objectContaining({ totalEur: 10, orderCount: 1 }),
+        expect.objectContaining({ totalBase: 10, orderCount: 1 }),
       ])
       // And the monthly series, which is filled in the same pass and would drift
       // from the total if the rows were counted more than once.
-      expect(result.data.series.reduce((sum, m) => sum + m.totalEur, 0)).toBe(10)
+      expect(result.data.series.reduce((sum, m) => sum + m.totalBase, 0)).toBe(10)
     }
   })
 })
@@ -151,7 +151,7 @@ describe('getCostReport — which price', () => {
       .where(eq(productEnvironments.productId, ctx.nginx.id))
 
     const result = await getCostReport(makeSession(ctx.admin))
-    expect(result.ok && result.data.totalEur).toBe(10)
+    expect(result.ok && result.data.totalBase).toBe(10)
     expect(result.ok && result.data.estimatedOrders).toBe(0)
   })
 
@@ -162,7 +162,7 @@ describe('getCostReport — which price', () => {
     const result = await getCostReport(makeSession(ctx.admin))
     expect(result.ok).toBe(true)
     if (!result.ok) return
-    expect(result.data.totalEur).toBe(10)
+    expect(result.data.totalBase).toBe(10)
     // Flagged, so the total is not presented as exact when part of it is inferred.
     expect(result.data.estimatedOrders).toBe(1)
   })
@@ -174,7 +174,7 @@ describe('getCostReport — which price', () => {
     await db.delete(productEnvironments).where(eq(productEnvironments.productId, ctx.nginx.id))
 
     const result = await getCostReport(makeSession(ctx.admin))
-    expect(result.ok && result.data.totalEur).toBe(10)
+    expect(result.ok && result.data.totalBase).toBe(10)
     expect(result.ok && result.data.orderCount).toBe(1)
   })
 
@@ -195,7 +195,7 @@ describe('getCostReport — which price', () => {
     expect(result.data.orderCount).toBe(1)
     // And it says so, rather than presenting a total that is quietly short.
     expect(result.data.unpricedOrders).toBe(1)
-    expect(result.data.totalEur).toBe(0)
+    expect(result.data.totalBase).toBe(0)
   })
 
   // `null` is not `'0'`. An offering priced at zero is a decision; an offering
@@ -210,7 +210,7 @@ describe('getCostReport — which price', () => {
     if (!result.ok) return
     expect(result.data.orderCount).toBe(1)
     expect(result.data.unpricedOrders).toBe(0)
-    expect(result.data.totalEur).toBe(0)
+    expect(result.data.totalBase).toBe(0)
   })
 
   it('counts nothing as unpriced when every order has a price', async () => {
@@ -220,7 +220,7 @@ describe('getCostReport — which price', () => {
     const result = await getCostReport(makeSession(ctx.admin))
 
     expect(result.ok && result.data.unpricedOrders).toBe(0)
-    expect(result.ok && result.data.totalEur).toBe(10)
+    expect(result.ok && result.data.totalBase).toBe(10)
   })
 
   it('treats an unparseable price as zero rather than NaN', async () => {
@@ -229,20 +229,51 @@ describe('getCostReport — which price', () => {
 
     const result = await getCostReport(makeSession(ctx.admin))
     // NaN would poison every total it touched.
-    expect(result.ok && result.data.totalEur).toBe(0)
+    expect(result.ok && result.data.totalBase).toBe(0)
     expect(result.ok && result.data.orderCount).toBe(1)
   })
 })
 
 describe('getCostReport — currency conversion', () => {
-  it('converts a foreign currency to EUR using the stored rate', async () => {
+  it('converts a foreign currency to the base using the stored rate', async () => {
     const ctx = await setup()
     await db.insert(exchangeRates).values({ currencyCode: 'CHF', rate: '2.0' })
     await spend(ctx, { projectId: ctx.mine.id, productId: ctx.nginx.id, price: '20.00', currency: 'CHF' })
 
     const result = await getCostReport(makeSession(ctx.admin))
-    // Rates are relative to EUR, so 20 CHF at 2.0 is 10 EUR.
-    expect(result.ok && result.data.totalEur).toBe(10)
+    // Rates are relative to the base (EUR here), so 20 CHF at 2.0 is 10 EUR.
+    expect(result.ok && result.data.totalBase).toBe(10)
+  })
+
+  it('sums into the CONFIGURED base currency, not a fixed EUR (#592)', async () => {
+    // The base is a setting. With USD as the base the stored rates are USD-relative,
+    // so 100 CHF at 0.85 CHF-per-USD is 117.65 USD.
+    const ctx = await setup()
+    await db.update(appConfig).set({ baseCurrency: 'USD' }).where(eq(appConfig.id, 1))
+    await db.insert(exchangeRates).values([
+      { currencyCode: 'USD', rate: '1' },
+      { currencyCode: 'CHF', rate: '0.85' },
+    ])
+    await spend(ctx, { projectId: ctx.mine.id, productId: ctx.nginx.id, price: '100.00', currency: 'CHF' })
+
+    const result = await getCostReport(makeSession(ctx.admin))
+    expect(result.ok && result.data.totalBase).toBe(117.65)
+  })
+
+  it('converts a legacy EUR amount when the base is no longer EUR (#592)', async () => {
+    // Order snapshots keep the currency the price was recorded in, so after root
+    // switches the base EUR -> USD, an old EUR-priced order must be converted, not
+    // taken at face value. 90 EUR at 0.9 EUR-per-USD is 100 USD.
+    const ctx = await setup()
+    await db.update(appConfig).set({ baseCurrency: 'USD' }).where(eq(appConfig.id, 1))
+    await db.insert(exchangeRates).values([
+      { currencyCode: 'USD', rate: '1' },
+      { currencyCode: 'EUR', rate: '0.9' },
+    ])
+    await spend(ctx, { projectId: ctx.mine.id, productId: ctx.nginx.id, price: '90.00', currency: 'EUR' })
+
+    const result = await getCostReport(makeSession(ctx.admin))
+    expect(result.ok && result.data.totalBase).toBe(100)
   })
 
   it('reports an unconvertible currency instead of counting it as EUR', async () => {
@@ -253,7 +284,7 @@ describe('getCostReport — currency conversion', () => {
     const result = await getCostReport(makeSession(ctx.admin))
     expect(result.ok).toBe(true)
     if (!result.ok) return
-    expect(result.data.totalEur).toBe(0)
+    expect(result.data.totalBase).toBe(0)
     expect(result.data.unconverted).toEqual([{ currency: 'JPY', amount: 100 }])
   })
 
@@ -272,7 +303,7 @@ describe('getCostReport — currency conversion', () => {
     await spend(ctx, { projectId: ctx.mine.id, productId: ctx.nginx.id, price: '10.00', currency: 'CHF' })
 
     const result = await getCostReport(makeSession(ctx.admin))
-    expect(result.ok && result.data.totalEur).toBe(3.33)
+    expect(result.ok && result.data.totalBase).toBe(3.33)
   })
 })
 
@@ -288,13 +319,13 @@ describe('getCostReport — breakdowns', () => {
     if (!result.ok) return
 
     // Largest spend first — the point of the page is to see where money goes.
-    expect(result.data.byProject.map((b) => [b.label, b.totalEur])).toEqual([
+    expect(result.data.byProject.map((b) => [b.label, b.totalBase])).toEqual([
       ['Hidden', 30],
       ['Webshop', 10],
     ])
     expect(result.data.byProduct.map((b) => b.label)).toEqual(['Managed Postgres', 'Nginx Gateway'])
-    expect(result.data.byEnvironment).toMatchObject([{ label: 'AWS Frankfurt', totalEur: 40 }])
-    expect(result.data.byCostCenter.map((b) => [b.label, b.totalEur])).toEqual([
+    expect(result.data.byEnvironment).toMatchObject([{ label: 'AWS Frankfurt', totalBase: 40 }])
+    expect(result.data.byCostCenter.map((b) => [b.label, b.totalBase])).toEqual([
       // Orders in 'project' cost-centre mode carry none, and are labelled rather
       // than dropped from the breakdown.
       ['No cost centre', 30],
@@ -314,7 +345,7 @@ describe('getCostReport — breakdowns', () => {
 
     const result = await getCostReport(makeSession(ctx.admin))
     expect(result.ok && result.data.byCostCenter).toEqual([
-      { id: cc.id, label: 'CC-9 — Owning Team', totalEur: 40, orderCount: 1 },
+      { id: cc.id, label: 'CC-9 — Owning Team', totalBase: 40, orderCount: 1 },
     ])
   })
 
@@ -337,7 +368,7 @@ describe('getCostReport — breakdowns', () => {
 
     const result = await getCostReport(makeSession(ctx.admin))
     expect(result.ok && result.data.byCostCenter).toEqual([
-      { id: null, label: 'No cost centre', totalEur: 5, orderCount: 1 },
+      { id: null, label: 'No cost centre', totalBase: 5, orderCount: 1 },
     ])
   })
 
@@ -347,7 +378,7 @@ describe('getCostReport — breakdowns', () => {
     await spend(ctx, { projectId: ctx.mine.id, productId: ctx.nginx.id, price: '10.00' })
 
     const result = await getCostReport(makeSession(ctx.admin))
-    expect(result.ok && result.data.byProject[0]).toMatchObject({ orderCount: 2, totalEur: 20 })
+    expect(result.ok && result.data.byProject[0]).toMatchObject({ orderCount: 2, totalBase: 20 })
   })
 })
 
@@ -358,7 +389,7 @@ describe('getCostReport — scoping', () => {
     await spend(ctx, { projectId: ctx.theirs.id, productId: ctx.nginx.id, price: '20.00' })
 
     const result = await getCostReport(makeSession(ctx.admin))
-    expect(result.ok && result.data.totalEur).toBe(30)
+    expect(result.ok && result.data.totalBase).toBe(30)
     expect(result.ok && result.data.global).toBe(true)
   })
 
@@ -372,7 +403,7 @@ describe('getCostReport — scoping', () => {
     const result = await getCostReport(makeSession(ctx.pm))
     expect(result.ok).toBe(true)
     if (!result.ok) return
-    expect(result.data.totalEur).toBe(10)
+    expect(result.data.totalBase).toBe(10)
     expect(result.data.byProject.map((b) => b.label)).toEqual(['Webshop'])
     expect(result.data.global).toBe(false)
   })
@@ -383,7 +414,7 @@ describe('getCostReport — scoping', () => {
     await spend(ctx, { projectId: ctx.theirs.id, productId: ctx.nginx.id, price: '20.00' })
 
     const result = await getCostReport(makeSession(ctx.admin), { projectId: ctx.theirs.id })
-    expect(result.ok && result.data.totalEur).toBe(20)
+    expect(result.ok && result.data.totalBase).toBe(20)
   })
 })
 
@@ -397,13 +428,13 @@ describe('getCostReport — time range', () => {
       from: new Date('2026-06-01T00:00:00.000Z'),
       to: new Date('2026-06-30T23:59:59.999Z'),
     })
-    expect(result.ok && result.data.totalEur).toBe(20)
+    expect(result.ok && result.data.totalBase).toBe(20)
 
     const onBoundary = await getCostReport(makeSession(ctx.admin), {
       from: new Date('2026-01-15T00:00:00.000Z'),
       to: new Date('2026-01-15T00:00:00.000Z'),
     })
-    expect(onBoundary.ok && onBoundary.data.totalEur).toBe(10)
+    expect(onBoundary.ok && onBoundary.data.totalBase).toBe(10)
   })
 
   it('returns a zero report rather than an error when nothing matches', async () => {
@@ -411,7 +442,7 @@ describe('getCostReport — time range', () => {
     const result = await getCostReport(makeSession(ctx.admin), { from: new Date('2099-01-01T00:00:00.000Z') })
     expect(result.ok).toBe(true)
     if (result.ok) {
-      expect(result.data).toMatchObject({ totalEur: 0, orderCount: 0, byProject: [], unconverted: [] })
+      expect(result.data).toMatchObject({ totalBase: 0, orderCount: 0, byProject: [], unconverted: [] })
     }
   })
 })
@@ -430,7 +461,7 @@ describe('getCostReport — monthly series (issue #106)', () => {
     const result = await getCostReport(makeSession(ctx.admin), {}, NOW)
     expect(result.ok).toBe(true)
     if (!result.ok) return
-    expect(result.data.series.map((p) => [p.period, p.totalEur])).toEqual([
+    expect(result.data.series.map((p) => [p.period, p.totalBase])).toEqual([
       ['2026-06', 15],
       ['2026-07', 0],
       ['2026-08', 20],
@@ -450,7 +481,7 @@ describe('getCostReport — monthly series (issue #106)', () => {
     expect(result.ok && result.data.series.map((p) => p.period)).toEqual([
       '2025-11', '2025-12', '2026-01', '2026-02',
     ])
-    expect(result.ok && result.data.series.map((p) => p.totalEur)).toEqual([10, 0, 0, 10])
+    expect(result.ok && result.data.series.map((p) => p.totalBase)).toEqual([10, 0, 0, 10])
   })
 
   it('pads nothing before the first order, however wide the window', async () => {
@@ -472,8 +503,8 @@ describe('getCostReport — monthly series (issue #106)', () => {
 
     const result = await getCostReport(makeSession(ctx.admin), {}, NOW)
     if (!result.ok) throw new Error('expected a report')
-    const summed = result.data.series.reduce((sum, p) => sum + p.totalEur, 0)
-    expect(Math.round(summed * 100) / 100).toBe(result.data.totalEur)
+    const summed = result.data.series.reduce((sum, p) => sum + p.totalBase, 0)
+    expect(Math.round(summed * 100) / 100).toBe(result.data.totalBase)
   })
 
   it('marks only the month that has not finished as partial', async () => {
@@ -509,7 +540,7 @@ describe('getCostReport — monthly series (issue #106)', () => {
       ['2026-08', 0],
     ])
     // The live price (10.00) stood in for the missing snapshot.
-    expect(result.data.series[0].totalEur).toBe(10)
+    expect(result.data.series[0].totalBase).toBe(10)
   })
 
   it('counts an unconvertible amount at zero in its month, as the breakdowns do', async () => {
@@ -521,7 +552,7 @@ describe('getCostReport — monthly series (issue #106)', () => {
     const result = await getCostReport(makeSession(ctx.admin), {}, NOW)
     if (!result.ok) throw new Error('expected a report')
     expect(result.data.series).toEqual([
-      { period: '2026-08', totalEur: 0, orderCount: 1, estimatedOrders: 0, partial: true },
+      { period: '2026-08', totalBase: 0, orderCount: 1, estimatedOrders: 0, partial: true },
     ])
     expect(result.data.unconverted).toEqual([{ currency: 'JPY', amount: 100 }])
   })
@@ -534,7 +565,7 @@ describe('getCostReport — monthly series (issue #106)', () => {
 
     const result = await getCostReport(makeSession(ctx.admin), {}, NOW)
     expect(result.ok && result.data.series).toEqual([
-      { period: '2026-08', totalEur: 10, orderCount: 1, estimatedOrders: 0, partial: true },
+      { period: '2026-08', totalBase: 10, orderCount: 1, estimatedOrders: 0, partial: true },
     ])
   })
 
@@ -557,7 +588,7 @@ describe('getCostReport — monthly series (issue #106)', () => {
     await spend(ctx, { projectId: ctx.theirs.id, productId: ctx.nginx.id, price: '99.00', createdAt: new Date('2026-08-02T00:00:00.000Z') })
 
     const result = await getCostReport(makeSession(ctx.pm), {}, NOW)
-    expect(result.ok && result.data.series[0].totalEur).toBe(10)
+    expect(result.ok && result.data.series[0].totalBase).toBe(10)
   })
 
   it('returns an empty series rather than a fabricated month when nothing matches', async () => {
@@ -579,9 +610,9 @@ describe('getCostReport — period comparison (issue #106)', () => {
     const result = await getCostReport(makeSession(ctx.admin), {}, NOW)
     if (!result.ok) throw new Error('expected a report')
     expect(result.data.comparison).toMatchObject({
-      previous: { period: '2026-07', totalEur: 40 },
-      current: { period: '2026-08', totalEur: 50 },
-      changeEur: 10,
+      previous: { period: '2026-07', totalBase: 40 },
+      current: { period: '2026-08', totalBase: 50 },
+      changeBase: 10,
       changePct: 25,
     })
   })
@@ -592,7 +623,7 @@ describe('getCostReport — period comparison (issue #106)', () => {
     await spend(ctx, { projectId: ctx.mine.id, productId: ctx.nginx.id, price: '10.00', createdAt: new Date('2026-08-02T00:00:00.000Z') })
 
     const result = await getCostReport(makeSession(ctx.admin), {}, NOW)
-    expect(result.ok && result.data.comparison?.changeEur).toBe(-30)
+    expect(result.ok && result.data.comparison?.changeBase).toBe(-30)
     expect(result.ok && result.data.comparison?.changePct).toBe(-75)
   })
 
@@ -606,7 +637,7 @@ describe('getCostReport — period comparison (issue #106)', () => {
     const result = await getCostReport(makeSession(ctx.admin), {}, NOW)
     expect(result.ok && result.data.comparison?.previous.period).toBe('2026-07')
     expect(result.ok && result.data.comparison?.changePct).toBeNull()
-    expect(result.ok && result.data.comparison?.changeEur).toBe(30)
+    expect(result.ok && result.data.comparison?.changeBase).toBe(30)
   })
 
   it('is null for a one-month window rather than comparing against an excluded month', async () => {
@@ -651,7 +682,7 @@ describe('getCostRows', () => {
       productName: 'Managed Postgres',
       environmentName: 'AWS Frankfurt',
       currency: 'EUR',
-      priceEur: 20,
+      priceBase: 20,
       estimated: false,
     })
   })
@@ -664,13 +695,13 @@ describe('getCostRows', () => {
     expect(result.ok && result.data[0].estimated).toBe(true)
   })
 
-  it('leaves priceEur null when the currency has no rate', async () => {
+  it('leaves priceBase null when the currency has no rate', async () => {
     // Null, not 0 — zero would read as "free" in the export.
     const ctx = await setup()
     await spend(ctx, { projectId: ctx.mine.id, productId: ctx.nginx.id, price: '100.00', currency: 'JPY' })
 
     const result = await getCostRows(makeSession(ctx.admin))
-    expect(result.ok && result.data[0].priceEur).toBeNull()
+    expect(result.ok && result.data[0].priceBase).toBeNull()
   })
 
   it('scopes a project manager the same way the report does', async () => {
@@ -684,8 +715,8 @@ describe('getCostRows', () => {
   })
 
   // The export exists so the report can be reconciled, and the CSV carries two
-  // money columns that do NOT agree with each other by design: `priceEur` is the
-  // rounded unit, `lineTotalEur` is the rounded line. Multiplying the first gives
+  // money columns that do NOT agree with each other by design: `priceBase` is the
+  // rounded unit, `lineTotalBase` is the rounded line. Multiplying the first gives
   // a different answer from the second at exactly the rates where it is hard to
   // notice, so which one reconciles has to be pinned rather than assumed (#189).
   it('reconciles the line total with the report, not the rounded unit', async () => {
@@ -710,11 +741,11 @@ describe('getCostRows', () => {
     expect(line.quantity).toBe(3)
     // 33.33 USD at 1.09 is 30.5779… — rounded for display, and that rounding is
     // exactly what must not be carried into the multiplication.
-    expect(line.priceEur).toBe(30.58)
-    expect(line.lineTotalEur).toBe(91.73)
-    expect((line.priceEur ?? 0) * line.quantity).toBeCloseTo(91.74, 2)
+    expect(line.priceBase).toBe(30.58)
+    expect(line.lineTotalBase).toBe(91.73)
+    expect((line.priceBase ?? 0) * line.quantity).toBeCloseTo(91.74, 2)
     // The line total is the one that matches the report.
-    expect(line.lineTotalEur).toBe(report.data.totalEur)
+    expect(line.lineTotalBase).toBe(report.data.totalBase)
   })
 
   it('sums to the report across several lines', async () => {
@@ -728,10 +759,10 @@ describe('getCostRows', () => {
     const report = await getCostReport(makeSession(ctx.admin))
     if (!rows.ok || !report.ok) throw new Error('expected both to succeed')
 
-    const summed = rows.data.reduce((a, r) => a + (r.lineTotalEur ?? 0), 0)
+    const summed = rows.data.reduce((a, r) => a + (r.lineTotalBase ?? 0), 0)
     // Per-line rounding against a rounded grand total: they agree to the cent
     // here, and this is the test that says so if that ever stops being true.
-    expect(Math.abs(summed - report.data.totalEur)).toBeLessThan(0.02)
+    expect(Math.abs(summed - report.data.totalBase)).toBeLessThan(0.02)
   })
 })
 

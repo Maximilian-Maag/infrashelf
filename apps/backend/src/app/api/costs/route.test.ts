@@ -65,7 +65,7 @@ describe('GET /api/costs', () => {
     const res = await GET(req('', pmAuth))
     expect(res.status).toBe(200)
     const body = await res.json()
-    expect(body.totalEur).toBe(10)
+    expect(body.totalBase).toBe(10)
     expect(body.global).toBe(false)
   })
 
@@ -78,7 +78,7 @@ describe('GET /api/costs', () => {
   it('narrows to a project', async () => {
     const { mine, adminAuth } = await setup()
     const body = await (await GET(req(`?projectId=${mine.id}`, adminAuth))).json()
-    expect(body.totalEur).toBe(10)
+    expect(body.totalBase).toBe(10)
   })
 
   it('refuses a project the caller may not see, rather than returning zero', async () => {
@@ -111,7 +111,7 @@ describe('GET /api/costs', () => {
   it('breaks the total down by project, cost centre, product and environment', async () => {
     const { adminAuth } = await setup()
     const body = await (await GET(req('', adminAuth))).json()
-    expect(body.byProject).toMatchObject([{ label: 'Webshop', totalEur: 10 }])
+    expect(body.byProject).toMatchObject([{ label: 'Webshop', totalBase: 10 }])
     expect(body.byProduct).toMatchObject([{ label: 'Nginx Gateway' }])
     expect(body.byEnvironment).toMatchObject([{ label: 'AWS Frankfurt' }])
     // 'project' cost-centre mode stores none, so the bucket is labelled explicitly.
@@ -127,14 +127,14 @@ describe('GET /api/costs', () => {
     expect(body.series).toHaveLength(1)
     expect(body.series[0]).toMatchObject({
       period: expect.stringMatching(/^\d{4}-\d{2}$/),
-      totalEur: 10,
+      totalBase: 10,
       orderCount: 1,
       estimatedOrders: 0,
       // The seeded order is created now, so its month is the unfinished one.
       partial: true,
     })
-    const summed = (body.series as { totalEur: number }[]).reduce((s, p) => s + p.totalEur, 0)
-    expect(Math.round(summed * 100) / 100).toBe(body.totalEur)
+    const summed = (body.series as { totalBase: number }[]).reduce((s, p) => s + p.totalBase, 0)
+    expect(Math.round(summed * 100) / 100).toBe(body.totalBase)
     // One month in the window, so there is nothing honest to compare against.
     expect(body.comparison).toBeNull()
   })
@@ -155,11 +155,11 @@ describe('GET /api/costs/export', () => {
     expect(res.headers.get('content-disposition')).toContain('costs.csv')
 
     const text = await res.text()
-    // `price` stays the UNIT price and `lineTotalEur` is what reconciles with the
+    // `price` stays the UNIT price and `lineTotalBase` is what reconciles with the
     // report total, now that one order can be twenty elements (issues #98/#104).
     expect(text.split('\n')[0]).toBe(
       'orderId,createdAt,project,costCenter,product,environment,size,quantity,status,' +
-        'price,currency,priceEur,lineTotalEur,estimated',
+        'price,currency,priceBase,lineTotalBase,estimated',
     )
     expect(text).toContain('Webshop')
     expect(text).toContain('Nginx Gateway')

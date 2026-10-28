@@ -31,9 +31,11 @@ interface Props {
   projects: Project[]
   costCenters: CostCenter[]
   lang: string
-  /** Rates relative to EUR, for the subtotal in the viewer's currency. */
+  /** Rates relative to the base currency, for the subtotal in the viewer's currency. */
   exchangeRates: Record<string, number>
   localeCurrency: string
+  /** The currency the stored rates are quoted against (FA-11.3), default EUR. */
+  baseCurrency: string
 }
 
 /**
@@ -53,6 +55,7 @@ export function CartView({
   lang,
   exchangeRates,
   localeCurrency,
+  baseCurrency,
 }: Props) {
   const router = useRouter()
   const [items, setItems] = useState(initialItems)
@@ -205,7 +208,7 @@ export function CartView({
 
   const unavailable = items.filter((i) => !i.stillOffered)
   const canCheckout = items.length > 0 && projectId !== '' && unavailable.length === 0 && !busy
-  const totals = subtotal(items, exchangeRates, localeCurrency, lang)
+  const totals = subtotal(items, exchangeRates, localeCurrency, lang, baseCurrency)
 
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
@@ -312,7 +315,7 @@ export function CartView({
                     costCenterId={costCentres[item.id] ?? ''}
                     costCenters={costCenters}
                     lang={lang}
-                    price={linePrice(item, exchangeRates, localeCurrency, lang)}
+                    price={linePrice(item, exchangeRates, localeCurrency, lang, baseCurrency)}
                     onMount={() => loadDefs(item)}
                     onQuantity={(next) => handleQuantity(item.id, next)}
                     onValues={(next) => setValues((prev) => ({ ...prev, [item.id]: next }))}
@@ -392,13 +395,14 @@ const linePrice = (
   rates: Record<string, number>,
   displayCurrency: string,
   lang: string,
+  baseCurrency: string,
 ): { total: string; unit: string | null } | null => {
   if (item.price === null || item.currency === null) return null
   const units = unitsOf(item)
-  const unit = convertPrice(item.price, item.currency, displayCurrency, rates, lang)
+  const unit = convertPrice(item.price, item.currency, displayCurrency, rates, lang, baseCurrency)
   const amount = Number(item.price)
   if (!Number.isFinite(amount)) return { total: `${unit.amount} ${unit.currency}`, unit: null }
-  const total = convertPrice((amount * units).toFixed(2), item.currency, displayCurrency, rates, lang)
+  const total = convertPrice((amount * units).toFixed(2), item.currency, displayCurrency, rates, lang, baseCurrency)
   return {
     total: `${total.amount} ${total.currency}`,
     // Only worth saying when it differs from the total.
@@ -409,21 +413,23 @@ const linePrice = (
 /**
  * Subtotal across the cart.
  *
- * Rates are relative to EUR, so everything goes through EUR. An item in a currency
- * with no stored rate cannot be added to the total honestly, so it is reported
- * separately instead of being counted at par.
+ * Rates are quoted against the configured base currency (FA-11.3), so everything
+ * goes through the base. An item in a currency with no stored rate cannot be added
+ * to the total honestly, so it is reported separately instead of being counted at
+ * par.
  */
 const subtotal = (
   items: CartItem[],
   rates: Record<string, number>,
   displayCurrency: string,
   lang: string,
+  baseCurrency: string,
 ): { display: string; unconverted: string[] } => {
   const rateOf = (currency: string): number | null =>
-    currency === 'EUR' ? 1 : (rates[currency] ?? null)
+    currency === baseCurrency ? 1 : (rates[currency] ?? null)
 
   const target = rateOf(displayCurrency)
-  let eur = 0
+  let base = 0
   const unconverted = new Map<string, number>()
 
   for (const item of items) {
@@ -438,10 +444,17 @@ const subtotal = (
       unconverted.set(item.currency, (unconverted.get(item.currency) ?? 0) + amount)
       continue
     }
-    eur += amount / source
+    base += amount / source
   }
 
-  const converted = convertPrice(eur.toFixed(2), 'EUR', target === null ? 'EUR' : displayCurrency, rates, lang)
+  const converted = convertPrice(
+    base.toFixed(2),
+    baseCurrency,
+    target === null ? baseCurrency : displayCurrency,
+    rates,
+    lang,
+    baseCurrency,
+  )
   return {
     display: `${converted.amount} ${converted.currency}`,
     unconverted: [...unconverted.entries()].map(([currency, amount]) => `${amount.toFixed(2)} ${currency}`),

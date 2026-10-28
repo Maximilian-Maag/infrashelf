@@ -6,12 +6,13 @@ import { parseCostFilters } from '@/lib/services/costFilters'
 import { getBranding } from '@/lib/services/admin/branding'
 import PDFDocument from 'pdfkit'
 import { requestLang } from '@/lib/http'
+import { readBaseCurrency } from '@/lib/exchange/baseCurrency'
 
-// `price` is the UNIT price and `lineTotalEur` is what reconciles with the report
+// `price` is the UNIT price and `lineTotalBase` is what reconciles with the report
 // total — an order of 20 costs 20 times one (issues #98/#104).
 const HEADER = [
   'orderId', 'createdAt', 'project', 'costCenter', 'product', 'environment',
-  'size', 'quantity', 'status', 'price', 'currency', 'priceEur', 'lineTotalEur',
+  'size', 'quantity', 'status', 'price', 'currency', 'priceBase', 'lineTotalBase',
   'estimated',
 ] as const
 
@@ -28,15 +29,17 @@ const cells = (row: CostRowExport) => [
   row.price,
   row.currency,
   // Blank rather than 0 when no rate was available: 0 would read as "free".
-  row.priceEur === null ? '' : row.priceEur,
-  row.lineTotalEur === null ? '' : row.lineTotalEur,
+  row.priceBase === null ? '' : row.priceBase,
+  row.lineTotalBase === null ? '' : row.lineTotalBase,
   row.estimated ? 'yes' : 'no',
 ]
 
 const buildPdf = async (
   rows: CostRowExport[],
-  totalEur: number,
+  totalBase: number,
   shopName: string,
+  /** The currency the report is summed into (FA-11.3); EUR unless root changed it. */
+  currency: string,
 ): Promise<Buffer> =>
   new Promise((resolve, reject) => {
     const doc = new PDFDocument({ margin: 40, size: 'A4', layout: 'landscape' })
@@ -48,7 +51,7 @@ const buildPdf = async (
     doc.fontSize(16).font('Helvetica-Bold').text(shopName, { align: 'center' })
     doc.fontSize(12).font('Helvetica-Bold').text('Cost Report', { align: 'center' })
     doc.fontSize(10).font('Helvetica').text(`Generated: ${new Date().toISOString()}`, { align: 'center' })
-    doc.fontSize(10).text(`${rows.length} order(s) · total ${totalEur.toFixed(2)} EUR`, { align: 'center' })
+    doc.fontSize(10).text(`${rows.length} order(s) · total ${totalBase.toFixed(2)} ${currency}`, { align: 'center' })
     // Said on the document itself, not only in the UI: an exported report outlives
     // the page that produced it.
     doc.fontSize(8).text(
@@ -70,7 +73,7 @@ const buildPdf = async (
       { label: 'Size', width: 45 },
       { label: 'Qty', width: 28 },
       { label: 'Price', width: 62 },
-      { label: 'EUR', width: 65 },
+      { label: currency, width: 65 },
       { label: 'Est.', width: 30 },
     ]
 
@@ -112,7 +115,7 @@ const buildPdf = async (
         String(row.quantity),
         `${row.price} ${row.currency}`,
         // The LINE total, so the column sums to the figure in the header.
-        row.lineTotalEur === null ? '—' : row.lineTotalEur.toFixed(2),
+        row.lineTotalBase === null ? '—' : row.lineTotalBase.toFixed(2),
         row.estimated ? 'yes' : '',
       ], y, false)
       y += rowHeight
@@ -154,8 +157,9 @@ export async function GET(req: NextRequest) {
     const branding = await getBranding()
     const pdf = await buildPdf(
       result.data,
-      report.ok ? report.data.totalEur : 0,
+      report.ok ? report.data.totalBase : 0,
       branding.ok ? branding.data.shopName : 'InfraShelf',
+      await readBaseCurrency(),
     )
     return new NextResponse(new Blob([new Uint8Array(pdf)], { type: 'application/pdf' }), {
       headers: { 'Content-Disposition': 'attachment; filename="costs.pdf"' },

@@ -46,7 +46,7 @@ describe('the headline price follows the choice', () => {
   ]
 
   it('starts at the cheapest, before anything is chosen', () => {
-    render(<AddToCart product={product(sized)} ratesMap={{}} lang="en" />)
+    render(<AddToCart product={product(sized)} ratesMap={{}} baseCurrency="EUR" lang="en" />)
     // Twice for the cheapest — the headline and its own swatch — and once for
     // the dearer one, which is only on its swatch.
     expect(screen.getAllByText(/10\.00 EUR/)).toHaveLength(2)
@@ -54,7 +54,7 @@ describe('the headline price follows the choice', () => {
   })
 
   it('moves to the chosen size', async () => {
-    render(<AddToCart product={product(sized)} ratesMap={{}} lang="en" />)
+    render(<AddToCart product={product(sized)} ratesMap={{}} baseCurrency="EUR" lang="en" />)
 
     // One offering, so the environment is preselected and the swatches show.
     await userEvent.click(screen.getByRole('radio', { name: /extra large/i }))
@@ -67,7 +67,7 @@ describe('the headline price follows the choice', () => {
   // An offering with no sizes keeps its own price, which is the case every
   // offering that predates sizing is in.
   it('uses the offering price when there are no sizes', () => {
-    render(<AddToCart product={product([offering({ environmentId: 1, price: '42.00' })])} ratesMap={{}} lang="en" />)
+    render(<AddToCart product={product([offering({ environmentId: 1, price: '42.00' })])} ratesMap={{}} baseCurrency="EUR" lang="en" />)
     expect(screen.getByText(/42\.00 EUR/)).toBeInTheDocument()
     expect(screen.queryByRole('radio')).toBeNull()
   })

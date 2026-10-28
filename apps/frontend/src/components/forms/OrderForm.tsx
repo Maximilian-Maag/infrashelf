@@ -33,6 +33,8 @@ interface OrderFormProps {
   lang?: string
   exchangeRates?: Record<string, number>
   localeCurrency?: string
+  /** The currency the stored rates are quoted against (FA-11.3), default EUR. */
+  baseCurrency?: string
   /**
    * Who is ordering (#509).
    *
@@ -59,6 +61,7 @@ export function OrderForm({
   lang = 'en',
   exchangeRates = {},
   localeCurrency = 'EUR',
+  baseCurrency = 'EUR',
   role = 'project_manager',
   fromInfraId,
   initialProjectId,
@@ -426,7 +429,7 @@ export function OrderForm({
   }
 
   function formatPrice(price: string, currency: string): string {
-    const converted = convertPrice(price, currency, localeCurrency, exchangeRates, lang)
+    const converted = convertPrice(price, currency, localeCurrency, exchangeRates, lang, baseCurrency)
     if (converted.currency !== currency) {
       return `${converted.amount} ${converted.currency}`
     }
@@ -446,9 +449,9 @@ export function OrderForm({
     // environment in the list, including ones that are not the selected one.
     const envSizes = env.sizes ?? []
     if (envSizes.length === 0) return formatPrice(env.price, env.currency)
-    // Compared in EUR, not by the digits: sizes carry their own currency, so the
-    // cheapest is not whichever one has the smallest number on it.
-    const cheapest = sortByValue(envSizes, exchangeRates)[0]
+    // Compared in the base currency, not by the digits: sizes carry their own
+    // currency, so the cheapest is not whichever one has the smallest number on it.
+    const cheapest = sortByValue(envSizes, exchangeRates, baseCurrency)[0]
     return formatPrice(cheapest.price, cheapest.currency)
   }
 
