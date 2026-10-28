@@ -309,6 +309,7 @@ const PAGE_ENVELOPES: Array<{ method: string; path: string }> = [
   { method: 'get', path: '/catalog' },
   { method: 'get', path: '/orders' },
   { method: 'get', path: '/infrastructure' },
+  { method: 'get', path: '/admin/products' },
 ]
 
 describe('every paginated list documents the page envelope (#589)', () => {

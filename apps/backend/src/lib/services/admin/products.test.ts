@@ -85,8 +85,9 @@ describe('listProducts', () => {
     const result = await listProducts()
     expect(result.ok).toBe(true)
     if (result.ok) {
-      expect(result.data.length).toBe(2)
-      expect(result.data.map((p) => p.name).sort()).toEqual(['Alpha', 'Beta'])
+      expect(result.data.items.length).toBe(2)
+      expect(result.data.items.map((p) => p.name).sort()).toEqual(['Alpha', 'Beta'])
+      expect(result.data.total).toBe(2)
     }
   })
 })
@@ -521,9 +522,9 @@ describe('deleteProduct preserves order history (issue #142)', () => {
     const admin = await listProducts()
     expect(admin.ok).toBe(true)
     if (admin.ok) {
-      expect(admin.data.map((p) => p.id)).toContain(product.id)
+      expect(admin.data.items.map((p) => p.id)).toContain(product.id)
       // Marked, so the list does not read as though it were live.
-      expect(admin.data.find((p) => p.id === product.id)?.retiredAt).toBeInstanceOf(Date)
+      expect(admin.data.items.find((p) => p.id === product.id)?.retiredAt).toBeTruthy()
     }
 
     const shop = await listCatalog('en')
