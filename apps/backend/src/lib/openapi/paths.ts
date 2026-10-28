@@ -2902,6 +2902,25 @@ registry.registerPath({
   },
 })
 
+registry.registerPath({
+  method: 'get',
+  path: '/public/currency-settings',
+  summary: 'The configured base currency',
+  description:
+    'The currency product prices are stored in and the stored exchange rates are quoted against ' +
+    '(FA-11.3). Public because the frontend converts every displayed price in the browser and ' +
+    'cannot anchor a conversion without it; writing it stays root-only.',
+  tags: ['Public'],
+  security: [],
+  responses: {
+    200: {
+      description: 'The configured base currency. EUR until root sets otherwise.',
+      content: { 'application/json': { schema: z.object({ baseCurrency: z.string() }) } },
+    },
+    503: { description: 'The base currency could not be read' },
+  },
+})
+
 // ─── Webhooks (public) ────────────────────────────────────────────────────────
 
 registry.registerPath({

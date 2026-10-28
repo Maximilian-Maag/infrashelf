@@ -21,6 +21,7 @@ public_routes := {
 	"auth/webauthn/verify": "redeems a passwordless assertion for a session (#241) — it is the login endpoint for keys, so requiring a session would be the same contradiction as auth/login. The proof it checks is the assertion itself: a challenge this server issued and has not yet spent, a signature over the real origin, and user verification required",
 	"public/branding": "the login screen renders from it, before any session exists",
 	"public/exchange-rates": "read by the unauthenticated shell for price display",
+	"public/currency-settings": "the base currency the stored rates are quoted against (FA-11.3). Public for the same reason as public/exchange-rates beside it: the frontend converts every displayed price in the browser and cannot anchor a conversion without it, and neither the code nor the rates is a secret. Writing the base stays root-only at /admin/exchange-rates/base-currency",
 	"catalog/[id]/image": "loaded by the browser as an <img> src, which cannot carry a bearer token",
 	"catalog/[id]/images/[imageId]": "one picture of the gallery (#107) — same reason as catalog/[id]/image above: reached only as an <img> src, and the API is a different origin from the session cookie, so requireAuth would have nothing to read and every picture would be a broken image. Both route ids go through parseRouteId and the service checks the (product, image) pairing, so a URL cannot be walked across products",
 	"webhooks/gitlab/pipeline": "authenticated by the environment's callback_secret over HMAC, not by a session",

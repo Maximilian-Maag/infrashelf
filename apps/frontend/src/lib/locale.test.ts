@@ -1,7 +1,10 @@
 import { describe, it, expect } from 'vitest'
-import { convertPrice, localeToCurrency, priceInEur, sortByValue } from './locale'
+import { convertPrice, localeToCurrency, priceInBase, sortByValue } from './locale'
 
 const rates = { USD: 1.1, GBP: 0.85 } // relative to EUR
+
+// The same rates re-based onto USD: EUR/USD = 1 / 1.1, GBP/USD = 0.85 / 1.1.
+const ratesUsdBase = { EUR: 1 / 1.1, GBP: 0.85 / 1.1, USD: 1 }
 
 describe('convertPrice', () => {
   it('formats the amount in the locale when currencies match', () => {
@@ -20,6 +23,18 @@ describe('convertPrice', () => {
     expect(res.currency).toBe('USD')
     // 100 EUR * 1.1 = 110.00 (en formatting)
     expect(res.amount).toBe('110.00')
+  })
+
+  it('anchors on a non-EUR base when one is configured', () => {
+    // Rates quoted against USD, so the base itself is 1.
+    // 100 USD → EUR at 1/1.1 EUR per USD = 90.91.
+    const toEur = convertPrice('100', 'USD', 'EUR', ratesUsdBase, 'en', 'USD')
+    expect(toEur.currency).toBe('EUR')
+    expect(toEur.amount).toBe('90.91')
+    // 100 EUR → USD at 1.1 USD per EUR = 110.00.
+    const toUsd = convertPrice('100', 'EUR', 'USD', ratesUsdBase, 'en', 'USD')
+    expect(toUsd.currency).toBe('USD')
+    expect(toUsd.amount).toBe('110.00')
   })
 
   it('formats grouping/decimals in the requested locale', () => {
@@ -51,20 +66,26 @@ describe('localeToCurrency', () => {
   })
 })
 
-describe('priceInEur', () => {
-  it('takes EUR as 1 without needing a rate entry', () => {
-    expect(priceInEur('9', 'EUR', rates)).toBe(9)
+describe('priceInBase', () => {
+  it('takes the base currency as 1 without needing a rate entry', () => {
+    expect(priceInBase('9', 'EUR', rates)).toBe(9)
   })
 
-  it('divides by the rate, which is quoted against EUR', () => {
+  it('divides by the rate, which is quoted against the base', () => {
     // 1.1 USD to the euro, so 11 USD is 10 EUR.
-    expect(priceInEur('11', 'USD', rates)).toBeCloseTo(10)
+    expect(priceInBase('11', 'USD', rates)).toBeCloseTo(10)
+  })
+
+  it('anchors on a non-EUR base when one is configured', () => {
+    // With rates quoted against USD, 11 USD is 11 USD and 11 EUR is 12.1 USD.
+    expect(priceInBase('11', 'USD', ratesUsdBase, 'USD')).toBe(11)
+    expect(priceInBase('11', 'EUR', ratesUsdBase, 'USD')).toBeCloseTo(12.1)
   })
 
   it('is null when nothing says what the currency is worth', () => {
-    expect(priceInEur('100', 'JPY', rates)).toBeNull()
-    expect(priceInEur('100', 'JPY', { JPY: 0 })).toBeNull()
-    expect(priceInEur('n/a', 'EUR', rates)).toBeNull()
+    expect(priceInBase('100', 'JPY', rates)).toBeNull()
+    expect(priceInBase('100', 'JPY', { JPY: 0 })).toBeNull()
+    expect(priceInBase('n/a', 'EUR', rates)).toBeNull()
   })
 })
 

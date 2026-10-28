@@ -70,8 +70,11 @@ describe('i18n', () => {
     'callbackSecretHint', 'revealCurrent', 'deleteEnvironmentTitle',
     'regenerateSecretTitle', 'regenerateSecretConfirm', 'failedToLoadSecret',
     'failedToRegenerateSecret', 'failedToCopyClipboard', 'failedToDeleteEnvironment',
-    'refreshRates', 'refreshing', 'currency', 'rateToEur', 'lastUpdated',
+    'refreshRates', 'refreshing', 'currency', 'rate', 'lastUpdated',
     'noExchangeRates', 'failedToLoadExchangeRates', 'failedToRefreshRates',
+    // Base currency (#592). The screen decides what every stored price MEANS, so
+    // a language silently rendering these in English is worth catching.
+    'baseCurrency', 'baseCurrencyHint', 'baseCurrencySavedToast', 'failedToSaveBaseCurrency',
     'addParameter', 'noGlobalParametersYet', 'variableName', 'variableNameHint',
     'displayLabel', 'displayLabelHint', 'defaultValue', 'commaSeparatedOptions',
     'editParameter', 'deleteParameterTitle', 'deleteParameterPrompt',

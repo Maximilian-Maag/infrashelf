@@ -1686,6 +1686,14 @@ export interface ExchangeRate {
   updatedAt: string
 }
 
+/**
+ * The base currency prices are stored in and rates are quoted against (FA-11.3).
+ * `GET /api/public/currency-settings` for reading; root-only admin route to set.
+ */
+export interface CurrencySettings {
+  baseCurrency: string
+}
+
 // Audit
 export interface AuditEntry {
   id: number

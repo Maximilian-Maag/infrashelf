@@ -18,8 +18,15 @@ const get = vi.fn()
 vi.mock('@/lib/serverApi', () => ({ get: (path: string) => get(path) }))
 
 vi.mock('./ExchangeRatesTable', () => ({
-  ExchangeRatesTable: ({ initial, initialError }: { initial: unknown[]; initialError: string | null }) =>
-    <div data-testid="manager" data-count={initial.length} data-error={initialError ?? ''} />,
+  ExchangeRatesTable: ({ initial, initialError, initialBaseCurrency }: {
+    initial: unknown[]; initialError: string | null; initialBaseCurrency: string
+  }) =>
+    <div
+      data-testid="manager"
+      data-count={initial.length}
+      data-error={initialError ?? ''}
+      data-base={initialBaseCurrency}
+    />,
 }))
 
 beforeEach(() => {
@@ -57,6 +64,16 @@ describe('ExchangeRatesPage', () => {
     expect(get).toHaveBeenCalledWith('/api/admin/exchange-rates')
     expect(screen.getByTestId('manager')).toHaveAttribute('data-count', '2')
     expect(screen.getByTestId('manager')).toHaveAttribute('data-error', '')
+  })
+
+  it('reads the base currency alongside the rates and hands it over (#592)', async () => {
+    get.mockImplementation((path: string) =>
+      Promise.resolve(path.endsWith('/base-currency') ? { baseCurrency: 'CHF' } : [{ id: 1 }, { id: 2 }]),
+    )
+    render(await ExchangeRatesPage())
+
+    expect(get).toHaveBeenCalledWith('/api/admin/exchange-rates/base-currency')
+    expect(screen.getByTestId('manager')).toHaveAttribute('data-base', 'CHF')
   })
 
   it('hands over the REASON when the fetch failed, not an empty list', async () => {

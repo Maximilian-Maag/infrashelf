@@ -2301,15 +2301,19 @@ in-memory with a mutex for read performance.
 \section{Currencies}
 \label{sec:currencies}
 
-Under \textbf{Administration → Currencies}:
+Under \textbf{Administration → Exchange Rates}:
 
 \begin{enumerate}
   \item The \textbf{base currency} (default EUR) is the currency in
-        which all product prices are stored.
-  \item Optionally configure an exchange rate API key and endpoint.
-  \item Click \textbf{Update Rates} to fetch live rates.
-  \item Individual rates can be overridden manually for fixed-rate
-        environments.
+        which all product prices are stored and against which the
+        stored exchange rates are quoted (FA-11.3). Enter a
+        three-letter ISO 4217 code in the \emph{Base currency} field
+        and press \textbf{Save} to change it; this re-bases every
+        stored rate onto the new currency. A code with no stored rate
+        is refused until the rates are refreshed.
+  \item Click \textbf{Refresh Rates} to fetch live rates from the
+        exchange-rate API configured via
+        \code{EXCHANGE\_RATE\_API\_URL}.
 \end{enumerate}
 
 Prices are displayed in the user's locale currency by looking up the
@@ -3202,8 +3206,8 @@ Append-only; rows are never updated or deleted.
     \textbf{Column} & \textbf{Type} & \textbf{Default} & \textbf{Notes} \\
     \midrule
     \code{currency\_code} & TEXT          & --- & PK; ISO 4217, e.g.\ \code{EUR} \\
-    \code{rate}           & NUMERIC(18,6) & --- & NOT NULL; relative to base currency (EUR = 1.0) \\
-    \code{updated\_at}    & TIMESTAMPTZ   & NOW() & refreshed via \route{POST /admin/currencies/refresh} \\
+    \code{rate}           & NUMERIC(18,6) & --- & NOT NULL; relative to the base currency (the base = 1.0) \\
+    \code{updated\_at}    & TIMESTAMPTZ   & NOW() & refreshed via \route{POST /admin/exchange-rates/refresh} \\
     \bottomrule
   \end{tabular}
 \end{table}

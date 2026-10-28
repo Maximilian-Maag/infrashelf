@@ -78,9 +78,11 @@ There is no "send test email" button — the only way to confirm SMTP works is t
 
 Under **Administration → Exchange Rates**:
 
-A read-only table of the currently stored rates (currency, rate to EUR, last updated). Click **Refresh Rates** to re-fetch current rates from the exchange-rate API configured via the `EXCHANGE_RATE_API_URL` environment variable.
+A read-only table of the currently stored rates (currency, rate to the base currency, last updated). Click **Refresh Rates** to re-fetch current rates from the exchange-rate API configured via the `EXCHANGE_RATE_API_URL` environment variable.
 
-The base currency is **fixed to EUR** — every stored rate is "to EUR", and there is no admin control to change it. There is also no way to enter an API key/URL in the UI or to override an individual rate by hand; both of those are configured, if at all, only through `EXCHANGE_RATE_API_URL`.
+The **base currency** is configurable here (FA-11.3). Enter a three-letter ISO 4217 code in the *Base currency* field and press **Save**; it defaults to **EUR**, which is what every price and rate in an existing installation already means. The base currency is what product prices are stored in and what the stored rates are quoted against — so changing it **re-bases every stored rate** onto the new currency (`rate[CUR] := rate[CUR] / rate[NEW]`), and the table reloads to show the re-based figures. A code with no stored rate is refused (409) — refresh the rates first, then set it. The change is audited as `currency.base_currency_updated`.
+
+There is no way to enter an API key/URL in the UI or to override an individual rate by hand; both of those are configured, if at all, only through `EXCHANGE_RATE_API_URL`.
 
 ### 2.5 Configuring AI Translation (optional)
 

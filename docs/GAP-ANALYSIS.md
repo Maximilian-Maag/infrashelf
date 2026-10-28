@@ -111,8 +111,10 @@ product deliberately diverged. None should be built blind:
    Pipeline Stack, reads only that stack's *first* step's template path, and —
    via a GitLab-shaped regex over the environment's Webhook URL — only works for
    GitLab sources. The HCL parser (`lib/tfparser`) is done; the browse UI is not.
-4. **FA-11.3 — configurable base currency.** EUR is hardcoded; `grep baseCurrency`
-   is empty; rates are shown only "to EUR".
+4. ~~**FA-11.3 — configurable base currency.**~~ **DONE (#591 backend, #592
+   frontend).** The base currency is a setting (`app_config.base_currency`, default
+   EUR), root-settable, re-basing the stored rates onto the chosen anchor; the
+   conversion helpers and the exchange-rate screen now follow it.
 5. **FA-15.4 — `APP_NAME` / `APP_SUBTITLE` override.** Neither var exists in the
    codebase; the requirement describes an override of nothing.
 
@@ -177,7 +179,8 @@ product deliberately diverged. None should be built blind:
 
 4. **FA-04.2/FA-05.4 browse-and-pick UI** — fund it or drop it. If funded, the
    parser is done and this is the largest genuine product feature left.
-5. **FA-11.3 base currency** — decide whether EUR is a constant by design.
+5. ~~**FA-11.3 base currency** — decide whether EUR is a constant by design.~~
+   **Decided and shipped**: not a constant — configurable, EUR by default (#591/#592).
 
 ### Wave 4 — quality gates (continuous)
 

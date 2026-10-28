@@ -66,6 +66,7 @@ const renderCart = (items: CartItem[], p: Project[] = projects) =>
       lang="en"
       exchangeRates={{}}
       localeCurrency="EUR"
+      baseCurrency="EUR"
     />,
   )
 

@@ -1,7 +1,7 @@
 import { auth } from '@/lib/auth'
 import { get } from '@/lib/serverApi'
 import { redirect } from 'next/navigation'
-import type { CostReport, CostBucket, ExchangeRate, Project } from '@infrashelf/types'
+import type { CostReport, CostBucket, ExchangeRate, CurrencySettings, Project } from '@infrashelf/types'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Card } from '@/components/ui/Card'
 import { CostFilters } from './CostFilters'
@@ -46,10 +46,11 @@ export default async function CostsPage({ searchParams }: Props) {
   query.set('lang', lang)
   const qs = query.toString()
 
-  const [reportRes, projectsRes, ratesRes] = await Promise.allSettled([
+  const [reportRes, projectsRes, ratesRes, currencyRes] = await Promise.allSettled([
     get<CostReport>(`/api/costs?${qs}`),
     get<Project[]>('/api/projects'),
     get<ExchangeRate[]>('/api/public/exchange-rates'),
+    get<CurrencySettings>('/api/public/currency-settings'),
   ])
 
   // A rejected report is the one failure that leaves nothing to show — an invalid
@@ -61,17 +62,29 @@ export default async function CostsPage({ searchParams }: Props) {
   const report = reportSection.data
   // The project list only fills the filter dropdown, so it degrades on its own.
   const projects = section(projectsRes, [] as Project[], 'projects for the cost filter')
-  // No rates degrades to EUR figures rather than a broken page: convertPrice
-  // returns the original amount when it cannot convert.
+  // No rates degrades to base-currency figures rather than a broken page:
+  // convertPrice returns the original amount when it cannot convert.
   const rates: Record<string, number> =
     ratesRes.status === 'fulfilled'
       ? Object.fromEntries((ratesRes.value ?? []).map((r) => [r.currencyCode, parseFloat(r.rate)]))
       : {}
+  // The report sums every order into the configured base currency (FA-11.3) — the
+  // field is still named `totalEur` for history, but it is base-currency amounts —
+  // so the figure is converted FROM the base. EUR by default, which is what the
+  // page always assumed.
+  const baseCurrency = (currencyRes.status === 'fulfilled' ? currencyRes.value?.baseCurrency : null) ?? 'EUR'
 
-  /** EUR from the API → the viewer's currency, formatted in their locale. */
-  const money = (eur: number) => {
-    const { amount, currency } = convertPrice(eur.toFixed(2), 'EUR', localeCurrency, rates, lang)
-    return `${amount} ${currency}`
+  /** Base-currency amount from the API → the viewer's currency, in their locale. */
+  const money = (amount: number) => {
+    const { amount: shown, currency } = convertPrice(
+      amount.toFixed(2),
+      baseCurrency,
+      localeCurrency,
+      rates,
+      lang,
+      baseCurrency,
+    )
+    return `${shown} ${currency}`
   }
 
   return (
