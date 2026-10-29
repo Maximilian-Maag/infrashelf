@@ -26,7 +26,14 @@
  * would double every rate unless the deployment stops load-balancing them
  * together. That is a decision about how this chart is deployed, not a line of
  * code in a route handler, so it is left out of this slice rather than guessed
- * at (#548 names it as the follow-on).
+ * at.
+ *
+ * #550 is where that decision is made, and it splits the ask: everything the
+ * portal can answer from rows it already stores belongs HERE (the provisioning
+ * duration pair at the bottom of this catalogue is that), and only what genuinely
+ * needs a request path — rate, error rate, latency — waits on the per-replica
+ * choice. Reading the ingress controller instead is a legitimate answer for the
+ * second half, which would leave the portal out of it entirely.
  *
  * Every family below has a value that is only ever 0, 1 or a timestamp: the
  * portal REPORTS what it knows, and the expensive questions ("is this machine
@@ -127,6 +134,25 @@ export const CATALOG = [
     name: 'infrashelf_integration_last_success_timestamp_seconds',
     type: 'gauge',
     help: 'Unix time at which a probe last reached this integration successfully. Absent when none ever has — the age of this series is the only honest answer to "is this still working".',
+  },
+  /*
+   * Provisioning duration, as the two timestamps it is a subtraction of (#550).
+   *
+   * Not a `…_duration_seconds` family: every gauge here is only ever 0, 1 or a
+   * timestamp, and a duration the portal computed and stored would be a fourth
+   * kind — one that goes stale the moment the estimate is wrong and cannot be
+   * re-cut over a different window. `deployed_at - placed_at` in PromQL is
+   * correct at every scrape and free to change.
+   */
+  {
+    name: 'infrashelf_order_placed_timestamp_seconds',
+    type: 'gauge',
+    help: 'Unix time at which an order was placed. Subtracted from infrashelf_element_deployed_timestamp_seconds on order_id this is provisioning duration (order placed → element active). Labelled by order and project only: a mutable label like the status would move the series and break the subtraction.',
+  },
+  {
+    name: 'infrashelf_element_deployed_timestamp_seconds',
+    type: 'gauge',
+    help: 'Unix time at which this element became active. ABSENT until it deploys — an element still provisioning has no duration to measure, and 0 would read as 1970. Subtract infrashelf_order_placed_timestamp_seconds on order_id for how long it took.',
   },
 ] as const satisfies readonly { name: string; type: 'gauge'; help: string }[]
 

@@ -661,6 +661,57 @@
         },
         "overrides": []
       }
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Provisioning duration (placed → active)",
+      "description": "How long an element took to become active, measured from the order being placed. Both timestamps are stored by the portal; the difference is taken here so it stays correct at every scrape (#550).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 25
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "infrashelf_element_deployed_timestamp_seconds{project_id=\"$project_id\"} - on(order_id) group_left() infrashelf_order_placed_timestamp_seconds{project_id=\"$project_id\"}",
+          "legendFormat": "{{element_id}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      }
     }
   ]
 }
