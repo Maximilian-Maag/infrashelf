@@ -78,10 +78,13 @@ describe('updateBrandingLogo', () => {
 
     const result = await getBrandingLogo()
     expect(result.ok).toBe(true)
-    if (result.ok && result.data) {
-      expect(Buffer.from(result.data.data).equals(buf)).toBe(true)
-      expect(result.data.mime).toBe('image/png')
-    }
+    // Guarded, not skipped. `if (result.ok && result.data)` passed having asserted
+    // nothing when the logo was NOT stored — the store losing it would look green
+    // (#307).
+    if (!result.ok) throw new Error(result.message)
+    if (!result.data) throw new Error('the logo was stored but not returned')
+    expect(Buffer.from(result.data.data).equals(buf)).toBe(true)
+    expect(result.data.mime).toBe('image/png')
   })
 
   // Issue #143: the route took `file.type` on trust, stored it, and echoed it as
@@ -138,6 +141,9 @@ describe('getBrandingLogo', () => {
 
     const result = await getBrandingLogo()
     expect(result.ok).toBe(true)
-    if (result.ok && result.data) expect(result.data.mime).toBe('application/octet-stream')
+    // Not `&& result.data`: a dropped row would skip the only assertion (#307).
+    if (!result.ok) throw new Error(result.message)
+    if (!result.data) throw new Error('the legacy row was dropped rather than clamped')
+    expect(result.data.mime).toBe('application/octet-stream')
   })
 })
