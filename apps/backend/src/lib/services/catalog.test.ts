@@ -570,11 +570,13 @@ describe('getProductImage', () => {
 
     const result = await getProductImage(product.id)
     expect(result.ok).toBe(true)
-    if (result.ok && result.data) {
-      expect(Buffer.from(result.data.data).equals(buf)).toBe(true)
-      expect(result.data.mime).toBe('image/png')
-      expect(result.data.alt).toBe('The front of it')
-    }
+    // Not `&& result.data`: a null image would skip every assertion below and pass
+    // (#307).
+    if (!result.ok) throw new Error(result.message)
+    if (!result.data) throw new Error('the product image was not returned')
+    expect(Buffer.from(result.data.data).equals(buf)).toBe(true)
+    expect(result.data.mime).toBe('image/png')
+    expect(result.data.alt).toBe('The front of it')
   })
 
   it('returns 404 for unknown product', async () => {
