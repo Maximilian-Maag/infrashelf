@@ -681,7 +681,7 @@
         {
           "refId": "A",
           "expr": "infrashelf_element_deployed_timestamp_seconds{project_id=\"$project_id\"} - on(order_id) group_left() infrashelf_order_placed_timestamp_seconds{project_id=\"$project_id\"}",
-          "legendFormat": "{{status}}",
+          "legendFormat": "{{element_id}}",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
@@ -701,7 +701,7 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "short",
+          "unit": "s",
           "custom": {
             "drawStyle": "line",
             "lineWidth": 1,
