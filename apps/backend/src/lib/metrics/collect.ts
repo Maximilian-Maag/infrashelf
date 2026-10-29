@@ -149,6 +149,7 @@ export const collectPortalMetrics = async (now: Date = new Date()): Promise<stri
       driftSummary: infrastructureElements.driftSummary,
       policyCheckedAt: infrastructureElements.policyCheckedAt,
       policyOutcome: infrastructureElements.policyOutcome,
+      deployedAt: infrastructureElements.deployedAt,
     })
     .from(infrastructureElements)
 
@@ -190,6 +191,37 @@ export const collectPortalMetrics = async (now: Date = new Date()): Promise<stri
         value: seconds(row.policyCheckedAt),
       })
     }
+
+    // Absent until it deploys, not 0: an element that has not become active has
+    // no provisioning duration, and 1970 - placed_at is a number a panel would
+    // happily plot.
+    if (row.deployedAt !== null) {
+      samples.push({
+        name: 'infrashelf_element_deployed_timestamp_seconds',
+        labels: { ...elementScope(row), order_id: row.orderId },
+        value: seconds(row.deployedAt),
+      })
+    }
+  }
+
+  /*
+   * One series per order, labelled by order and project ONLY.
+   *
+   * The status is deliberately not a label: it changes, and a timestamp gauge
+   * whose label set changes is a series that disappears and reappears — which
+   * breaks any `- on(order_id)` against it at exactly the moments (deploying,
+   * failing) someone is looking at the panel.
+   */
+  const orderRows = await db
+    .select({ id: orders.id, projectId: orders.projectId, createdAt: orders.createdAt })
+    .from(orders)
+
+  for (const row of orderRows) {
+    samples.push({
+      name: 'infrashelf_order_placed_timestamp_seconds',
+      labels: { order_id: row.id, project_id: row.projectId },
+      value: seconds(row.createdAt),
+    })
   }
 
   const projectRows = await db.select({ id: projects.id, name: projects.name }).from(projects)

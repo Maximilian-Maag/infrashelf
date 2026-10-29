@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { db } from '@/lib/db/client'
-import { integrations } from '@/lib/db/schema'
+import { infrastructureElements, integrations } from '@/lib/db/schema'
+import { eq } from 'drizzle-orm'
 import { collectPortalMetrics, integrationHealthState } from './collect'
 import {
   createUser,
@@ -108,6 +109,41 @@ describe('collectPortalMetrics', () => {
       expect(line).not.toContain(`element_id="${unexamined.id}"`)
     }
     expect(seriesOf(text, 'infrashelf_element_last_refresh_timestamp_seconds')).not.toHaveLength(3)
+  })
+
+  it('exposes the two timestamps provisioning duration is a subtraction of (#550)', async () => {
+    const { product, environment, project, order } = await seed()
+    const deployed = await createInfraElement(order.id, project.id, environment.id, product.id, {
+      deployedAt: new Date('2026-09-23T12:00:00Z'),
+    })
+    const pending = await createInfraElement(order.id, project.id, environment.id, product.id, {
+      status: 'provisioning',
+    })
+    // The fixture stamps `deployed_at` with the current time (the column defaults
+    // to now), so "not deployed yet" has to be said explicitly.
+    await db
+      .update(infrastructureElements)
+      .set({ deployedAt: null })
+      .where(eq(infrastructureElements.id, pending.id))
+
+    const text = await collectPortalMetrics()
+
+    // One series per order and NO status label: a mutable label would move the
+    // series whenever the order's state changed — which is exactly when someone is
+    // watching — and a `- on(order_id)` against a series that vanishes is a panel
+    // that goes blank at the worst moment.
+    expect(seriesOf(text, 'infrashelf_order_placed_timestamp_seconds')).toEqual([
+      `infrashelf_order_placed_timestamp_seconds{order_id="${order.id}",project_id="${project.id}"} ${unix(order.createdAt.toISOString())}`,
+    ])
+
+    // Only the element that actually deployed has one. The one still coming up has
+    // NO series rather than a zero: 0 - placed_at is a number a panel would plot.
+    expect(seriesOf(text, 'infrashelf_element_deployed_timestamp_seconds')).toEqual([
+      `infrashelf_element_deployed_timestamp_seconds{element_id="${deployed.id}",environment_id="${environment.id}",order_id="${order.id}",project_id="${project.id}"} ${unix('2026-09-23T12:00:00Z')}`,
+    ])
+    expect(seriesOf(text, 'infrashelf_element_deployed_timestamp_seconds')).not.toContainEqual(
+      expect.stringContaining(`element_id="${pending.id}"`),
+    )
   })
 
   it('counts a never-evaluated element into the project’s verdicts rather than dropping it', async () => {
