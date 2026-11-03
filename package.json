@@ -16,11 +16,11 @@
     "test:scripts": "vitest run"
   },
   "devDependencies": {
-    "@axe-core/playwright": "^4.13.0",
-    "@playwright/test": "^1.61.1",
+    "@axe-core/playwright": "^4.14.0",
+    "@playwright/test": "^1.64.1",
     "@types/node": "^22.20.0",
-    "axe-core": "^4.13.0",
-    "tsx": "^4.19.0",
+    "axe-core": "^4.14.0",
+    "tsx": "^4.23.15",
     "typescript": "^5.7.0",
     "vitest": "^4.1.11"
   }
